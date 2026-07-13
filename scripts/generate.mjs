@@ -168,6 +168,7 @@ export async function buildArtifacts({ check = false } = {}) {
 async function replacePackagesAtomically(artifacts) {
   const nonce = `${process.pid}-${Date.now()}`;
   const staged = [];
+  const swapped = [];
 
   try {
     for (const packageRoot of PACKAGE_ROOTS) {
@@ -200,27 +201,49 @@ async function replacePackagesAtomically(artifacts) {
       await verifyStagedPackage(stageUrl, expected, packageRoot);
     }
 
-    for (const entry of staged) {
-      const hadPackage = await exists(entry.packageUrl);
-      try {
+    try {
+      for (const entry of staged) {
+        const hadPackage = await exists(entry.packageUrl);
         if (hadPackage) {
           await rename(entry.packageUrl, entry.backupUrl);
         }
-        await rename(entry.stageUrl, entry.packageUrl);
-        await rm(entry.backupUrl, { force: true, recursive: true });
-      } catch (error) {
-        if (hadPackage && !(await exists(entry.packageUrl)) && (await exists(entry.backupUrl))) {
-          await rename(entry.backupUrl, entry.packageUrl);
+        try {
+          await rename(entry.stageUrl, entry.packageUrl);
+          swapped.push({ ...entry, hadPackage });
+        } catch (error) {
+          if (hadPackage && (await exists(entry.backupUrl))) {
+            await rename(entry.backupUrl, entry.packageUrl);
+          }
+          throw error;
         }
-        throw error;
       }
+    } catch (error) {
+      const rollbackErrors = [];
+      for (const entry of [...swapped].reverse()) {
+        try {
+          await rm(entry.packageUrl, { force: true, recursive: true });
+          if (entry.hadPackage && (await exists(entry.backupUrl))) {
+            await rename(entry.backupUrl, entry.packageUrl);
+          }
+        } catch (rollbackError) {
+          rollbackErrors.push(rollbackError);
+        }
+      }
+      if (rollbackErrors.length > 0) {
+        throw new AggregateError(
+          [error, ...rollbackErrors],
+          "Package swap failed and rollback was incomplete; backup directories were preserved",
+        );
+      }
+      throw error;
+    }
+
+    for (const entry of swapped) {
+      await rm(entry.backupUrl, { force: true, recursive: true });
     }
   } finally {
-    for (const { packageUrl, stageUrl, backupUrl } of staged) {
+    for (const { stageUrl } of staged) {
       await rm(stageUrl, { force: true, recursive: true });
-      if (await exists(packageUrl)) {
-        await rm(backupUrl, { force: true, recursive: true });
-      }
     }
   }
 }
