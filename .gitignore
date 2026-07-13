@@ -1,0 +1,7 @@
+.DS_Store
+.omx/
+.pet-runs/
+node_modules/
+coverage/
+dist/
+*.log
