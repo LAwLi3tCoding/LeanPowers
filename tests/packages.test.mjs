@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { access, readFile, readdir, stat } from "node:fs/promises";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { access, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
@@ -10,7 +11,9 @@ const execFileAsync = promisify(execFile);
 const root = fileURLToPath(new URL("../", import.meta.url));
 const codexRoot = path.join(root, "plugins/codex/leanpowers");
 const claudeRoot = path.join(root, "plugins/claude/leanpowers");
-const skillNames = ["build", "debug", "review", "shape", "ship", "verify"];
+const skillNames = ["adapt", "build", "debug", "review", "shape", "ship", "verify"];
+const helperNames = ["learning.mjs", "learning-core.mjs", "learning-store.mjs"];
+const schemaNames = ["learning-config.schema.json", "lesson-event.schema.json"];
 
 test("both packages contain source-identical portable skills", async () => {
   for (const name of skillNames) {
@@ -19,6 +22,54 @@ test("both packages contain source-identical portable skills", async () => {
     const claude = await readFile(path.join(claudeRoot, "skills", name, "SKILL.md"), "utf8");
     assert.equal(codex, source, `Codex ${name} drifted`);
     assert.equal(claude, source, `Claude ${name} drifted`);
+  }
+});
+
+test("both packages contain the complete source-identical adaptive learning capability", async () => {
+  const portableFiles = [
+    "skills/adapt/agents/openai.yaml",
+    ...helperNames.map((name) => `skills/adapt/scripts/${name}`),
+    "references/learning-policy.md",
+    ...schemaNames.map((name) => `schemas/${name}`),
+  ];
+
+  for (const packageRoot of [codexRoot, claudeRoot]) {
+    for (const relativePath of portableFiles) {
+      assert.equal(
+        await readFile(path.join(packageRoot, relativePath), "utf8"),
+        await readFile(path.join(root, relativePath), "utf8"),
+        `${packageRoot}/${relativePath} drifted from source`,
+      );
+    }
+    assert.deepEqual((await readdir(path.join(packageRoot, "schemas"))).sort(), schemaNames);
+  }
+});
+
+test("packaged learning helpers parse and run help plus side-effect-free doctor", async (context) => {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), "leanpowers-package-smoke-"));
+  context.after(() => rm(workspace, { force: true, recursive: true }));
+
+  for (const packageRoot of [codexRoot, claudeRoot]) {
+    for (const helper of helperNames) {
+      const checked = await executeNode(
+        ["--check", path.join(packageRoot, "skills/adapt/scripts", helper)],
+        { cwd: workspace },
+      );
+      assert.equal(checked.exitCode, 0, checked.stderr);
+    }
+
+    const cli = path.join(packageRoot, "skills/adapt/scripts/learning.mjs");
+    const help = await executeNode([cli, "--help"], { cwd: workspace });
+    assert.equal(help.exitCode, 0, help.stderr);
+    assert.match(help.stdout, /^Usage:/);
+
+    const doctor = await executeNode([cli, "doctor"], {
+      cwd: workspace,
+      input: "{}\n",
+    });
+    assert.equal(doctor.exitCode, 0, doctor.stderr || doctor.stdout);
+    assert.equal(JSON.parse(doctor.stdout).ok, true);
+    await assert.rejects(access(path.join(workspace, ".leanpowers")));
   }
 });
 
@@ -53,7 +104,6 @@ test("installable packages include user guidance and license without source-only
     "adapters",
     "evals",
     "metadata",
-    "schemas",
     "scripts",
     "tests",
     "package.json",
@@ -158,4 +208,39 @@ async function textFiles(directory) {
 
 function wordCount(value) {
   return value.trim().split(/\s+/u).filter(Boolean).length;
+}
+
+function executeNode(args, { cwd, input = "" } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, {
+      cwd,
+      env: { PATH: "/usr/bin:/bin" },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const stdout = [];
+    const stderr = [];
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error("packaged learning helper timed out after 5000ms"));
+    }, 5000);
+    child.stdout.on("data", (chunk) => stdout.push(chunk));
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (exitCode, signal) => {
+      clearTimeout(timer);
+      if (signal) {
+        reject(new Error(`packaged learning helper exited from signal ${signal}`));
+        return;
+      }
+      resolve({
+        exitCode,
+        stdout: Buffer.concat(stdout).toString("utf8"),
+        stderr: Buffer.concat(stderr).toString("utf8"),
+      });
+    });
+    child.stdin.end(input);
+  });
 }

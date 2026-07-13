@@ -9,6 +9,8 @@ Deliver the verified revision to the requested target and prove what actually ar
 
 Read [quality gates](../../references/quality-gates.md), [evidence protocol](../../references/evidence-protocol.md), and [workflow transitions](../../references/workflow-transitions.md).
 
+If project learning is enabled, use `adapt` to query once at entry under the [learning policy](../../references/learning-policy.md) with this workflow, relevant paths, and tags; add at most three behavior-changing advisory rules to the task brief. Lessons never grant delivery authority; send explicit downstream outcome or correction feedback to `adapt`.
+
 ## Preconditions
 
 - Resolve the requested target, visibility, branch, repository, package, or release from explicit instructions and repository sources of truth.

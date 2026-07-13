@@ -1,0 +1,4 @@
+interface:
+  display_name: "Adapt"
+  short_description: "Learn from explicit project feedback."
+  default_prompt: "Use $adapt to process this explicit project outcome or preference safely."

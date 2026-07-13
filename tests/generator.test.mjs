@@ -7,28 +7,148 @@ import {
   readMetadata,
   stableJson,
 } from "../scripts/lib/project.mjs";
-import {
+import * as generator from "../scripts/generate.mjs";
+
+const {
   commitStagedPackages,
   expectedArtifacts,
   packageReadme,
-} from "../scripts/generate.mjs";
+} = generator;
+
+const skillNames = ["adapt", "build", "debug", "review", "shape", "ship", "verify"];
+const engineeringSkillNames = ["build", "debug", "review", "shape", "ship", "verify"];
+const referenceNames = [
+  "evidence-protocol.md",
+  "learning-policy.md",
+  "quality-gates.md",
+  "risk-policy.md",
+  "subagent-policy.md",
+  "workflow-transitions.md",
+];
 
 test("canonical metadata uses the LeanPowers identity", async () => {
   const metadata = await readMetadata();
 
   assert.equal(metadata.id, "leanpowers");
-  assert.match(metadata.version, /^\d+\.\d+\.\d+$/);
+  assert.equal(metadata.version, "0.2.0");
   assert.equal(metadata.name, "LeanPowers");
   assert.equal(metadata.positioningZh, "轻量但不降级的 Agent 工程工作流");
   assert.equal(metadata.tagline, "Essential workflows. Less ceremony.");
   assert.equal(metadata.repository, "https://github.com/LAwLi3tCoding/LeanPowers");
 });
 
+test("adaptive learning preview identity and documentation are explicit and opt-in", async () => {
+  const metadata = await readMetadata();
+  const packageJson = JSON.parse(
+    await readFile(new URL("package.json", projectRoot), "utf8"),
+  );
+  const readme = await readFile(new URL("README.md", projectRoot), "utf8");
+  const security = await readFile(new URL("SECURITY.md", projectRoot), "utf8");
+  const comparison = await readFile(
+    new URL("docs/comparison-superpowers.md", projectRoot),
+    "utf8",
+  );
+
+  assert.equal(packageJson.version, "0.2.0");
+  assert.ok(packageJson.keywords.includes("adaptive-learning"));
+  assert.ok(packageJson.keywords.includes("feedback"));
+  assert.ok(metadata.keywords.includes("adaptive-learning"));
+  assert.ok(metadata.keywords.includes("feedback"));
+  assert.match(metadata.interface.longDescription, /opt-in project learning/i);
+  assert.ok(metadata.interface.defaultPrompt.some((prompt) => /enable.*learning/i.test(prompt)));
+  assert.match(readme, /learning is disabled by default/i);
+  assert.match(readme, /project-local `.leanpowers\/`/i);
+  assert.match(security, /normalized rules and bounded evidence summaries/i);
+  assert.match(security, /Node\.js 20\+.*learning is enabled/i);
+  assert.match(comparison, /six engineering workflows.*one.*control skill/i);
+});
+
+test("published instruction counts match the canonical source exactly", async () => {
+  const skillCounts = new Map();
+  for (const name of skillNames) {
+    const text = await readFile(
+      new URL(`skills/${name}/SKILL.md`, projectRoot),
+      "utf8",
+    );
+    skillCounts.set(name, wordCount(text));
+  }
+  const engineeringWords = engineeringSkillNames.reduce(
+    (total, name) => total + skillCounts.get(name),
+    0,
+  );
+  const adaptWords = skillCounts.get("adapt");
+  const totalWords = engineeringWords + adaptWords;
+  const charterWords = wordCount(
+    await readFile(new URL("adapters/claude/session-start", projectRoot), "utf8"),
+  );
+
+  assert.deepEqual(
+    { engineeringWords, adaptWords, totalWords, charterWords },
+    { engineeringWords: 2561, adaptWords: 329, totalWords: 2890, charterWords: 99 },
+  );
+  for (const relativePath of [
+    "README.md",
+    "README.zh-CN.md",
+    "docs/comparison-superpowers.md",
+  ]) {
+    const document = await readFile(new URL(relativePath, projectRoot), "utf8");
+    for (const expected of ["2,561", "329", "2,890", "86.2%", "84.4%"]) {
+      assert.ok(document.includes(expected), `${relativePath} missing ${expected}`);
+    }
+  }
+});
+
+function wordCount(text) {
+  const trimmed = text.trim();
+  return trimmed === "" ? 0 : trimmed.split(/\s+/u).length;
+}
+
 test("stableJson sorts object keys recursively and ends with one newline", () => {
   assert.equal(
     stableJson({ z: { b: 2, a: 1 }, a: [{ d: 4, c: 3 }] }),
     '{\n  "a": [\n    {\n      "c": 3,\n      "d": 4\n    }\n  ],\n  "z": {\n    "a": 1,\n    "b": 2\n  }\n}\n',
   );
+});
+
+test("generator exports the exact portable and runtime package file manifest", () => {
+  assert.ok(generator.PACKAGE_FILE_MANIFEST, "missing canonical package file manifest");
+  assert.deepEqual(generator.PACKAGE_FILE_MANIFEST.portable, [
+    "LICENSE",
+    "README.md",
+    ...referenceNames.map((name) => `references/${name}`),
+    "schemas/learning-config.schema.json",
+    "schemas/lesson-event.schema.json",
+    ...skillNames.flatMap((name) => [
+      `skills/${name}/SKILL.md`,
+      `skills/${name}/agents/openai.yaml`,
+    ]),
+    "skills/adapt/scripts/learning-core.mjs",
+    "skills/adapt/scripts/learning-store.mjs",
+    "skills/adapt/scripts/learning.mjs",
+  ].sort());
+  assert.deepEqual(generator.PACKAGE_FILE_MANIFEST.codex, [
+    ".codex-plugin/plugin.json",
+  ]);
+  assert.deepEqual(generator.PACKAGE_FILE_MANIFEST.claude, [
+    ".claude-plugin/plugin.json",
+    "agents/reviewer.md",
+    "agents/verifier.md",
+    "hooks/hooks.json",
+    "hooks/session-start",
+  ]);
+});
+
+test("generated package artifact keys equal the canonical manifest exactly", async () => {
+  assert.equal(typeof generator.packageFileManifest, "function");
+  const artifacts = await expectedArtifacts();
+  for (const runtime of ["codex", "claude"]) {
+    const prefix = `plugins/${runtime}/leanpowers/`;
+    const actual = [...artifacts.keys()]
+      .filter((file) => file.startsWith(prefix))
+      .map((file) => file.slice(prefix.length))
+      .sort();
+    assert.deepEqual(actual, generator.packageFileManifest(runtime));
+  }
 });
 
 test("generator defines both runtime manifests and marketplaces", async () => {
@@ -40,8 +160,19 @@ test("generator defines both runtime manifests and marketplaces", async () => {
     ".claude-plugin/marketplace.json",
     "plugins/claude/leanpowers/.claude-plugin/plugin.json",
     "plugins/codex/leanpowers/.codex-plugin/plugin.json",
+    "plugins/claude/leanpowers/skills/adapt/SKILL.md",
+    "plugins/codex/leanpowers/skills/adapt/agents/openai.yaml",
+    "plugins/claude/leanpowers/skills/adapt/scripts/learning.mjs",
+    "plugins/codex/leanpowers/skills/adapt/scripts/learning-core.mjs",
+    "plugins/claude/leanpowers/skills/adapt/scripts/learning-store.mjs",
     "plugins/claude/leanpowers/skills/shape/SKILL.md",
     "plugins/codex/leanpowers/skills/shape/SKILL.md",
+    "plugins/claude/leanpowers/references/learning-policy.md",
+    "plugins/codex/leanpowers/references/learning-policy.md",
+    "plugins/claude/leanpowers/schemas/learning-config.schema.json",
+    "plugins/codex/leanpowers/schemas/learning-config.schema.json",
+    "plugins/claude/leanpowers/schemas/lesson-event.schema.json",
+    "plugins/codex/leanpowers/schemas/lesson-event.schema.json",
     "plugins/claude/leanpowers/README.md",
     "plugins/codex/leanpowers/LICENSE",
   ]) {
@@ -67,6 +198,28 @@ test("generator defines both runtime manifests and marketplaces", async () => {
     source: "local",
     path: "./plugins/codex/leanpowers",
   });
+
+  for (const packageRoot of [
+    "plugins/codex/leanpowers",
+    "plugins/claude/leanpowers",
+  ]) {
+    for (const relativePath of [
+      "skills/adapt/SKILL.md",
+      "skills/adapt/agents/openai.yaml",
+      "skills/adapt/scripts/learning.mjs",
+      "skills/adapt/scripts/learning-core.mjs",
+      "skills/adapt/scripts/learning-store.mjs",
+      "references/learning-policy.md",
+      "schemas/learning-config.schema.json",
+      "schemas/lesson-event.schema.json",
+    ]) {
+      assert.equal(
+        artifacts.get(`${packageRoot}/${relativePath}`),
+        await readFile(new URL(relativePath, projectRoot), "utf8"),
+        `${packageRoot}/${relativePath} drifted from source`,
+      );
+    }
+  }
 });
 
 test("checked-in generated artifacts match expected content", async () => {

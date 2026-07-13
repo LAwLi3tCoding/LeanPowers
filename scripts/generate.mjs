@@ -18,6 +18,48 @@ const PACKAGE_ROOTS = [
   "plugins/codex/leanpowers",
   "plugins/claude/leanpowers",
 ];
+const SKILLS = ["adapt", "build", "debug", "review", "shape", "ship", "verify"];
+const REFERENCES = [
+  "evidence-protocol.md",
+  "learning-policy.md",
+  "quality-gates.md",
+  "risk-policy.md",
+  "subagent-policy.md",
+  "workflow-transitions.md",
+];
+const PORTABLE_PACKAGE_FILES = [
+  "LICENSE",
+  "README.md",
+  ...REFERENCES.map((name) => `references/${name}`),
+  "schemas/learning-config.schema.json",
+  "schemas/lesson-event.schema.json",
+  ...SKILLS.flatMap((name) => [
+    `skills/${name}/SKILL.md`,
+    `skills/${name}/agents/openai.yaml`,
+  ]),
+  "skills/adapt/scripts/learning-core.mjs",
+  "skills/adapt/scripts/learning-store.mjs",
+  "skills/adapt/scripts/learning.mjs",
+].sort();
+
+export const PACKAGE_FILE_MANIFEST = Object.freeze({
+  portable: Object.freeze(PORTABLE_PACKAGE_FILES),
+  codex: Object.freeze([".codex-plugin/plugin.json"]),
+  claude: Object.freeze([
+    ".claude-plugin/plugin.json",
+    "agents/reviewer.md",
+    "agents/verifier.md",
+    "hooks/hooks.json",
+    "hooks/session-start",
+  ]),
+});
+
+export function packageFileManifest(runtime) {
+  if (runtime !== "codex" && runtime !== "claude") {
+    throw new Error(`Unsupported package runtime: ${String(runtime)}`);
+  }
+  return [...PACKAGE_FILE_MANIFEST.portable, ...PACKAGE_FILE_MANIFEST[runtime]].sort();
+}
 
 export async function expectedArtifacts() {
   const metadata = await readMetadata();
@@ -33,18 +75,14 @@ export async function expectedArtifacts() {
   };
 
   const artifacts = new Map();
-  artifacts.set(
-    "plugins/codex/leanpowers/.codex-plugin/plugin.json",
-    stableJson({
+  const runtimeManifests = {
+    codex: stableJson({
       ...common,
       skills: "./skills/",
       interface: metadata.interface,
     }),
-  );
-  artifacts.set(
-    "plugins/claude/leanpowers/.claude-plugin/plugin.json",
-    stableJson(common),
-  );
+    claude: stableJson(common),
+  };
   artifacts.set(
     ".agents/plugins/marketplace.json",
     stableJson({
@@ -84,22 +122,38 @@ export async function expectedArtifacts() {
     }),
   );
 
-  await addTree(artifacts, "skills", "plugins/codex/leanpowers/skills");
-  await addTree(artifacts, "skills", "plugins/claude/leanpowers/skills");
-  await addTree(artifacts, "references", "plugins/codex/leanpowers/references");
-  await addTree(artifacts, "references", "plugins/claude/leanpowers/references");
   const readme = packageReadme(
     await readFile(new URL("README.md", projectRoot), "utf8"),
     metadata.repository,
   );
-  artifacts.set("plugins/codex/leanpowers/README.md", readme);
-  artifacts.set("plugins/claude/leanpowers/README.md", readme);
-  await addFile(artifacts, "LICENSE", "plugins/codex/leanpowers/LICENSE");
-  await addFile(artifacts, "LICENSE", "plugins/claude/leanpowers/LICENSE");
-  await addTree(artifacts, "agent-specs", "plugins/claude/leanpowers/agents");
-  await addTree(artifacts, "adapters/claude", "plugins/claude/leanpowers/hooks", {
-    rename: new Map([["hooks.json", "hooks.json"], ["session-start", "session-start"]]),
-  });
+  for (const runtime of ["codex", "claude"]) {
+    const packageRoot = `plugins/${runtime}/leanpowers`;
+    const manifest = runtime === "codex"
+      ? ".codex-plugin/plugin.json"
+      : ".claude-plugin/plugin.json";
+    artifacts.set(`${packageRoot}/${manifest}`, runtimeManifests[runtime]);
+    for (const file of PACKAGE_FILE_MANIFEST.portable) {
+      if (file === "README.md") {
+        artifacts.set(`${packageRoot}/${file}`, readme);
+      } else {
+        await addFile(artifacts, file, `${packageRoot}/${file}`);
+      }
+    }
+  }
+  for (const name of ["reviewer.md", "verifier.md"]) {
+    await addFile(
+      artifacts,
+      `agent-specs/${name}`,
+      `plugins/claude/leanpowers/agents/${name}`,
+    );
+  }
+  for (const name of ["hooks.json", "session-start"]) {
+    await addFile(
+      artifacts,
+      `adapters/claude/${name}`,
+      `plugins/claude/leanpowers/hooks/${name}`,
+    );
+  }
 
   return artifacts;
 }
@@ -303,16 +357,6 @@ async function verifyStagedPackage(stageUrl, expected, packageRoot) {
     !(await isExecutable(new URL("hooks/session-start", stageUrl)))
   ) {
     throw new Error("Staged Claude hook is not executable");
-  }
-}
-
-async function addTree(artifacts, sourceDirectory, outputDirectory, options = {}) {
-  const sourceUrl = new URL(`${sourceDirectory}/`, projectRoot);
-  const files = await listFiles(sourceUrl);
-  for (const relativePath of files) {
-    const outputName = options.rename?.get(relativePath) ?? relativePath;
-    const content = await readFile(new URL(relativePath, sourceUrl), "utf8");
-    artifacts.set(path.posix.join(outputDirectory, outputName), content);
   }
 }
 

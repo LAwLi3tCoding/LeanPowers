@@ -9,6 +9,8 @@ Implement one delivery slice at a time and keep the feedback loop proportional t
 
 Read [risk policy](../../references/risk-policy.md), [quality gates](../../references/quality-gates.md), [subagent policy](../../references/subagent-policy.md), and [workflow transitions](../../references/workflow-transitions.md).
 
+If project learning is enabled, use `adapt` to query once at entry under the [learning policy](../../references/learning-policy.md) with this workflow, relevant paths, and tags; add at most three behavior-changing advisory rules to the task brief. Send explicit downstream outcome, correction, confirmation, or durable-preference feedback to `adapt`.
+
 ## Entry contract
 
 Start only when goal, declared scope, acceptance evidence, and constraints are executable. If they are materially unclear, use `shape`. If the cause of a failure is unknown, use `debug`.

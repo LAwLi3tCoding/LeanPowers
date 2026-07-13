@@ -19,9 +19,13 @@ Do not open a public issue for an unpatched vulnerability. Do not include real c
 
 ## Security model
 
-The installed plugin is static and dependency-free. It requires no MCP server, daemon, telemetry service, or network access. Codex receives no startup hook. Claude Code receives one command-only `SessionStart` hook that prints a fixed routing charter; it does not scan or write the repository, access the network, or dispatch agents.
+The installed plugin requires no MCP server, daemon, telemetry service, network access, or third-party package installation. Its six engineering workflows remain dependency-free static instructions. Codex receives zero startup injection. Claude Code receives one command-only, read-only `SessionStart` hint; it prints fixed routing text and does not scan or write the repository, inspect learning state, access the network, or dispatch agents.
 
-LeanPowers does not store secrets, environment variables, or full command logs. Evidence is ephemeral by default. If a runtime persists strict cross-session evidence, it should use runtime plugin data with bounded summaries and expiration, not repository-local files.
+Adaptive learning is disabled by default. Installation and startup do not read or create `.leanpowers/`. A user must explicitly enable learning for one project before the bundled helper writes a project-local ledger. In Git repositories the helper adds `.leanpowers/` to the local path returned by `git rev-parse --git-path info/exclude`; it does not modify tracked `.gitignore` files. There is no global store, background process, network synchronization, telemetry, or cross-project sharing.
+
+Enabled learning stores normalized rules and bounded evidence summaries, not raw conversations, complete prompts, command output, stack traces, secrets, credentials, environment-variable values, or unrelated repository content. Unsafe or materially ambiguous feedback is skipped. Lessons remain advisory and cannot authorize actions or lower safety, scope, risk, root-cause, regression, independent-review, or completion-evidence gates. Node.js 20+ is required only when learning is enabled; if it is unavailable, LeanPowers refuses enablement instead of creating best-effort state.
+
+The package validator checks an exact file manifest, import containment, runtime isolation, and side-effect-free helper probes. These checks are defense-in-depth for trusted local and build artifacts, not an OS sandbox for executing untrusted packages. Validate provenance and inspect unfamiliar package contents before running any executable artifact.
 
 Agent instructions are not a security boundary. The host runtime, sandbox, repository permissions, review policy, and human authorization remain authoritative. Users should inspect commands and diffs before authorizing destructive, irreversible, credential-sensitive, or production actions.
 
@@ -30,6 +34,8 @@ Agent instructions are not a security boundary. The host runtime, sandbox, repos
 Examples of relevant issues include:
 
 - a packaged hook performing undeclared reads, writes, network calls, or agent dispatch;
+- learning state being read or written before explicit project opt-in, outside the resolved project, or without local Git exclusion;
+- raw chats, logs, secrets, or unrelated repository content being persisted as a lesson;
 - generated-package drift that changes executable behavior;
 - workflow instructions that bypass explicit authorization for high-risk actions;
 - exposure or unintended persistence of secrets or full logs;

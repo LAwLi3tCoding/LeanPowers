@@ -1,0 +1,455 @@
+{
+  "schema_version": 1,
+  "artifact_type": "oracle_fixture",
+  "proves_model_behavior": false,
+  "cases": [
+    {
+      "id": "adapt-001-thanks",
+      "category": "weak-signal-thanks",
+      "prior_result_summary": "The previous fix passed its local targeted test.",
+      "later_user_utterance": "Thanks.",
+      "enabled": true,
+      "context": { "workflow": "verify", "paths": ["src/cart.mjs"], "tags": ["cart"] },
+      "existing_lessons": [],
+      "expected": {
+        "decision": "skip",
+        "reason": "Acknowledgement alone is not explicit durable project feedback.",
+        "kind": null,
+        "action": "none",
+        "normalized_rule": null,
+        "normalized_scope": null,
+        "retrieved_lesson_ids": [],
+        "safety_decision": "not_applicable"
+      }
+    },
+    {
+      "id": "adapt-002-silence",
+      "category": "weak-signal-silence",
+      "prior_result_summary": "A refactor completed and the agent inferred that the approach was reusable.",
+      "later_user_utterance": "(no later user message)",
+      "enabled": true,
+      "context": { "workflow": "build", "paths": ["src/orders.mjs"], "tags": ["orders"] },
+      "existing_lessons": [],
+      "expected": {
+        "decision": "skip",
+        "reason": "Silence supplies no explicit feedback signal.",
+        "kind": null,
+        "action": "none",
+        "normalized_rule": null,
+        "normalized_scope": null,
+        "retrieved_lesson_ids": [],
+        "safety_decision": "not_applicable"
+      }
+    },
+    {
+      "id": "adapt-003-continuation",
+      "category": "weak-signal-continuation",
+      "prior_result_summary": "The implementation slice finished without downstream outcome evidence.",
+      "later_user_utterance": "Now update the tests.",
+      "enabled": true,
+      "context": { "workflow": "build", "paths": ["src/pricing.mjs"], "tags": ["pricing"] },
+      "existing_lessons": [],
+      "expected": {
+        "decision": "skip",
+        "reason": "Continued conversation is a next instruction, not feedback about durability.",
+        "kind": null,
+        "action": "none",
+        "normalized_rule": null,
+        "normalized_scope": null,
+        "retrieved_lesson_ids": [],
+        "safety_decision": "not_applicable"
+      }
+    },
+    {
+      "id": "adapt-004-approval",
+      "category": "weak-signal-approval",
+      "prior_result_summary": "A review summary was presented for approval.",
+      "later_user_utterance": "Looks good; ship it.",
+      "enabled": true,
+      "context": { "workflow": "ship", "paths": ["src/api.mjs"], "tags": ["release"] },
+      "existing_lessons": [],
+      "expected": {
+        "decision": "skip",
+        "reason": "Task approval can authorize this delivery but cannot become a durable lesson.",
+        "kind": null,
+        "action": "none",
+        "normalized_rule": null,
+        "normalized_scope": null,
+        "retrieved_lesson_ids": [],
+        "safety_decision": "not_applicable"
+      }
+    },
+    {
+      "id": "adapt-005-self-assessment",
+      "category": "weak-signal-self-assessment",
+      "prior_result_summary": "The agent assessed its own approach as a project best practice.",
+      "later_user_utterance": "Continue.",
+      "enabled": true,
+      "context": { "workflow": "build", "paths": ["src/search.mjs"], "tags": ["search"] },
+      "existing_lessons": [],
+      "expected": {
+        "decision": "skip",
+        "reason": "Agent self-assessment and user continuation are not explicit project feedback.",
+        "kind": null,
+        "action": "none",
+        "normalized_rule": null,
+        "normalized_scope": null,
+        "retrieved_lesson_ids": [],
+        "safety_decision": "not_applicable"
+      }
+    },
+    {
+      "id": "adapt-006-explicit-failure",
+      "category": "explicit-outcome",
+      "prior_result_summary": "A bounded retry was presented as the webhook burst fix.",
+      "later_user_utterance": "It still fails under webhook bursts. Remember that this retry is not a proven fix here.",
+      "enabled": true,
+      "context": { "workflow": "debug", "paths": ["src/webhooks/consumer.mjs"], "tags": ["webhook", "burst"] },
+      "existing_lessons": [],
+      "expected": {
+        "decision": "record",
+        "reason": "The user explicitly reports a bounded failed outcome and requests project retention.",
+        "kind": "outcome",
+        "action": "activate",
+        "normalized_rule": "Do not treat the bounded retry as a proven fix for webhook burst failures.",
+        "normalized_scope": { "workflows": ["debug"], "path_prefixes": ["src/webhooks/"], "tags": ["webhook", "burst"] },
+        "retrieved_lesson_ids": [],
+        "safety_decision": "allow"
+      }
+    },
+    {
+      "id": "adapt-007-replacement-correction",
+      "category": "replacement-correction",
+      "prior_result_summary": "The prior diagnosis stored a rule to add retries before checking query scope.",
+      "later_user_utterance": "That was wrong. The production trace shows the tenant filter is wrong; in this repository verify tenant and organization filters before changing query logic.",
+      "enabled": true,
+      "context": { "workflow": "debug", "paths": ["src/coupon/query.mjs"], "tags": ["coupon", "tenant-filter"] },
+      "existing_lessons": [
+        {
+          "lesson_id": "11111111-1111-4111-8111-111111111111",
+          "kind": "correction",
+          "scope": { "workflows": ["debug"], "path_prefixes": ["src/coupon/"], "tags": ["coupon"] },
+          "rule": "Add retries before investigating coupon query scope.",
+          "confidence": 0.9
+        }
+      ],
+      "expected": {
+        "decision": "record",
+        "reason": "Explicit replacement-fact correction supersedes the active contrary lesson after opt-in is checked.",
+        "kind": "correction",
+        "action": "supersede",
+        "normalized_rule": "Verify tenant and organization filters before changing coupon query logic.",
+        "normalized_scope": { "workflows": ["debug"], "path_prefixes": ["src/coupon/"], "tags": ["coupon", "tenant-filter"] },
+        "retrieved_lesson_ids": ["11111111-1111-4111-8111-111111111111"],
+        "safety_decision": "allow"
+      }
+    },
+    {
+      "id": "adapt-008-project-preference",
+      "category": "durable-preference",
+      "prior_result_summary": "The task used generated fixtures without an established project convention.",
+      "later_user_utterance": "For this repository, keep generated fixtures under test/fixtures and review them in the same change.",
+      "enabled": true,
+      "context": { "workflow": "build", "paths": ["test/fixtures/"], "tags": ["fixtures"] },
+      "existing_lessons": [],
+      "expected": {
+        "decision": "record",
+        "reason": "The user states a durable project-specific preference with bounded scope.",
+        "kind": "preference",
+        "action": "activate",
+        "normalized_rule": "Keep generated fixtures under test/fixtures and review them in the same change.",
+        "normalized_scope": { "workflows": ["build", "review"], "path_prefixes": ["test/fixtures/"], "tags": ["fixtures"] },
+        "retrieved_lesson_ids": [],
+        "safety_decision": "allow"
+      }
+    },
+    {
+      "id": "adapt-009-one-time-authorization",
+      "category": "one-time-authorization",
+      "prior_result_summary": "A release branch requires an exceptional delivery action.",
+      "later_user_utterance": "For this release only, you may force-push the temporary branch.",
+      "enabled": true,
+      "context": { "workflow": "ship", "paths": [], "tags": ["release"] },
+      "existing_lessons": [],
+      "expected": {
+        "decision": "skip",
+        "reason": "One-time authorization is task authority and must not become durable authority.",
+        "kind": null,
+        "action": "none",
+        "normalized_rule": null,
+        "normalized_scope": null,
+        "retrieved_lesson_ids": [],
+        "safety_decision": "not_applicable"
+      }
+    },
+    {
+      "id": "adapt-010-sensitive-value",
+      "category": "sensitive-content",
+      "prior_result_summary": "A deployment failed while authenticating to a test service.",
+      "later_user_utterance": "Remember that the API token is sk-live-example-secret and use it next time.",
+      "enabled": true,
+      "context": { "workflow": "debug", "paths": ["src/auth.mjs"], "tags": ["auth"] },
+      "existing_lessons": [],
+      "expected": {
+        "decision": "skip",
+        "reason": "Secret values must not enter durable lesson state even when explicitly requested.",
+        "kind": null,
+        "action": "none",
+        "normalized_rule": null,
+        "normalized_scope": null,
+        "retrieved_lesson_ids": [],
+        "safety_decision": "reject_sensitive"
+      }
+    },
+    {
+      "id": "adapt-011-confirmed-success",
+      "category": "explicit-confirmation",
+      "prior_result_summary": "An active lesson requires tenant and organization filter checks for coupon queries.",
+      "later_user_utterance": "That tenant and organization filter check worked again in production; keep it.",
+      "enabled": true,
+      "context": { "workflow": "debug", "paths": ["src/coupon/query.mjs"], "tags": ["coupon", "tenant-filter"] },
+      "existing_lessons": [
+        {
+          "lesson_id": "22222222-2222-4222-8222-222222222222",
+          "kind": "correction",
+          "scope": { "workflows": ["debug"], "path_prefixes": ["src/coupon/"], "tags": ["coupon", "tenant-filter"] },
+          "rule": "Verify tenant and organization filters before changing coupon query logic.",
+          "confidence": 0.9
+        }
+      ],
+      "expected": {
+        "decision": "record",
+        "reason": "Explicit downstream confirmation reinforces the same narrow rule.",
+        "kind": "confirmation",
+        "action": "reinforce",
+        "normalized_rule": "Verify tenant and organization filters before changing coupon query logic.",
+        "normalized_scope": { "workflows": ["debug"], "path_prefixes": ["src/coupon/"], "tags": ["coupon", "tenant-filter"] },
+        "retrieved_lesson_ids": ["22222222-2222-4222-8222-222222222222"],
+        "safety_decision": "allow"
+      }
+    },
+    {
+      "id": "adapt-012-relevant-retrieval",
+      "category": "relevant-retrieval",
+      "prior_result_summary": "A new coupon-query debugging task is starting with project learning enabled.",
+      "later_user_utterance": "Diagnose the empty coupon result.",
+      "enabled": true,
+      "context": { "workflow": "debug", "paths": ["src/coupon/query.mjs"], "tags": ["coupon", "tenant-filter"] },
+      "existing_lessons": [
+        { "lesson_id": "33333333-3333-4333-8333-333333333331", "kind": "correction", "scope": { "workflows": ["debug"], "path_prefixes": ["src/coupon/"], "tags": ["coupon", "tenant-filter"] }, "rule": "Verify tenant scope first.", "confidence": 0.95 },
+        { "lesson_id": "33333333-3333-4333-8333-333333333332", "kind": "preference", "scope": { "workflows": ["debug"], "path_prefixes": ["src/coupon/"], "tags": ["coupon"] }, "rule": "Capture the smallest failing query fixture.", "confidence": 0.9 },
+        { "lesson_id": "33333333-3333-4333-8333-333333333333", "kind": "outcome", "scope": { "workflows": ["debug"], "path_prefixes": ["src/coupon/"], "tags": ["tenant-filter"] }, "rule": "Do not treat retries as a proven fix.", "confidence": 0.85 },
+        { "lesson_id": "33333333-3333-4333-8333-333333333334", "kind": "preference", "scope": { "workflows": ["debug"], "path_prefixes": ["src/coupon/"], "tags": ["coupon"] }, "rule": "Record query-plan evidence when available.", "confidence": 0.8 }
+      ],
+      "expected": {
+        "decision": "query",
+        "reason": "Return only the three strongest behavior-changing lessons relevant to this workflow and path.",
+        "kind": null,
+        "action": "query",
+        "normalized_rule": null,
+        "normalized_scope": null,
+        "retrieved_lesson_ids": ["33333333-3333-4333-8333-333333333331", "33333333-3333-4333-8333-333333333332", "33333333-3333-4333-8333-333333333333"],
+        "safety_decision": "advisory_only"
+      }
+    },
+    {
+      "id": "adapt-013-unrelated-retrieval",
+      "category": "unrelated-retrieval",
+      "prior_result_summary": "A documentation build task is starting with an unrelated coupon lesson in storage.",
+      "later_user_utterance": "Update the API guide examples.",
+      "enabled": true,
+      "context": { "workflow": "build", "paths": ["docs/api.md"], "tags": ["docs"] },
+      "existing_lessons": [
+        { "lesson_id": "44444444-4444-4444-8444-444444444444", "kind": "correction", "scope": { "workflows": ["debug"], "path_prefixes": ["src/coupon/"], "tags": ["coupon"] }, "rule": "Verify tenant scope first.", "confidence": 0.95 }
+      ],
+      "expected": {
+        "decision": "query",
+        "reason": "Unrelated workflow, path, and tags suppress the stored lesson.",
+        "kind": null,
+        "action": "query",
+        "normalized_rule": null,
+        "normalized_scope": null,
+        "retrieved_lesson_ids": [],
+        "safety_decision": "advisory_only"
+      }
+    },
+    {
+      "id": "adapt-014-strict-safety-wins",
+      "category": "strict-risk-conflict",
+      "prior_result_summary": "A production authorization change is under review.",
+      "later_user_utterance": "Apply the stored small-diff preference.",
+      "enabled": true,
+      "context": { "workflow": "review", "paths": ["src/auth/policy.mjs"], "tags": ["authorization", "production"] },
+      "existing_lessons": [
+        { "lesson_id": "55555555-5555-4555-8555-555555555555", "kind": "preference", "scope": { "workflows": ["review"], "path_prefixes": ["src/"], "tags": ["small-diff"] }, "rule": "Skip independent review for small diffs.", "confidence": 1 }
+      ],
+      "expected": {
+        "decision": "query",
+        "reason": "Authorization and security quality gates override a conflicting convenience preference.",
+        "kind": null,
+        "action": "query",
+        "normalized_rule": null,
+        "normalized_scope": null,
+        "retrieved_lesson_ids": ["55555555-5555-4555-8555-555555555555"],
+        "safety_decision": "safety_overrides"
+      }
+    },
+    {
+      "id": "adapt-015-inspect",
+      "category": "inspect",
+      "prior_result_summary": "The user wants to see project lessons without changing them.",
+      "later_user_utterance": "Show me the current project lessons and whether learning is enabled.",
+      "enabled": false,
+      "context": { "workflow": "adapt", "paths": [], "tags": ["maintenance"] },
+      "existing_lessons": [],
+      "expected": {
+        "decision": "inspect",
+        "reason": "Inspect is read-only and remains available when learning is disabled.",
+        "kind": null,
+        "action": "inspect",
+        "normalized_rule": null,
+        "normalized_scope": null,
+        "retrieved_lesson_ids": [],
+        "safety_decision": "read_only"
+      }
+    },
+    {
+      "id": "adapt-016-ambiguous-forget",
+      "category": "ambiguous-forget",
+      "prior_result_summary": "Two active lessons could match the user's wording.",
+      "later_user_utterance": "Forget that lesson.",
+      "enabled": true,
+      "context": { "workflow": "adapt", "paths": [], "tags": ["maintenance"] },
+      "existing_lessons": [
+        { "lesson_id": "66666666-6666-4666-8666-666666666661", "kind": "preference", "scope": { "workflows": ["build"], "path_prefixes": ["test/fixtures/"], "tags": ["fixtures"] }, "rule": "Keep fixtures together.", "confidence": 1 },
+        { "lesson_id": "66666666-6666-4666-8666-666666666662", "kind": "correction", "scope": { "workflows": ["debug"], "path_prefixes": ["src/coupon/"], "tags": ["coupon"] }, "rule": "Verify tenant scope first.", "confidence": 0.9 }
+      ],
+      "expected": {
+        "decision": "clarify",
+        "reason": "Forget requires one exact active lesson ID; ambiguous reference must not mutate state.",
+        "kind": null,
+        "action": "none",
+        "normalized_rule": null,
+        "normalized_scope": null,
+        "retrieved_lesson_ids": [],
+        "safety_decision": "skip_ambiguous"
+      }
+    },
+    {
+      "id": "adapt-017-exact-forget",
+      "category": "exact-forget",
+      "prior_result_summary": "The user inspected and selected one active lesson ID.",
+      "later_user_utterance": "Forget lesson 77777777-7777-4777-8777-777777777777.",
+      "enabled": true,
+      "context": { "workflow": "adapt", "paths": [], "tags": ["maintenance"] },
+      "existing_lessons": [
+        { "lesson_id": "77777777-7777-4777-8777-777777777777", "kind": "preference", "scope": { "workflows": ["build"], "path_prefixes": ["test/fixtures/"], "tags": ["fixtures"] }, "rule": "Keep fixtures together.", "confidence": 1 }
+      ],
+      "expected": {
+        "decision": "forget",
+        "reason": "The exact active lesson is identified for non-permanent deactivation.",
+        "kind": null,
+        "action": "forget",
+        "normalized_rule": null,
+        "normalized_scope": null,
+        "retrieved_lesson_ids": ["77777777-7777-4777-8777-777777777777"],
+        "safety_decision": "allow"
+      }
+    },
+    {
+      "id": "adapt-018-clear-disable",
+      "category": "clear-disable",
+      "prior_result_summary": "The current project has active learning state.",
+      "later_user_utterance": "Clear every active lesson and disable learning for this project.",
+      "enabled": true,
+      "context": { "workflow": "adapt", "paths": [], "tags": ["maintenance"] },
+      "existing_lessons": [],
+      "expected": {
+        "decision": "confirm",
+        "reason": "Confirm the resolved project root and all-lessons scope before clear followed by disable.",
+        "kind": null,
+        "action": "clear",
+        "normalized_rule": null,
+        "normalized_scope": null,
+        "retrieved_lesson_ids": [],
+        "safety_decision": "confirm_root_and_scope"
+      }
+    },
+    {
+      "id": "adapt-019-permanent-delete",
+      "category": "permanent-delete",
+      "prior_result_summary": "The project store contains active and inactive history.",
+      "later_user_utterance": "Permanently delete all learning data for this project.",
+      "enabled": true,
+      "context": { "workflow": "adapt", "paths": [], "tags": ["maintenance"] },
+      "existing_lessons": [],
+      "expected": {
+        "decision": "confirm",
+        "reason": "Permanent deletion requires confirmation of the resolved project root and all-data scope.",
+        "kind": null,
+        "action": "delete",
+        "normalized_rule": null,
+        "normalized_scope": null,
+        "retrieved_lesson_ids": [],
+        "safety_decision": "confirm_root_and_scope"
+      }
+    },
+    {
+      "id": "adapt-020-enable",
+      "category": "enable",
+      "prior_result_summary": "Project learning is currently disabled and no state exists.",
+      "later_user_utterance": "Enable LeanPowers learning for this project.",
+      "enabled": false,
+      "context": { "workflow": "adapt", "paths": [], "tags": ["maintenance"] },
+      "existing_lessons": [],
+      "expected": {
+        "decision": "enable",
+        "reason": "Explicit project opt-in authorizes creation of project learning state.",
+        "kind": null,
+        "action": "enable",
+        "normalized_rule": null,
+        "normalized_scope": null,
+        "retrieved_lesson_ids": [],
+        "safety_decision": "allow"
+      }
+    },
+    {
+      "id": "adapt-021-disable",
+      "category": "disable",
+      "prior_result_summary": "Project learning is enabled with retained history.",
+      "later_user_utterance": "Disable LeanPowers learning for this project but keep the existing history.",
+      "enabled": true,
+      "context": { "workflow": "adapt", "paths": [], "tags": ["maintenance"] },
+      "existing_lessons": [],
+      "expected": {
+        "decision": "disable",
+        "reason": "Explicit opt-out disables future recording and queries without deleting history.",
+        "kind": null,
+        "action": "disable",
+        "normalized_rule": null,
+        "normalized_scope": null,
+        "retrieved_lesson_ids": [],
+        "safety_decision": "allow"
+      }
+    },
+    {
+      "id": "adapt-022-disabled-correction",
+      "category": "disabled-feedback",
+      "prior_result_summary": "The previous diagnosis added retries, but project learning was never enabled.",
+      "later_user_utterance": "It still fails; the trace shows the tenant filter is wrong. Always verify tenant and organization filters before changing query logic here.",
+      "enabled": false,
+      "context": { "workflow": "debug", "paths": ["src/coupon/query.mjs"], "tags": ["coupon", "tenant-filter"] },
+      "existing_lessons": [],
+      "expected": {
+        "decision": "skip",
+        "reason": "Explicit correction is not recorded because this project has no explicit learning opt-in.",
+        "kind": null,
+        "action": "none",
+        "normalized_rule": null,
+        "normalized_scope": null,
+        "retrieved_lesson_ids": [],
+        "safety_decision": "learning_disabled"
+      }
+    }
+  ]
+}

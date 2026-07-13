@@ -1,8 +1,14 @@
 {
   "name": "leanpowers",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "description": "Lightweight, high-rigor engineering workflows with opt-in project-local learning.",
   "private": true,
   "type": "module",
+  "keywords": [
+    "adaptive-learning",
+    "agent-workflows",
+    "feedback"
+  ],
   "engines": {
     "node": ">=20"
   },

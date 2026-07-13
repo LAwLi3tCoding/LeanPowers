@@ -8,15 +8,16 @@
 
 LeanPowers 保留真正影响工程结果的约束：明确需求边界、回归证据、根因调试、独立审查、当前版本验证和安全交付；同时根据风险选择最短的安全路径。它是一个工作流微内核，不是常驻的大提示词，也不是重型编排服务。
 
-> **发布状态：**`0.1.0` 是技术预览版。确定性评分器和测试夹具已经实现，但 LeanPowers 与 Superpowers 的成对 live benchmark 尚未执行。下文的效率与非劣效阈值是稳定版 `1.0.0` 的门槛，不是已经测得的产品结论。
+> **发布状态：**`0.2.0` 是技术预览版，新增了基于显式反馈、按项目主动开启的学习能力。确定性评分器和模拟测试夹具已经实现，但 LeanPowers 与 Superpowers 的成对 live benchmark 尚未执行。下文的效率与非劣效阈值是稳定版 `1.0.0` 的门槛，不是已经测得的产品结论。
 
 ## 为什么是 LeanPowers
 
-- 只有六个职责清晰的 Skill，不强制走完整流程链。
+- 只有六个职责清晰的工程工作流，不强制走完整流程链。
+- 另有一个事件驱动的 `adapt` 控制 Skill，用于可选的项目学习，不进入工程流程链。
 - 使用 `lean`、`standard`、`strict` 三档风险路径。
 - 默认单 Agent；只有任务真正独立且可独立验证时才使用少量子 Agent。
 - 宣称完成或交付前，必须有当前版本的证据。
-- 安装包是静态、零依赖内容，不需要 MCP、守护进程或运行时服务。
+- 安装包不需要 MCP、守护进程、遥测服务或额外安装依赖。
 - Codex 与 Claude Code 都有原生插件包，同时保留通用 Agent Skills 兼容性。
 
 ## 从 GitHub 直接安装
@@ -57,16 +58,18 @@ LeanPowers 可以根据任务自动选择入口，也支持显式调用。
 $leanpowers:build mode=lean 补上缺失的参数校验和回归测试。
 $leanpowers:debug 集成测试偶发返回空结果，请找出根因并修复。
 $leanpowers:verify 证明当前分支可以交付。
+$leanpowers:adapt 为当前项目启用 LeanPowers 学习。
 
 # Claude Code
 /leanpowers:shape mode=standard 设计一个向后兼容的分页改造。
 /leanpowers:review 按验收标准审查当前 diff。
 /leanpowers:ship 推送已验证的分支并创建用户要求的 PR。
+/leanpowers:adapt 查看 LeanPowers 在当前项目学到了什么。
 ```
 
 默认是 `mode=auto`。你也可以指定 `mode=lean`、`mode=standard` 或 `mode=strict`。模式是流程偏好，不能关闭安全、授权、范围和证据门槛；风险更高时会自动升级。
 
-## 六个 Skill 分别做什么
+## 六个工程工作流分别做什么
 
 | Skill | 使用场景 | 主要产物 |
 | --- | --- | --- |
@@ -76,6 +79,27 @@ $leanpowers:verify 证明当前分支可以交付。
 | `review` | 独立判断正确性、风险、兼容性和复杂度 | Findings-first 结论、严重级别和证据 |
 | `verify` | 证明完成、修复、安全、可安装或可交付 | 声明到命令的证据映射和验证缺口 |
 | `ship` | commit、push、PR、打包、发布或交接 | 实际目标端的版本回读证据 |
+
+`adapt` 是控制面 Skill，不是第七个工程工作流。它的名称表示“根据已验证反馈改变后续行为”。它处理显式结果反馈和学习数据维护，不会在 `shape → build/debug → review? → verify → ship?` 中增加一个必经阶段。
+
+## 可选的项目学习
+
+学习默认关闭。安装、Codex 启动、Claude `SessionStart` 和普通工作流都不会读取或创建学习状态。只有以下这类明确的项目级指令才会启用或维护学习：
+
+```text
+为当前项目启用 LeanPowers 学习。
+为当前项目停用 LeanPowers 学习。
+LeanPowers 在当前项目学到了什么？
+忘记 tenant-filter 这条经验。
+清空当前项目的已学习经验。
+永久删除当前项目的 LeanPowers 学习数据。
+```
+
+启用后，随包 Node.js helper 会把数据保存在当前项目的 `.leanpowers/`，并将 `.leanpowers/` 写入 Git 本地 `info/exclude`，不会修改受版本控制的 `.gitignore`。它只根据显式纠正、确认、实际结果或持久项目偏好，保存归一化规则和有界证据摘要；不会保存原始对话、完整提示词、命令日志、堆栈、密钥、凭证或无关仓库内容。
+
+检索结果只是建议，严格限制在当前项目，且最多返回三条相关经验。经验不能降低授权、范围、风险、根因定位、回归证据、独立审查或完成证据门槛。没有后台活动、网络访问、遥测、全局用户画像或跨项目共享。只有明确启用项目学习后才需要 Node.js 20+；学习关闭时，六个工程工作流仍然零运行时依赖。
+
+停用学习会保留本地 ledger，便于之后检查或删除。忘记和清空会保留可审计事件历史；永久删除会实际重写本地学习树，与“清空并停用”一样，都需要明确的破坏性操作确认。
 
 ## 路由与模式
 
@@ -116,26 +140,26 @@ LeanPowers 每次只从一个工作流开始，出现可观察的升级条件时
 
 | 能力 | Codex | Claude Code | 其他 Agent Skills 运行时 |
 | --- | --- | --- | --- |
-| 六个共享 Skill | 支持 | 支持 | 支持 |
+| 六个工程工作流 + `adapt` 控制 Skill | 支持 | 支持 | 支持 |
 | 启动注入 | 无 | 精简路由说明 | 默认无 |
 | reviewer / verifier | 运行时原生任务提示 | 随包 Agent | 单 Agent 执行；严格审查必须来自外部独立视角 |
 | 核心质量门槛 | 保留 | 保留 | 保留 |
 
-安装后的 LeanPowers 不需要 Node.js、MCP、守护进程、网络访问或仓库内运行状态。只有开发、校验、基准评测和构建本仓库时需要 Node.js 20+。
+Codex 保持零启动注入。Claude Code 只接收一段 99 词的只读路由提示；它不会检查 `.leanpowers/`、扫描或修改仓库、访问网络或派发 Agent。六个工程工作流不需要 Node.js；只有用户明确启用项目学习后，可选学习 helper 才需要 Node.js 20+。
 
 ## 隐私与安全
 
 - 不包含遥测或分析上报。
 - Claude 启动 Hook 不扫描仓库、不访问网络。
-- 工作流不存储密钥、环境变量或完整日志。
-- 证据默认只存在当前上下文；严格且跨会话的任务可以使用运行时插件数据，但默认不在仓库写状态。
+- 学习默认关闭，启用后的数据也不会离开当前项目。
+- 只保存归一化规则和有界证据摘要，不保存原始对话、密钥、环境变量值或完整日志。
 - 完整命令输出保留在本地，只把有界摘要放进模型上下文。
 
 Agent 指令本身不是安全边界。授权破坏性、生产或凭证相关操作前，请检查命令和 diff。详见 [SECURITY.md](SECURITY.md)。
 
 ## 与 Superpowers 6.1.1 的区别
 
-LeanPowers 把 Superpowers 的 14 个 Skill 收敛为六个工作流，并把重复规则提取为五份短共享策略。按相同的 `wc -w` 方法，LeanPowers V1 的六个 `SKILL.md` 共 2,196 词，Superpowers 6.1.1 的 14 个主 `SKILL.md` 共 18,516 词。结构缩减已经验证，但真实任务中的质量非劣效和效率收益仍需 live benchmark 证明。
+LeanPowers 的比较范围包含 Superpowers 6.1.1 的全部 14 个 Skill。其中 13 个工程流程关注点被收敛为六个工程工作流，`writing-skills` 则保留为外部专项能力。六个工程 `SKILL.md` 共 2,561 词，比 14 个基线文件合计的 18,516 词减少 86.2%。独立的 `adapt` 控制 Skill 为 329 词，全部七个 LeanPowers Skill 共 2,890 词，仍减少 84.4%。这些数字使用相同的 `wc -w` 方法；以全部 14 个基线文件计算会明确包含外部的 Skill 编写能力。结构缩减已经验证，但真实任务中的质量非劣效和效率收益仍需 live benchmark 证明。
 
 保留能力、刻意差异和逐项证据见 [docs/comparison-superpowers.md](docs/comparison-superpowers.md)。迁移前请先读 [docs/migration.md](docs/migration.md)：**不要在同一会话同时启用两个系统的自动路由。**
 
@@ -154,7 +178,7 @@ node scripts/benchmark.mjs compare \
 
 ## 开发
 
-需要 Git 和 Node.js 20 或 22。安装后的插件本身没有运行时依赖。
+开发需要 Git 和 Node.js 20 或 22。安装后的工程工作流没有运行时依赖；只有用户明确启用项目学习时才使用 Node.js 20+。
 
 ```bash
 npm run generate         # 重新生成两个运行时安装包

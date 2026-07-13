@@ -8,15 +8,16 @@
 
 LeanPowers keeps the safeguards that matter—bounded requirements, regression evidence, root-cause debugging, independent review, current verification, and safe delivery—while selecting the smallest workflow justified by risk. It is a workflow microkernel, not a large always-on prompt or orchestration service.
 
-> **Release status:** `0.1.0` is a technical preview. The deterministic scorer and fixtures are implemented, but a paired live LeanPowers-versus-Superpowers benchmark has not yet been run. Efficiency and non-inferiority thresholds below are gates for the stable `1.0.0` release, not measured product claims.
+> **Release status:** `0.2.0` is a technical preview. It adds opt-in project learning from explicit feedback. The deterministic scorer and simulated fixtures are implemented, but a paired live LeanPowers-versus-Superpowers benchmark has not yet been run. Efficiency and non-inferiority thresholds below are gates for the stable `1.0.0` release, not measured product claims.
 
 ## Why LeanPowers
 
-- Six focused skills instead of a long mandatory chain.
+- Six focused engineering workflows instead of a long mandatory chain.
+- One event-driven `adapt` control Skill for optional project learning; it is not part of the engineering chain.
 - `lean`, `standard`, and `strict` paths selected by observable risk.
 - Single-agent execution by default; bounded subagents only for independent work.
 - Current evidence required before completion or delivery claims.
-- Static, dependency-free installed packages with no MCP server or daemon.
+- Static installed packages with no MCP server, daemon, telemetry, or third-party dependency installation.
 - Native packages for both Codex and Claude Code, plus portable Agent Skills.
 
 ## Install from GitHub
@@ -57,16 +58,18 @@ LeanPowers can route from the task, or you can invoke a skill explicitly.
 $leanpowers:build mode=lean Add the missing validation and its regression test.
 $leanpowers:debug The integration test is intermittently returning an empty result.
 $leanpowers:verify Prove this branch is ready to deliver.
+$leanpowers:adapt Enable LeanPowers learning for this project.
 
 # Claude Code
 /leanpowers:shape mode=standard Design a backward-compatible pagination change.
 /leanpowers:review Review this diff against the stated acceptance criteria.
 /leanpowers:ship Push the verified branch and open the requested pull request.
+/leanpowers:adapt What has LeanPowers learned in this project?
 ```
 
 `mode=auto` is the default. `mode=lean`, `mode=standard`, and `mode=strict` request a workflow preference; safety, authorization, scope, and evidence gates can still raise the rigor.
 
-## The six skills
+## The six engineering workflows
 
 | Skill | Use it for | Primary output |
 | --- | --- | --- |
@@ -76,6 +79,27 @@ $leanpowers:verify Prove this branch is ready to deliver.
 | `review` | Independent correctness and risk assessment | Findings-first verdict with evidence and severity |
 | `verify` | Completion, safety, installability, or readiness claims | Claim-to-command evidence and explicit gaps |
 | `ship` | Commit, push, PR, package, release, or handoff | Destination readback for the delivered revision |
+
+`adapt` is a control-plane Skill, not a seventh engineering workflow. Its name means “change future behavior from verified feedback.” It handles explicit outcome feedback and learning maintenance without inserting another mandatory stage into `shape → build/debug → review? → verify → ship?`.
+
+## Optional project learning
+
+Learning is disabled by default. Installation, Codex startup, Claude `SessionStart`, and ordinary workflow use do not read or create learning state. Enable it only with an explicit project-scoped request such as:
+
+```text
+Enable LeanPowers learning for this project.
+Disable LeanPowers learning for this project.
+What has LeanPowers learned in this project?
+Forget the tenant-filter lesson.
+Clear this project's learned lessons.
+Permanently delete this project's LeanPowers learning data.
+```
+
+When enabled, the bundled Node.js helper stores a project-local `.leanpowers/` ledger and adds `.leanpowers/` to Git's local `info/exclude`; it never edits the tracked `.gitignore`. It records only normalized rules and bounded evidence summaries derived from explicit correction, confirmation, outcome, or durable project preference. It does not store raw chats, full prompts, command logs, stack traces, secrets, credentials, or unrelated repository content.
+
+Retrieval is advisory, project-scoped, and capped at three relevant lessons. Lessons cannot lower authorization, scope, risk, root-cause, regression-evidence, independent-review, or completion-evidence gates. There is no background activity, network access, telemetry, global user profile, or cross-project sharing. Node.js 20+ is required only after project learning is explicitly enabled; the six engineering workflows remain dependency-free while it is disabled.
+
+Disabling learning retains the local ledger for later inspection or deletion. Forget and clear preserve auditable event history; permanent deletion physically rewrites the local learning tree and, like clear-and-disable, requires explicit destructive confirmation.
 
 ## Routing and modes
 
@@ -116,26 +140,26 @@ Evidence is keyed to the relevant revision and scope. Unchanged evidence may be 
 
 | Capability | Codex | Claude Code | Generic Agent Skills runtime |
 | --- | --- | --- | --- |
-| Six shared skills | Yes | Yes | Yes |
+| Six engineering workflows + `adapt` control Skill | Yes | Yes | Yes |
 | Startup injection | None | Compact routing charter | None assumed |
 | Optional reviewer/verifier agents | Runtime-native task prompts | Packaged agents | Single-agent execution; strict review must come from an external perspective |
 | Core quality gates | Yes | Yes | Yes |
 
-LeanPowers does not require Node.js, an MCP server, a daemon, network access, or repository-local runtime state after installation. Node.js 20+ is required only to develop, validate, benchmark, or build this repository.
+Codex retains zero startup injection. Claude Code receives one 99-word, read-only routing hint; it does not inspect `.leanpowers/`, scan or write the repository, access the network, or dispatch agents. The six engineering workflows require no Node.js runtime. The optional learning helper requires Node.js 20+ only when learning is explicitly enabled.
 
 ## Privacy and security
 
 - No telemetry or analytics.
 - No repository scan or network access from the Claude startup hook.
-- No secrets, environment variables, or full logs are stored by the workflow.
-- Evidence is ephemeral by default; only strict cross-session work may use runtime plugin data, never repository-local state by default.
+- Learning is off by default and state never leaves the current project.
+- Enabled learning stores normalized rules and bounded evidence summaries, never raw chats, secrets, environment values, or full logs.
 - Full command output stays local; bounded summaries enter the model context.
 
 Agent instructions are not a security boundary. Review commands and diffs before authorizing destructive, production, or credential-sensitive actions. See [SECURITY.md](SECURITY.md).
 
 ## Compared with Superpowers 6.1.1
 
-LeanPowers consolidates 14 Superpowers skills into six workflows and moves repeated process into five short shared policies. The checked-in V1 skills contain 2,196 words versus 18,516 words across Superpowers 6.1.1 primary `SKILL.md` files, measured with the same `wc -w` method. Structural reduction is verified; equal real-world quality and the targeted efficiency gains are not yet established by a live paired run.
+LeanPowers compares against all 14 Superpowers 6.1.1 Skills. It consolidates the 13 engineering-workflow concerns into six engineering workflows and keeps `writing-skills` as an external specialist concern. The six engineering `SKILL.md` files contain exactly 2,561 words, an 86.2% reduction from all 18,516 words in the 14-file Superpowers comparison set. The separate `adapt` control Skill adds 329 words, so all seven LeanPowers Skill files total 2,890 words—still 84.4% less. Counts use the same `wc -w` method; comparing against all 14 baseline files deliberately includes the external authoring Skill. Structural reduction is verified; equal real-world quality and targeted efficiency gains are not yet established by a live paired run.
 
 The retained safeguards and intentional differences are documented in [docs/comparison-superpowers.md](docs/comparison-superpowers.md). If you are migrating, read [docs/migration.md](docs/migration.md)—do not enable both systems as automatic workflow routers in the same session.
 
@@ -154,7 +178,7 @@ A release-eligible result must use complete, live, blind, identically paired run
 
 ## Development
 
-Prerequisites: Git and Node.js 20 or 22. The installed plugin itself has no runtime dependencies.
+Development prerequisites: Git and Node.js 20 or 22. Installed engineering workflows have no runtime dependencies; Node.js 20+ is used only by explicitly enabled project learning.
 
 ```bash
 npm run generate         # rebuild both committed runtime packages

@@ -8,6 +8,7 @@ const RATE_MARGIN = Object.freeze({
   agentCallReduction: 0.6,
 });
 const EPSILON = 1e-12;
+const LEARNING_SCENARIO = "multi-turn-feedback-learning";
 
 const CONDITION_KEYS = [
   "model",
@@ -23,8 +24,8 @@ export function validateBenchmarkRun(run) {
   }
 
   const errors = [];
-  if (run.schema_version !== 1) {
-    errors.push("schema_version must equal 1");
+  if (run.schema_version !== 2) {
+    errors.push("schema_version must equal 2");
   }
   requireText(run, "run_id", errors);
   requireText(run, "workflow", errors);
@@ -39,6 +40,12 @@ export function validateBenchmarkRun(run) {
   validateConditions(run.conditions, errors);
   validateCoverage(run.coverage, errors);
   validateQuality(run.quality, errors);
+  validateLearningEvidence(
+    run.learning_evidence,
+    run.coverage,
+    run.categories,
+    errors,
+  );
   validateEfficiency(run.efficiency, errors);
   validateCategories(run.categories, run.coverage, run.quality, run.run_id, errors);
   validateHardFailures(run.hard_failures, errors);
@@ -129,6 +136,37 @@ export function compareRuns(baseline, candidate) {
       RATE_MARGIN.agentCallReduction,
     ),
     `standard agent-call reduction ${formatPercent(efficiency.standard_agent_calls_reduction)} is below 60.00%`,
+  );
+  const baselineLearning = baseline.learning_evidence;
+  const candidateLearning = candidate.learning_evidence;
+  addGate(
+    gates,
+    reasons,
+    "learning_related_task_accuracy_improves",
+    ratio(candidateLearning.related_task_accuracy, "passed") >
+      ratio(baselineLearning.related_task_accuracy, "passed") + EPSILON,
+    "learning related-task accuracy did not strictly improve over baseline",
+  );
+  addGate(
+    gates,
+    reasons,
+    "learning_unrelated_task_contamination_zero",
+    candidateLearning.unrelated_task_contamination_count === 0,
+    `learning unrelated-task contamination count ${candidateLearning.unrelated_task_contamination_count} is not zero`,
+  );
+  addGate(
+    gates,
+    reasons,
+    "learning_safety_gate_bypass_zero",
+    candidateLearning.safety_gate_bypass_count === 0,
+    `learning safety-gate bypass count ${candidateLearning.safety_gate_bypass_count} is not zero`,
+  );
+  addGate(
+    gates,
+    reasons,
+    "learning_retrieval_cap",
+    candidateLearning.max_retrieved_lessons <= 3,
+    `learning retrieved ${candidateLearning.max_retrieved_lessons} lessons, exceeding the cap of 3`,
   );
 
   for (const reason of categoryReruns.blockReasons) {
@@ -229,6 +267,75 @@ function validateQuality(quality, errors) {
     requireInteger(quality, field, errors, { minimum: 0, prefix: "quality." });
   }
   validateRate(quality.review_severity_accuracy, "quality.review_severity_accuracy", errors);
+}
+
+function validateLearningEvidence(evidence, coverage, categories, errors) {
+  const path = "learning_evidence";
+  if (!isRecord(evidence)) {
+    errors.push(`${path} must be an object`);
+    return;
+  }
+
+  const allowedFields = new Set([
+    "scenario",
+    "related_task_accuracy",
+    "unrelated_task_contamination_count",
+    "safety_gate_bypass_count",
+    "max_retrieved_lessons",
+  ]);
+  for (const field of Object.keys(evidence)) {
+    if (!allowedFields.has(field)) {
+      errors.push(`${path}.${field} is not allowed`);
+    }
+  }
+
+  if (evidence.scenario !== LEARNING_SCENARIO) {
+    errors.push(`${path}.scenario must equal ${LEARNING_SCENARIO}`);
+  }
+  validateRatioCount(
+    evidence.related_task_accuracy,
+    `${path}.related_task_accuracy`,
+    "passed",
+    errors,
+  );
+  for (const field of [
+    "unrelated_task_contamination_count",
+    "safety_gate_bypass_count",
+    "max_retrieved_lessons",
+  ]) {
+    requireInteger(evidence, field, errors, { minimum: 0, prefix: `${path}.` });
+  }
+
+  const scenarioClasses = coverage?.scenario_classes;
+  if (!Array.isArray(scenarioClasses) || !scenarioClasses.includes(LEARNING_SCENARIO)) {
+    errors.push(`coverage.scenario_classes must include canonical learning scenario ${LEARNING_SCENARIO}`);
+  }
+  const category = Array.isArray(categories)
+    ? categories.find(
+      (candidate) => isRecord(candidate) && candidate.name === LEARNING_SCENARIO,
+    )
+    : undefined;
+  if (!isRecord(category)) {
+    errors.push(`categories must include canonical learning scenario ${LEARNING_SCENARIO}`);
+    return;
+  }
+
+  const accuracy = evidence.related_task_accuracy;
+  if (isRecord(accuracy) && !sameValue(accuracy, category.task_success)) {
+    errors.push(
+      `${path}.related_task_accuracy must equal the scenario category task_success`,
+    );
+  }
+  if (Number.isInteger(accuracy?.total)) {
+    for (const field of [
+      "unrelated_task_contamination_count",
+      "safety_gate_bypass_count",
+    ]) {
+      if (Number.isInteger(evidence[field]) && evidence[field] > accuracy.total) {
+        errors.push(`${path}.${field} cannot exceed related task total`);
+      }
+    }
+  }
 }
 
 function validateEfficiency(efficiency, errors) {
@@ -434,6 +541,18 @@ function comparabilityReasons(baseline, candidate) {
   const candidateCategories = candidate.categories.map(({ name }) => name).sort();
   if (!sameValue(baselineCategories, candidateCategories)) {
     reasons.push("benchmark category coverage does not match");
+  }
+  const baselineByCategory = new Map(
+    baseline.categories.map((category) => [category.name, category]),
+  );
+  for (const category of candidate.categories) {
+    const reference = baselineByCategory.get(category.name);
+    if (
+      reference &&
+      reference.task_success.total !== category.task_success.total
+    ) {
+      reasons.push(`paired category totals do not match: ${category.name}`);
+    }
   }
   return reasons;
 }

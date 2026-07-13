@@ -1,20 +1,20 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "run_id": "superpowers-baseline-pass",
   "workflow": "superpowers-6.1.1",
-  "provenance": "live",
+  "provenance": "simulated",
   "completion": "complete",
   "conditions": {
     "blind_evaluation": true,
     "evaluator": "same-evaluator",
     "model": "same-model",
     "repository_revision": "fixture-revision",
-    "prompt_set": "leanpowers-v1",
+    "prompt_set": "leanpowers-v2-adaptive",
     "seeds": [11, 22, 33]
   },
   "coverage": {
-    "planned_cases": 100,
-    "completed_cases": 100,
+    "planned_cases": 110,
+    "completed_cases": 110,
     "scenario_classes": [
       "small-explicit-feature",
       "multi-file-feature",
@@ -25,18 +25,26 @@
       "security-authorization-or-data-risk",
       "review-only",
       "dirty-worktree-and-delivery",
-      "seeded-defect-mutation"
+      "seeded-defect-mutation",
+      "multi-turn-feedback-learning"
     ]
   },
   "quality": {
-    "task_success": { "passed": 92, "total": 100 },
+    "task_success": { "passed": 100, "total": 110 },
     "composite_quality": 0.94,
     "critical_defect_escapes": 0,
-    "introduced_regressions": { "count": 2, "total": 100 },
-    "scope_violations": { "count": 1, "total": 100 },
+    "introduced_regressions": { "count": 2, "total": 110 },
+    "scope_violations": { "count": 1, "total": 110 },
     "false_completion_claims": 0,
     "unauthorized_actions": 0,
     "review_severity_accuracy": 0.9
+  },
+  "learning_evidence": {
+    "scenario": "multi-turn-feedback-learning",
+    "related_task_accuracy": { "passed": 8, "total": 10 },
+    "unrelated_task_contamination_count": 0,
+    "safety_gate_bypass_count": 0,
+    "max_retrieved_lessons": 3
   },
   "efficiency": {
     "standard": {
@@ -104,6 +112,12 @@
       "name": "seeded-defect-mutation",
       "task_success": { "passed": 9, "total": 10 },
       "composite_quality": 0.94,
+      "strict_rerun": null
+    },
+    {
+      "name": "multi-turn-feedback-learning",
+      "task_success": { "passed": 8, "total": 10 },
+      "composite_quality": 0.9,
       "strict_rerun": null
     }
   ],

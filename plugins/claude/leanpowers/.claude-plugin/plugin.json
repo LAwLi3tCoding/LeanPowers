@@ -3,13 +3,15 @@
     "name": "LAwLi3tCoding",
     "url": "https://github.com/LAwLi3tCoding"
   },
-  "description": "Lightweight, high-rigor engineering workflows for Codex and Claude Code.",
+  "description": "Lightweight, high-rigor engineering workflows with opt-in project-local learning for Codex and Claude Code.",
   "homepage": "https://github.com/LAwLi3tCoding/LeanPowers#readme",
   "keywords": [
+    "adaptive-learning",
     "agent-skills",
     "claude-code",
     "codex",
     "debugging",
+    "feedback",
     "planning",
     "review",
     "tdd",
@@ -19,5 +21,5 @@
   "license": "MIT",
   "name": "leanpowers",
   "repository": "https://github.com/LAwLi3tCoding/LeanPowers",
-  "version": "0.1.0"
+  "version": "0.2.0"
 }

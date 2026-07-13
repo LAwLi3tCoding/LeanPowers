@@ -11,10 +11,10 @@
         "name": "LAwLi3tCoding",
         "url": "https://github.com/LAwLi3tCoding"
       },
-      "description": "Lightweight, high-rigor engineering workflows for Codex and Claude Code.",
+      "description": "Lightweight, high-rigor engineering workflows with opt-in project-local learning for Codex and Claude Code.",
       "name": "leanpowers",
       "source": "./plugins/claude/leanpowers",
-      "version": "0.1.0"
+      "version": "0.2.0"
     }
   ]
 }

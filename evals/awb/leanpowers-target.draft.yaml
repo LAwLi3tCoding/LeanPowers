@@ -1,9 +1,12 @@
 schemaVersion: 0.1.0
 id: leanpowers
-name: LeanPowers
+name: LeanPowers 0.2.0
 targetType: directory
 root: plugins/codex/leanpowers
 entrypoints:
+  - id: adapt
+    kind: file
+    path: skills/adapt/SKILL.md
   - id: shape
     kind: file
     path: skills/shape/SKILL.md
@@ -23,6 +26,9 @@ entrypoints:
     kind: file
     path: skills/ship/SKILL.md
 roles:
+  - id: adapt
+    path: skills/adapt/SKILL.md
+    ownerScopes: [learning]
   - id: shape
     path: skills/shape/SKILL.md
     ownerScopes: [planning, design]
@@ -44,6 +50,7 @@ roles:
 contracts:
   statuses: [PASS, BLOCK, DIAGNOSTIC_ONLY, INCOMPLETE]
   requiredOwners:
+    learning: adapt
     planning: shape
     design: shape
     implementation: build

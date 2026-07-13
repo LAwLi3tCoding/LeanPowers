@@ -4,14 +4,14 @@ import { fileURLToPath } from "node:url";
 
 import { buildArtifacts } from "./generate.mjs";
 import { projectRoot } from "./lib/project.mjs";
-import { collectValidationErrors } from "./validate-package.mjs";
+import { collectValidationErrors, validatePackage } from "./validate-package.mjs";
 
 const ROOT = fileURLToPath(projectRoot);
 const DIST_ROOT = path.join(ROOT, "dist");
 
 export async function buildRelease({
   outputRoot = path.join(ROOT, "dist"),
-} = {}) {
+} = {}, dependencies = {}) {
   const resolvedOutput = resolveSafeOutputRoot(outputRoot);
   await buildArtifacts({ check: true });
   const errors = await collectValidationErrors();
@@ -43,6 +43,21 @@ export async function buildRelease({
   await cp(path.join(ROOT, "plugins/claude/leanpowers"), stagedOutputs.claude, {
     recursive: true,
   });
+  try {
+    await dependencies.afterStage?.(stagedOutputs);
+    const stagedErrors = [];
+    for (const runtime of ["codex", "claude"]) {
+      stagedErrors.push(
+        ...(await validatePackage(stagedOutputs[runtime], { runtime })),
+      );
+    }
+    if (stagedErrors.length > 0) {
+      throw new Error(`Staged release validation failed:\n${stagedErrors.join("\n")}`);
+    }
+  } catch (error) {
+    await rm(stage, { force: true, recursive: true });
+    throw error;
+  }
 
   const hadExistingOutput = await exists(resolvedOutput);
   try {

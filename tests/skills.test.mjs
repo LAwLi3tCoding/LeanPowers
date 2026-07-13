@@ -6,9 +6,10 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const skillsRoot = path.join(root, "skills");
-const expectedSkills = ["build", "debug", "review", "shape", "ship", "verify"];
+const engineeringSkills = ["build", "debug", "review", "shape", "ship", "verify"];
+const expectedSkills = ["adapt", ...engineeringSkills].sort();
 
-test("exactly six user-facing skills exist", async () => {
+test("six engineering workflows plus adapt control skill exist", async () => {
   const entries = await readdir(skillsRoot, { withFileTypes: true });
   const discovered = entries
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("_"))
@@ -35,16 +36,131 @@ test("skill frontmatter is portable and descriptions are discovery-focused", asy
 });
 
 test("skill bodies stay within the LeanPowers context budget", async () => {
-  let totalWords = 0;
+  let engineeringWords = 0;
 
   for (const name of expectedSkills) {
     const content = await readFile(path.join(skillsRoot, name, "SKILL.md"), "utf8");
     const words = wordCount(content);
-    assert.ok(words <= 800, `${name} has ${words} words`);
-    totalWords += words;
+    if (name === "adapt") {
+      assert.ok(words < 400, `adapt has ${words} words`);
+    } else {
+      assert.ok(words <= 800, `${name} has ${words} words`);
+      engineeringWords += words;
+    }
   }
 
-  assert.ok(totalWords <= 5000, `all skills contain ${totalWords} words`);
+  assert.ok(engineeringWords <= 5000, `engineering skills contain ${engineeringWords} words`);
+});
+
+test("adapt triggers on explicit downstream feedback but not educational learning", async () => {
+  const content = await readFile(path.join(skillsRoot, "adapt", "SKILL.md"), "utf8");
+  const { frontmatter } = parseSkill(content);
+
+  assert.match(
+    frontmatter.description,
+    /reports? .*worked|reports? .*failed|corrects?|durable .*preference/i,
+  );
+  assert.doesNotMatch(frontmatter.description, /help .* learn/i);
+});
+
+test("engineering workflows query bounded project lessons and route explicit feedback", async () => {
+  for (const name of engineeringSkills) {
+    const content = await readFile(path.join(skillsRoot, name, "SKILL.md"), "utf8");
+    const integration = content
+      .split("\n")
+      .find((line) => line.startsWith("If project learning is enabled"));
+
+    assert.ok(integration, `${name} is missing its learning integration paragraph`);
+    assert.match(integration, /use `adapt` to query once/i, name);
+    assert.match(
+      integration,
+      /\[learning policy\]\(\.\.\/\.\.\/references\/learning-policy\.md\)/i,
+      name,
+    );
+    assert.equal(
+      integration.match(/[.!?](?=\s|$)/g)?.length,
+      2,
+      `${name} learning integration must remain two sentences`,
+    );
+    assert.match(content, /learning is enabled[\s\S]{0,180}query/i, name);
+    assert.match(content, /workflow[\s\S]{0,80}path[\s\S]{0,80}tag/i, name);
+    assert.match(content, /(?:no more than|at most) three[\s\S]{0,100}(?:advisory|behavior-changing)/i, name);
+    assert.match(content, /explicit[\s\S]{0,100}(?:feedback|outcome)[\s\S]{0,80}`adapt`/i, name);
+  }
+});
+
+test("learning policy makes every read request and helper invocation executable", async () => {
+  const policy = await readFile(path.join(root, "references", "learning-policy.md"), "utf8");
+
+  assert.match(policy, /`inspect`, `doctor`\s*\|\s*`\{\}`/);
+  assert.ok(
+    policy.includes(
+      '`query` | `{"workflow":"<canonical-workflow>","paths":["<safe-relative-path>"],"tags":["<tag>"]}`',
+    ),
+    "query must document its exact stdin JSON",
+  );
+  assert.match(policy, /installed `adapt` Skill/i);
+  assert.match(policy, /resolve `scripts\/learning\.mjs` relative to/i);
+  assert.match(policy, /project-root cwd/i);
+  assert.match(policy, /command[^\n]{0,40}argv/i);
+  assert.match(policy, /request[^\n]{0,40}stdin JSON/i);
+});
+
+test("adapt uses the tested stdin helper and preserves control-plane precedence", async () => {
+  const content = await readFile(path.join(skillsRoot, "adapt", "SKILL.md"), "utf8");
+  assert.match(content, /scripts\/learning\.mjs/);
+  assert.match(content, /stdin JSON/i);
+  assert.match(content, /caller[^\n]{0,40}leader/i);
+  assert.match(content, /instructions[\s\S]{0,120}evidence[\s\S]{0,220}quality gates/i);
+  assert.match(content, /scope[\s\S]{0,120}risk[\s\S]{0,120}authorization/i);
+});
+
+test("adapt record shape nests all matching fields under scope", async () => {
+  const source = await adaptSource();
+  assert.match(
+    source,
+    /"scope":\{"workflows":\[[^\]]+\],"path_prefixes":\[[^\]]+\],"tags":\[[^\]]+\]\}/,
+  );
+  assert.match(source, /record[\s\S]{0,500}"caller":"leader"[\s\S]{0,500}"scope":/i);
+  assert.match(source, /record may add exact `supersedes` IDs and `expires_at`/i);
+});
+
+test("adapt classifies one narrow lesson by the normalized reusable rule", async () => {
+  const source = await adaptSource();
+  assert.match(source, /normalized reusable rule/i);
+  assert.match(source, /project convention[\s\S]{0,80}`preference`/i);
+  assert.match(source, /replacement fact or rule[\s\S]{0,80}`correction`/i);
+  assert.match(source, /actual result[\s\S]{0,80}`outcome`/i);
+  assert.match(source, /specific prior result[\s\S]{0,80}`confirmation`/i);
+  assert.match(source, /each feedback[\s\S]{0,80}one[\s\S]{0,80}narrowest lesson/i);
+});
+
+test("adapt documents exact maintenance mutation request shapes", async () => {
+  const source = await adaptSource();
+  assert.match(source, /enable.*disable[\s\S]{0,160}\{"caller":"leader"\}/i);
+  assert.match(source, /clear[\s\S]{0,160}\{"caller":"leader","all":true\}/i);
+  assert.match(source, /delete all[\s\S]{0,160}\{"caller":"leader","all":true\}/i);
+  assert.match(
+    source,
+    /delete IDs[\s\S]{0,180}\{"caller":"leader","lesson_ids":\["<uuid>"\]\}/i,
+  );
+});
+
+test("lesson scopes use only the six canonical engineering workflows", async () => {
+  const source = await adaptSource();
+  assert.match(source, /scope\.workflows/i);
+  assert.match(source, /shape.*build.*debug.*review.*verify.*ship/is);
+  assert.match(source, /only (?:these )?canonical/i);
+});
+
+test("learning policy and Claude routing stay within their budgets", async () => {
+  const policy = await readFile(path.join(root, "references", "learning-policy.md"), "utf8");
+  const claude = await readFile(path.join(root, "adapters", "claude", "session-start"), "utf8");
+
+  assert.ok(wordCount(policy) < 180, `learning policy has ${wordCount(policy)} words`);
+  assert.ok(wordCount(claude) < 120, `Claude session-start has ${wordCount(claude)} words`);
+  assert.match(claude, /explicit[\s\S]{0,100}feedback[\s\S]{0,100}adapt/i);
+  assert.doesNotMatch(claude, /writeFile|mkdir|\.leanpowers/);
 });
 
 test("skill references resolve and source contains no placeholders", async () => {
@@ -125,4 +241,13 @@ async function collectMarkdown(directory) {
     }
   }
   return files;
+}
+
+async function adaptSource() {
+  return (
+    await Promise.all([
+      readFile(path.join(skillsRoot, "adapt", "SKILL.md"), "utf8"),
+      readFile(path.join(root, "references", "learning-policy.md"), "utf8"),
+    ])
+  ).join("\n");
 }

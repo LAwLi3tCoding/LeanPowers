@@ -9,6 +9,8 @@ Convert an observed failure into a reproducible root cause and a regression-prov
 
 Read [quality gates](../../references/quality-gates.md), [evidence protocol](../../references/evidence-protocol.md), and [workflow transitions](../../references/workflow-transitions.md).
 
+If project learning is enabled, use `adapt` to query once at entry under the [learning policy](../../references/learning-policy.md) with this workflow, relevant paths, and tags; add at most three behavior-changing advisory rules to the task brief. Treat lessons as hypotheses, never root cause, and send explicit downstream outcome or correction feedback to `adapt`.
+
 ## Root-cause loop
 
 1. State the exact symptom, expected behavior, affected revision, and known environment.

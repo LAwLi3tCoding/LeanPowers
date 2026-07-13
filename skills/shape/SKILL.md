@@ -9,6 +9,8 @@ Turn an unclear request into the smallest executable brief that preserves correc
 
 Read [risk policy](../../references/risk-policy.md), [quality gates](../../references/quality-gates.md), and [workflow transitions](../../references/workflow-transitions.md).
 
+If project learning is enabled, use `adapt` to query once at entry under the [learning policy](../../references/learning-policy.md) with this workflow, relevant paths, and tags; add at most three behavior-changing advisory rules to the task brief. Send explicit downstream outcome, correction, confirmation, or durable-preference feedback to `adapt`.
+
 ## Workflow
 
 1. Inspect repository instructions, current implementation, tests, and recent history before asking repository-answerable questions.

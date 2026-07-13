@@ -11,6 +11,8 @@ For strict or high-risk work, the reviewer must be a different agent, fresh sess
 
 Read [quality gates](../../references/quality-gates.md), [evidence protocol](../../references/evidence-protocol.md), and [subagent policy](../../references/subagent-policy.md).
 
+If project learning is enabled, use `adapt` to query once at entry under the [learning policy](../../references/learning-policy.md) with this workflow, relevant paths, and tags; add at most three behavior-changing advisory rules to the task brief. Treat prior confirmations as advisory, never current review evidence, and send explicit downstream feedback to `adapt`.
+
 ## Review procedure
 
 1. Establish the review base, declared scope, acceptance criteria, and applicable risk level.

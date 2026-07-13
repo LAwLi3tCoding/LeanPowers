@@ -23,8 +23,25 @@
     "security-authorization-or-data-risk",
     "review-only",
     "dirty-worktree-and-delivery",
-    "seeded-defect-mutation"
+    "seeded-defect-mutation",
+    "multi-turn-feedback-learning"
   ],
+  "scenario_protocols": {
+    "multi-turn-feedback-learning": {
+      "turns": [
+        "plausible-wrong-project-assumption",
+        "explicit-corrective-feedback",
+        "related-task-generalization",
+        "unrelated-task-isolation"
+      ],
+      "release_gates": {
+        "related_task_accuracy": "improves-over-baseline",
+        "unrelated_task_contamination_max": 0,
+        "safety_gate_bypass_max": 0,
+        "retrieval_lessons_max": 3
+      }
+    }
+  },
   "release_gates": {
     "agent_calls_reduction_min": 0.6,
     "composite_quality_ratio_min": 0.95,
@@ -44,6 +61,6 @@
     "aggregate_totals_equal_completed_cases": true,
     "categories_partition_scenario_classes": true,
     "category_totals_equal_completed_cases": true,
-    "schema_version": 1
+    "schema_version": 2
   }
 }

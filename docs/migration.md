@@ -33,7 +33,8 @@ Do not treat command namespaces alone as isolation; automatic skill discovery ca
 | `finishing-a-development-branch` | `ship` | Follows the user's requested target and reads it back |
 | `dispatching-parallel-agents` | shared subagent policy | Delegate only independent, independently verifiable boundaries |
 | `subagent-driven-development` | `build` plus strict `review` | Default is one agent; high-risk review stays independent |
-| `writing-skills` | no V1 equivalent | Continue using a dedicated skill-authoring workflow when creating skills |
+| `writing-skills` | no engineering-workflow equivalent | Continue using a dedicated skill-authoring workflow when creating skills |
+| no equivalent in the compared core Skill set | `adapt` control Skill | Optional project-local learning from explicit feedback; disabled by default |
 
 ## Invocation mapping
 
@@ -45,8 +46,27 @@ Do not treat command namespaces alone as isolation; automatic skill discovery ca
 | Independent assessment | `$leanpowers:review` | `/leanpowers:review` |
 | Prove completion | `$leanpowers:verify` | `/leanpowers:verify` |
 | Deliver verified work | `$leanpowers:ship` | `/leanpowers:ship` |
+| Enable or maintain project learning | `$leanpowers:adapt` | `/leanpowers:adapt` |
 
 Append `mode=lean`, `mode=standard`, or `mode=strict` when you want to request a level. Leave `mode=auto` for normal risk-based routing.
+
+## Optional learning migration
+
+`adapt` is a control-plane capability, not a seventh engineering workflow and not an automatic stage. Installing LeanPowers does not enable it. To opt in, use an explicit project-scoped request such as “Enable LeanPowers learning for this project.” Before writing, `adapt` displays the resolved root and discloses that normalized feedback will be stored in project-local `.leanpowers/` and excluded through local Git `info/exclude`.
+
+Only explicit downstream correction, confirmation, real outcome, or durable project preference is eligible. Thanks, silence, approval to proceed, Agent self-assessment, one-time authorization, and ambiguous feedback are not learned. Stored events contain normalized rules and bounded evidence summaries—not raw conversations, full prompts, logs, stack traces, secrets, credentials, or unrelated repository content. Retrieval stays inside the project, returns at most three relevant lessons, and cannot weaken current instructions or evidence gates.
+
+Maintenance requests route explicitly to `adapt`:
+
+```text
+Disable LeanPowers learning for this project.
+What has LeanPowers learned in this project?
+Forget the tenant-filter lesson.
+Clear this project's learned lessons.
+Permanently delete this project's LeanPowers learning data.
+```
+
+Disabling retains local data for inspection or later re-enablement. Forget and clear deactivate lessons while preserving auditable history; a permanent deletion request rewrites the local learning tree after the required destructive confirmation. Learning has no background process, network access, global profile, or cross-project sharing. It requires Node.js 20+ only while enabled; without Node.js, the six engineering workflows continue unchanged.
 
 ## Recommended migration sequence
 
@@ -57,7 +77,8 @@ Append `mode=lean`, `mode=standard`, or `mode=strict` when you want to request a
 5. **Exercise strict tasks.** Verify security, authorization, migration, or production-shaped scenarios still receive independent review and authorization gates.
 6. **Test delivery.** Confirm `ship` preserves unrelated work and reads back the actual branch, commit, PR, or package target.
 7. **Run the paired benchmark.** Follow [benchmark.md](benchmark.md) under identical live conditions. Fixture data is not migration evidence.
-8. **Cut over one runtime or team at a time.** Disable Superpowers routing only after representative quality results and rollback criteria are accepted.
+8. **Evaluate learning separately.** If desired, enable it only in a disposable representative project and run the four-turn correction/generalization scenario before broader opt-in.
+9. **Cut over one runtime or team at a time.** Disable Superpowers routing only after representative quality results and rollback criteria are accepted.
 
 ## Behavioral changes to expect
 
@@ -68,6 +89,7 @@ Append `mode=lean`, `mode=standard`, or `mode=strict` when you want to request a
 - Full-suite evidence may be reused for the same unaffected revision scope.
 - Worktrees are created when isolation is needed, not by default.
 - If you already requested a PR or package, `ship` executes that path instead of showing a generic completion menu.
+- Project learning remains off until explicitly enabled; once enabled, later workflows may apply up to three scoped advisory lessons.
 
 These changes are intentional. They must not remove root-cause diagnosis, regression coverage, independent strict-risk review, current verification, or authorization gates.
 
