@@ -168,7 +168,6 @@ export async function buildArtifacts({ check = false } = {}) {
 async function replacePackagesAtomically(artifacts) {
   const nonce = `${process.pid}-${Date.now()}`;
   const staged = [];
-  const swapped = [];
 
   try {
     for (const packageRoot of PACKAGE_ROOTS) {
@@ -200,51 +199,91 @@ async function replacePackagesAtomically(artifacts) {
       }
       await verifyStagedPackage(stageUrl, expected, packageRoot);
     }
-
-    try {
-      for (const entry of staged) {
-        const hadPackage = await exists(entry.packageUrl);
-        if (hadPackage) {
-          await rename(entry.packageUrl, entry.backupUrl);
-        }
-        try {
-          await rename(entry.stageUrl, entry.packageUrl);
-          swapped.push({ ...entry, hadPackage });
-        } catch (error) {
-          if (hadPackage && (await exists(entry.backupUrl))) {
-            await rename(entry.backupUrl, entry.packageUrl);
-          }
-          throw error;
-        }
-      }
-    } catch (error) {
-      const rollbackErrors = [];
-      for (const entry of [...swapped].reverse()) {
-        try {
-          await rm(entry.packageUrl, { force: true, recursive: true });
-          if (entry.hadPackage && (await exists(entry.backupUrl))) {
-            await rename(entry.backupUrl, entry.packageUrl);
-          }
-        } catch (rollbackError) {
-          rollbackErrors.push(rollbackError);
-        }
-      }
-      if (rollbackErrors.length > 0) {
-        throw new AggregateError(
-          [error, ...rollbackErrors],
-          "Package swap failed and rollback was incomplete; backup directories were preserved",
-        );
-      }
-      throw error;
-    }
-
-    for (const entry of swapped) {
-      await rm(entry.backupUrl, { force: true, recursive: true });
-    }
+    await commitStagedPackages(staged);
   } finally {
     for (const { stageUrl } of staged) {
       await rm(stageUrl, { force: true, recursive: true });
     }
+  }
+}
+
+export async function commitStagedPackages(
+  staged,
+  operations = { exists, rename, rm },
+) {
+  const swapped = [];
+
+  try {
+    for (const entry of staged) {
+      const hadPackage = await operations.exists(entry.packageUrl);
+      if (hadPackage) {
+        await operations.rename(entry.packageUrl, entry.backupUrl);
+      }
+      try {
+        await operations.rename(entry.stageUrl, entry.packageUrl);
+        swapped.push({ ...entry, hadPackage });
+      } catch (swapError) {
+        const restoreErrors = [];
+        if (hadPackage) {
+          try {
+            await requireBackup(entry, operations);
+            await operations.rename(entry.backupUrl, entry.packageUrl);
+          } catch (restoreError) {
+            restoreErrors.push(restoreError);
+          }
+        }
+        if (restoreErrors.length > 0) {
+          throw new AggregateError(
+            [swapError, ...restoreErrors],
+            "Package swap failed and rollback was incomplete; backup directories were preserved",
+          );
+        }
+        throw swapError;
+      }
+    }
+  } catch (error) {
+    const rollbackErrors = [];
+    for (const entry of [...swapped].reverse()) {
+      try {
+        if (entry.hadPackage) {
+          await requireBackup(entry, operations);
+        }
+        await operations.rm(entry.packageUrl, { force: true, recursive: true });
+        if (entry.hadPackage) {
+          await operations.rename(entry.backupUrl, entry.packageUrl);
+        }
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
+    }
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...rollbackErrors],
+        "Package swap failed and rollback was incomplete; backup directories were preserved",
+      );
+    }
+    throw error;
+  }
+
+  const cleanupErrors = [];
+  for (const entry of swapped) {
+    try {
+      await operations.rm(entry.backupUrl, { force: true, recursive: true });
+    } catch (cleanupError) {
+      cleanupErrors.push(cleanupError);
+    }
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(
+      cleanupErrors,
+      "Package swap committed but backup cleanup was incomplete; generated packages are current",
+    );
+  }
+}
+
+async function requireBackup(entry, operations) {
+  if (!(await operations.exists(entry.backupUrl))) {
+    throw new Error(`Package rollback backup is missing: ${entry.backupUrl}`);
   }
 }
 

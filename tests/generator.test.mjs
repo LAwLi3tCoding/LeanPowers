@@ -7,7 +7,11 @@ import {
   readMetadata,
   stableJson,
 } from "../scripts/lib/project.mjs";
-import { expectedArtifacts, packageReadme } from "../scripts/generate.mjs";
+import {
+  commitStagedPackages,
+  expectedArtifacts,
+  packageReadme,
+} from "../scripts/generate.mjs";
 
 test("canonical metadata uses the LeanPowers identity", async () => {
   const metadata = await readMetadata();
@@ -86,3 +90,127 @@ test("packaged README rewrites repository-only links to canonical GitHub URLs", 
   assert.match(rendered, /\[anchor\]\(#usage\)/);
   assert.match(rendered, /\[web\]\(https:\/\/example\.test\)/);
 });
+
+test("package transaction restores the first package when the second swap fails", async () => {
+  const fixture = transactionFixture({
+    failRename: ({ from, to }) => from === "stage-claude" && to === "package-claude",
+  });
+
+  await assert.rejects(
+    commitStagedPackages(fixture.entries, fixture.operations),
+    /injected rename failure/,
+  );
+
+  assert.deepEqual(fixture.snapshot(), {
+    "package-claude": "old-claude",
+    "package-codex": "old-codex",
+    "stage-claude": "new-claude",
+  });
+});
+
+test("package transaction reports an incomplete current-package restore", async () => {
+  const fixture = transactionFixture({
+    failRename: ({ from, to }) =>
+      (from === "stage-claude" && to === "package-claude") ||
+      (from === "backup-claude" && to === "package-claude"),
+  });
+
+  await assert.rejects(
+    commitStagedPackages(fixture.entries, fixture.operations),
+    (error) =>
+      error instanceof AggregateError &&
+      /rollback was incomplete/i.test(error.message),
+  );
+
+  assert.equal(fixture.snapshot()["package-codex"], "old-codex");
+  assert.equal(fixture.snapshot()["backup-claude"], "old-claude");
+});
+
+test("package transaction never deletes a new package when its backup vanished", async () => {
+  const fixture = transactionFixture({
+    failRename: ({ from, to, files }) => {
+      if (from === "stage-claude" && to === "package-claude") {
+        files.delete("backup-codex");
+        return true;
+      }
+      return false;
+    },
+  });
+
+  await assert.rejects(
+    commitStagedPackages(fixture.entries, fixture.operations),
+    (error) =>
+      error instanceof AggregateError &&
+      /rollback was incomplete/i.test(error.message),
+  );
+
+  assert.equal(fixture.snapshot()["package-codex"], "new-codex");
+});
+
+test("package transaction distinguishes committed output from backup cleanup failure", async () => {
+  const fixture = transactionFixture({
+    failRemove: ({ target }) => target === "backup-codex",
+  });
+
+  await assert.rejects(
+    commitStagedPackages(fixture.entries, fixture.operations),
+    (error) =>
+      error instanceof AggregateError &&
+      /swap committed.*cleanup was incomplete/i.test(error.message),
+  );
+
+  assert.equal(fixture.snapshot()["package-codex"], "new-codex");
+  assert.equal(fixture.snapshot()["package-claude"], "new-claude");
+  assert.equal(fixture.snapshot()["backup-codex"], "old-codex");
+});
+
+function transactionFixture({
+  failRename = () => false,
+  failRemove = () => false,
+}) {
+  const files = new Map([
+    ["package-codex", "old-codex"],
+    ["package-claude", "old-claude"],
+    ["stage-codex", "new-codex"],
+    ["stage-claude", "new-claude"],
+  ]);
+  const entries = [
+    {
+      packageUrl: "package-codex",
+      stageUrl: "stage-codex",
+      backupUrl: "backup-codex",
+    },
+    {
+      packageUrl: "package-claude",
+      stageUrl: "stage-claude",
+      backupUrl: "backup-claude",
+    },
+  ];
+  const operations = {
+    exists: async (target) => files.has(target),
+    rename: async (from, to) => {
+      if (failRename({ from, to, files })) {
+        throw new Error(`injected rename failure: ${from} -> ${to}`);
+      }
+      if (!files.has(from)) {
+        throw new Error(`missing source: ${from}`);
+      }
+      files.set(to, files.get(from));
+      files.delete(from);
+    },
+    rm: async (target) => {
+      if (failRemove({ target, files })) {
+        throw new Error(`injected remove failure: ${target}`);
+      }
+      files.delete(target);
+    },
+  };
+  return {
+    entries,
+    operations,
+    snapshot: () =>
+      Object.fromEntries(
+        [...files].sort(([left], [right]) => left.localeCompare(right)),
+      ),
+  };
+}
