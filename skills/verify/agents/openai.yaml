@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verify"
+  short_description: "Prove completion claims with current evidence."
+  default_prompt: "Use $verify to check these completion claims against current repository evidence."

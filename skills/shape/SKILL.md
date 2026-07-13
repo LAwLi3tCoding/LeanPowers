@@ -1,0 +1,51 @@
+---
+name: shape
+description: Use when an engineering request has material ambiguity, unclear scope, missing acceptance criteria, conflicting constraints, multiple architecture choices, or cross-component risk that must be bounded before implementation.
+---
+
+# Shape
+
+Turn an unclear request into the smallest executable brief that preserves correctness. Do not turn clear work into a planning ceremony.
+
+Read [risk policy](../_shared/risk-policy.md), [quality gates](../_shared/quality-gates.md), and [workflow transitions](../_shared/workflow-transitions.md).
+
+## Workflow
+
+1. Inspect repository instructions, current implementation, tests, and recent history before asking repository-answerable questions.
+2. State the desired outcome, declared scope, constraints, acceptance evidence, and highest applicable risk level.
+3. Use `light` shaping for bounded standard work. Use `full` shaping only when architecture, public contracts, irreversible choices, or strict risk require it.
+4. Make low-risk reversible assumptions explicit and continue. Ask one consolidated question only when missing information materially changes the result or authority.
+5. Split work into one to five independently verifiable delivery slices. Split by outcome and interface, never by file or arbitrary time box.
+
+## Output
+
+```yaml
+goal: one outcome
+scope:
+  include: explicit boundaries
+  exclude: explicit non-goals
+acceptance: observable proof of completion
+constraints: hard requirements
+risk: lean | standard | strict
+assumptions: reversible assumptions made
+slices:
+  - outcome: independently reviewable result
+    evidence: command or inspection that proves it
+decision_needed: null | one material user decision
+```
+
+Keep the brief in conversation by default. Persist it only for strict, cross-session, or explicitly documented work.
+
+## Decision gate
+
+Pause only for a destructive or irreversible choice, missing credentials or authority, external production impact, or a material product decision with meaningfully different outcomes. Do not pause for ordinary local implementation details.
+
+## Common mistakes
+
+- Expanding “multi-runtime” into every known runtime instead of the declared V1 targets.
+- Restating the request without defining evidence.
+- Copying implementation code into a plan.
+- Asking multiple rounds of questions that repository inspection could answer.
+- Treating setup, each file, or each test as a separate delivery slice.
+
+When the brief is executable, transition to `build`. If the request was already executable, skip shaping entirely.
