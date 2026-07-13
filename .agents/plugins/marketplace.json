@@ -12,8 +12,8 @@
         "installation": "AVAILABLE"
       },
       "source": {
-        "source": "url",
-        "url": "./plugins/codex/leanpowers"
+        "path": "./plugins/codex/leanpowers",
+        "source": "local"
       }
     }
   ]

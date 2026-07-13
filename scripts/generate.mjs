@@ -53,8 +53,8 @@ export async function expectedArtifacts() {
         {
           name: metadata.id,
           source: {
-            source: "url",
-            url: "./plugins/codex/leanpowers",
+            source: "local",
+            path: "./plugins/codex/leanpowers",
           },
           policy: {
             installation: "AVAILABLE",

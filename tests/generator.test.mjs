@@ -50,12 +50,19 @@ test("generator defines both runtime manifests and marketplaces", async () => {
   const claudeManifest = JSON.parse(
     artifacts.get("plugins/claude/leanpowers/.claude-plugin/plugin.json"),
   );
+  const codexMarketplace = JSON.parse(
+    artifacts.get(".agents/plugins/marketplace.json"),
+  );
 
   assert.equal(codexManifest.name, "leanpowers");
   assert.equal(codexManifest.skills, "./skills/");
   assert.equal("hooks" in codexManifest, false);
   assert.equal(claudeManifest.name, "leanpowers");
   assert.equal("interface" in claudeManifest, false);
+  assert.deepEqual(codexMarketplace.plugins[0].source, {
+    source: "local",
+    path: "./plugins/codex/leanpowers",
+  });
 });
 
 test("checked-in generated artifacts match expected content", async () => {
