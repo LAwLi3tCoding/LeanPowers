@@ -31,12 +31,16 @@ test("generator defines both runtime manifests and marketplaces", async () => {
   const artifacts = await expectedArtifacts();
   const paths = [...artifacts.keys()].sort();
 
-  assert.deepEqual(paths, [
+  for (const required of [
     ".agents/plugins/marketplace.json",
     ".claude-plugin/marketplace.json",
     "plugins/claude/leanpowers/.claude-plugin/plugin.json",
     "plugins/codex/leanpowers/.codex-plugin/plugin.json",
-  ]);
+    "plugins/claude/leanpowers/skills/shape/SKILL.md",
+    "plugins/codex/leanpowers/skills/shape/SKILL.md",
+  ]) {
+    assert.ok(paths.includes(required), `missing generated artifact: ${required}`);
+  }
 
   const codexManifest = JSON.parse(
     artifacts.get("plugins/codex/leanpowers/.codex-plugin/plugin.json"),

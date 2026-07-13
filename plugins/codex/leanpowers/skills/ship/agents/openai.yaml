@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ship"
+  short_description: "Deliver verified work safely to its requested target."
+  default_prompt: "Use $ship to deliver this verified change through the requested Git or release path."

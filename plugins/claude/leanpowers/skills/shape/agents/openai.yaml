@@ -1,0 +1,4 @@
+interface:
+  display_name: "Shape"
+  short_description: "Turn unclear engineering requests into executable work."
+  default_prompt: "Use $shape to clarify this engineering task and define the lightest safe execution path."

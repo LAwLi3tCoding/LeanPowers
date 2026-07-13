@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review"
+  short_description: "Find material issues in code and workflow changes."
+  default_prompt: "Use $review to assess these changes against their requirements and engineering risks."

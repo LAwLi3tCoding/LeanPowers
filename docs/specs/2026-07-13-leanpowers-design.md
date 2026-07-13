@@ -370,12 +370,12 @@ Storage:
 LeanPowers/
 ├── .claude-plugin/marketplace.json
 ├── .agents/plugins/marketplace.json
+├── references/
+│   ├── risk-policy.md
+│   ├── quality-gates.md
+│   ├── evidence-protocol.md
+│   └── subagent-policy.md
 ├── skills/
-│   ├── _shared/
-│   │   ├── risk-policy.md
-│   │   ├── quality-gates.md
-│   │   ├── evidence-protocol.md
-│   │   └── subagent-policy.md
 │   ├── shape/SKILL.md
 │   ├── build/SKILL.md
 │   ├── debug/SKILL.md

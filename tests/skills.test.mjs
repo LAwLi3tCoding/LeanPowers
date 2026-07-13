@@ -53,7 +53,7 @@ test("skill references resolve and source contains no placeholders", async () =>
     const content = await readFile(skillPath, "utf8");
     assert.doesNotMatch(content, /\b(?:TBD|TODO|FIXME)\b|\[TODO:/i);
 
-    for (const reference of content.matchAll(/\]\((\.\.\/_shared\/[^)]+)\)/g)) {
+    for (const reference of content.matchAll(/\]\((\.\.\/\.\.\/references\/[^)]+)\)/g)) {
       const resolved = path.resolve(path.dirname(skillPath), reference[1]);
       assert.equal((await stat(resolved)).isFile(), true, `${reference[1]} is missing`);
     }
@@ -61,7 +61,10 @@ test("skill references resolve and source contains no placeholders", async () =>
 });
 
 test("the source set states every non-negotiable quality invariant", async () => {
-  const files = await collectMarkdown(skillsRoot);
+  const files = [
+    ...(await collectMarkdown(skillsRoot)),
+    ...(await collectMarkdown(path.join(root, "references"))),
+  ];
   const source = (
     await Promise.all(files.map((file) => readFile(file, "utf8")))
   ).join("\n");

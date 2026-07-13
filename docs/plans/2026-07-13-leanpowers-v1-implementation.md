@@ -30,7 +30,7 @@
 ### Canonical source
 
 - `metadata/plugin.json`: single version, product copy, author, repository, marketplace, and interface metadata source.
-- `skills/_shared/*.md`: risk, quality, evidence, transition, and subagent contracts.
+- `references/*.md`: risk, quality, evidence, transition, and subagent contracts.
 - `skills/{shape,build,debug,review,verify,ship}/SKILL.md`: six portable workflows.
 - `agent-specs/{reviewer,verifier}.md`: canonical optional specialist instructions.
 - `adapters/claude/session-start`: compact Claude routing charter hook.
@@ -173,11 +173,11 @@ git commit -m "feat: add dual-runtime plugin generator"
 
 **Files:**
 
-- Create: `skills/_shared/risk-policy.md`
-- Create: `skills/_shared/quality-gates.md`
-- Create: `skills/_shared/evidence-protocol.md`
-- Create: `skills/_shared/subagent-policy.md`
-- Create: `skills/_shared/workflow-transitions.md`
+- Create: `references/risk-policy.md`
+- Create: `references/quality-gates.md`
+- Create: `references/evidence-protocol.md`
+- Create: `references/subagent-policy.md`
+- Create: `references/workflow-transitions.md`
 - Create: `skills/{shape,build,debug,review,verify,ship}/SKILL.md`
 - Create: `tests/skills.test.mjs`
 
@@ -185,7 +185,7 @@ git commit -m "feat: add dual-runtime plugin generator"
 
 - Each skill frontmatter contains only `name` and `description`; runtime and license metadata belong at plugin level.
 - Each workflow declares `Use when`, `Do not use when`, `Inputs`, `Workflow`, `Hard gates`, `Output`, and `Transitions`.
-- Shared references are addressed as `../_shared/<file>.md` from skill directories.
+- Shared references are addressed as `../../references/<file>.md` from skill directories.
 
 - [ ] **Step 1: Write failing skill-contract tests**
 

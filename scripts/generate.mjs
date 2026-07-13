@@ -1,7 +1,22 @@
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import {
+  access,
+  chmod,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { projectRoot, readMetadata, stableJson } from "./lib/project.mjs";
+
+const PACKAGE_ROOTS = [
+  "plugins/codex/leanpowers",
+  "plugins/claude/leanpowers",
+];
 
 export async function expectedArtifacts() {
   const metadata = await readMetadata();
@@ -68,31 +83,132 @@ export async function expectedArtifacts() {
     }),
   );
 
+  await addTree(artifacts, "skills", "plugins/codex/leanpowers/skills");
+  await addTree(artifacts, "skills", "plugins/claude/leanpowers/skills");
+  await addTree(artifacts, "references", "plugins/codex/leanpowers/references");
+  await addTree(artifacts, "references", "plugins/claude/leanpowers/references");
+  await addTree(artifacts, "agent-specs", "plugins/claude/leanpowers/agents");
+  await addTree(artifacts, "adapters/claude", "plugins/claude/leanpowers/hooks", {
+    rename: new Map([["hooks.json", "hooks.json"], ["session-start", "session-start"]]),
+  });
+
   return artifacts;
 }
 
 export async function buildArtifacts({ check = false } = {}) {
   const artifacts = await expectedArtifacts();
-  const changed = [];
+  const changed = new Set();
 
   for (const [relativePath, expected] of artifacts) {
     const url = new URL(relativePath, projectRoot);
     const actual = await readIfPresent(url);
-    if (actual === expected) {
+    const executable = relativePath === "plugins/claude/leanpowers/hooks/session-start";
+    const modeMatches = !executable || (await isExecutable(url));
+    if (actual === expected && modeMatches) {
       continue;
     }
-    changed.push(relativePath);
-    if (!check) {
-      await mkdir(new URL("./", url), { recursive: true });
-      await writeFile(url, expected, "utf8");
+    changed.add(relativePath);
+  }
+
+  const expectedPackagePaths = new Set(
+    [...artifacts.keys()].filter(isPackageArtifact),
+  );
+  for (const packageRoot of PACKAGE_ROOTS) {
+    const files = await listFilesIfPresent(new URL(`${packageRoot}/`, projectRoot));
+    for (const file of files) {
+      const relativePath = path.posix.join(packageRoot, file);
+      if (!expectedPackagePaths.has(relativePath)) {
+        changed.add(relativePath);
+      }
     }
   }
 
-  if (check && changed.length > 0) {
-    throw new Error(`Generated artifacts are stale:\n${changed.join("\n")}`);
+  const changedPaths = [...changed].sort();
+  if (check && changedPaths.length > 0) {
+    throw new Error(`Generated artifacts are stale:\n${changedPaths.join("\n")}`);
   }
 
-  return { changed };
+  if (!check) {
+    const rebuildPackages = changedPaths.some(isPackageArtifact);
+    if (rebuildPackages) {
+      for (const packageRoot of PACKAGE_ROOTS) {
+        await rm(new URL(`${packageRoot}/`, projectRoot), {
+          force: true,
+          recursive: true,
+        });
+      }
+    }
+
+    for (const [relativePath, expected] of artifacts) {
+      if (!rebuildPackages && !changed.has(relativePath)) {
+        continue;
+      }
+      if (rebuildPackages && !isPackageArtifact(relativePath) && !changed.has(relativePath)) {
+        continue;
+      }
+      const url = new URL(relativePath, projectRoot);
+      await mkdir(new URL("./", url), { recursive: true });
+      await writeFile(url, expected, "utf8");
+      if (relativePath === "plugins/claude/leanpowers/hooks/session-start") {
+        await chmod(url, 0o755);
+      }
+    }
+  }
+
+  return { changed: changedPaths };
+}
+
+async function addTree(artifacts, sourceDirectory, outputDirectory, options = {}) {
+  const sourceUrl = new URL(`${sourceDirectory}/`, projectRoot);
+  const files = await listFiles(sourceUrl);
+  for (const relativePath of files) {
+    const outputName = options.rename?.get(relativePath) ?? relativePath;
+    const content = await readFile(new URL(relativePath, sourceUrl), "utf8");
+    artifacts.set(path.posix.join(outputDirectory, outputName), content);
+  }
+}
+
+async function listFiles(directoryUrl, prefix = "") {
+  const entries = await readdir(directoryUrl, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    const relativePath = path.posix.join(prefix, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await listFiles(new URL(`${entry.name}/`, directoryUrl), relativePath)));
+    } else if (entry.isFile()) {
+      files.push(relativePath);
+    }
+  }
+  return files;
+}
+
+async function listFilesIfPresent(directoryUrl) {
+  try {
+    return await listFiles(directoryUrl);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+function isPackageArtifact(relativePath) {
+  return PACKAGE_ROOTS.some(
+    (packageRoot) =>
+      relativePath === packageRoot || relativePath.startsWith(`${packageRoot}/`),
+  );
+}
+
+async function isExecutable(url) {
+  try {
+    return ((await stat(url)).mode & 0o111) !== 0;
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
 }
 
 async function readIfPresent(url) {
