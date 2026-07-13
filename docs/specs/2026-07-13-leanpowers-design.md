@@ -367,8 +367,6 @@ Storage:
 
 ```text
 LeanPowers/
-├── .codex-plugin/plugin.json
-├── .claude-plugin/plugin.json
 ├── .claude-plugin/marketplace.json
 ├── .agents/plugins/marketplace.json
 ├── skills/
@@ -395,7 +393,16 @@ LeanPowers/
 ├── hooks/
 │   ├── hooks.json
 │   └── session-start
-├── metadata/plugin.yaml
+├── metadata/plugin.json
+├── plugins/                       # generated, committed installable packages
+│   ├── codex/leanpowers/
+│   │   ├── .codex-plugin/plugin.json
+│   │   └── skills/
+│   └── claude/leanpowers/
+│       ├── .claude-plugin/plugin.json
+│       ├── skills/
+│       ├── agents/
+│       └── hooks/
 ├── scripts/
 ├── schemas/
 ├── evals/
@@ -407,7 +414,7 @@ LeanPowers/
 └── package.json
 ```
 
-`metadata/plugin.yaml` is the single metadata source. Development scripts generate runtime manifests, marketplace entries, and optional agent artifacts. The installed workflow remains static and dependency-free.
+`metadata/plugin.json` is the single metadata source. JSON keeps the generator dependency-free while development scripts produce two committed installable packages, their runtime manifests, marketplace entries, and optional agent artifacts. Package-sync tests prevent generated copies from drifting from the canonical skills. The installed workflow remains static and dependency-free.
 
 ## 15. Token and performance budgets
 
@@ -531,7 +538,7 @@ Release gates:
 
 ## 20. Distribution and migration
 
-One GitHub repository publishes Codex and Claude Code marketplace entries with a shared version and Git tag. Runtime-specific manifests are generated from one metadata source.
+One GitHub repository publishes Codex and Claude Code marketplace entries with a shared version and Git tag. Each marketplace points to its runtime-specific generated package under `plugins/`, and both packages are generated from one metadata and skill source. This prevents Claude-only hooks from being discovered by Codex while keeping installation static.
 
 Coexistence with Superpowers is supported for explicit namespaced invocation. Automatic routing should not be enabled in both simultaneously because the Superpowers startup directive can dominate routing. Migration maps the existing skills as follows:
 
