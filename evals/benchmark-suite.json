@@ -1,5 +1,10 @@
 {
   "schema_version": 1,
+  "workflow_contract": {
+    "baseline_prefix": "superpowers-",
+    "candidate_prefix": "leanpowers-",
+    "distinct_run_ids": true
+  },
   "pairing_requirements": [
     "model",
     "repository_revision",
@@ -28,6 +33,17 @@
     "scope_violation_rate_delta_max": 0.02,
     "standard_tokens_reduction_min": 0.5,
     "standard_wall_reduction_min": 0.4,
-    "task_success_delta_min": -0.03
+    "task_success_delta_min": -0.03,
+    "regressing_category_strict_rerun": {
+      "completion": "complete",
+      "minimum_result": "meet-or-exceed-baseline-category",
+      "provenance": "live"
+    }
+  },
+  "result_integrity": {
+    "aggregate_totals_equal_completed_cases": true,
+    "categories_partition_scenario_classes": true,
+    "category_totals_equal_completed_cases": true,
+    "schema_version": 1
   }
 }

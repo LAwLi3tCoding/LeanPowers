@@ -27,6 +27,48 @@ test("benchmark fixtures satisfy the executable result contract", async () => {
   }
 });
 
+test("schema version 1 is the only accepted benchmark result version", () => {
+  const future = structuredClone(passing);
+  future.schema_version = 2;
+  assert.ok(
+    validateBenchmarkRun(future).some((error) => error.includes("schema_version must equal 1")),
+  );
+});
+
+test("aggregate denominators and category coverage must reconcile to completed cases", () => {
+  const aggregateMismatch = structuredClone(passing);
+  aggregateMismatch.quality.task_success.total -= 1;
+  assert.ok(
+    validateBenchmarkRun(aggregateMismatch).some((error) =>
+      error.includes("quality.task_success.total must equal coverage.completed_cases"),
+    ),
+  );
+
+  const missingCategory = structuredClone(passing);
+  missingCategory.categories.pop();
+  assert.ok(
+    validateBenchmarkRun(missingCategory).some((error) =>
+      error.includes("categories must exactly partition coverage.scenario_classes"),
+    ),
+  );
+
+  const categoryTotalMismatch = structuredClone(passing);
+  categoryTotalMismatch.categories[0].task_success.total -= 1;
+  assert.ok(
+    validateBenchmarkRun(categoryTotalMismatch).some((error) =>
+      error.includes("category task_success totals must equal coverage.completed_cases"),
+    ),
+  );
+
+  const categoryPassedMismatch = structuredClone(passing);
+  categoryPassedMismatch.categories[0].task_success.passed -= 1;
+  assert.ok(
+    validateBenchmarkRun(categoryPassedMismatch).some((error) =>
+      error.includes("category task_success passed counts must equal quality.task_success.passed"),
+    ),
+  );
+});
+
 test("a comparable non-inferior and materially leaner run passes", () => {
   const result = compareRuns(baseline, passing);
   assert.equal(result.decision, "PASS");
@@ -61,9 +103,28 @@ test("mismatched pairing conditions are diagnostic only", () => {
   assert.equal(compareRuns(baseline, mismatched).decision, "DIAGNOSTIC_ONLY");
 });
 
+test("paired runs require distinct IDs and deterministic workflow identities", () => {
+  const reusedRunId = { ...passing, run_id: baseline.run_id };
+  assert.equal(compareRuns(baseline, reusedRunId).decision, "DIAGNOSTIC_ONLY");
+
+  const wrongBaseline = { ...baseline, workflow: "leanpowers-0.1.0" };
+  assert.equal(compareRuns(wrongBaseline, passing).decision, "DIAGNOSTIC_ONLY");
+
+  const wrongCandidate = { ...passing, workflow: "superpowers-6.1.1" };
+  assert.equal(compareRuns(baseline, wrongCandidate).decision, "DIAGNOSTIC_ONLY");
+});
+
 test("all non-inferiority boundaries pass exactly and fail beyond the margin", () => {
   const boundary = structuredClone(passing);
   boundary.quality.task_success.passed = 89;
+  boundary.categories[1].task_success.passed = 7;
+  boundary.categories[1].strict_rerun = {
+    run_id: "leanpowers-boundary-multi-file-strict",
+    provenance: "live",
+    completion: "complete",
+    task_success: structuredClone(baseline.categories[1].task_success),
+    composite_quality: baseline.categories[1].composite_quality,
+  };
   boundary.quality.composite_quality = baseline.quality.composite_quality * 0.95;
   boundary.quality.introduced_regressions.count = 4;
   boundary.quality.scope_violations.count = 3;
@@ -73,17 +134,63 @@ test("all non-inferiority boundaries pass exactly and fail beyond the margin", (
   assert.equal(compareRuns(baseline, boundary).decision, "PASS");
 
   boundary.quality.task_success.passed = 88;
+  boundary.categories[1].task_success.passed = 6;
   assert.equal(compareRuns(baseline, boundary).decision, "BLOCK");
 });
 
-test("regressing categories require an explicit strict fallback", () => {
+test("regressing categories require a linked live complete strict rerun that recovers quality", () => {
   const candidate = structuredClone(passing);
-  candidate.categories[0].task_success.passed = 18;
-  candidate.categories[0].strict_fallback = false;
+  const baselineCategory = baseline.categories[0];
+  candidate.categories[0].task_success.passed = baselineCategory.task_success.passed - 1;
+  candidate.categories[0].strict_rerun = null;
   assert.equal(compareRuns(baseline, candidate).decision, "BLOCK");
 
-  candidate.categories[0].strict_fallback = true;
+  candidate.categories[0].strict_rerun = {
+    run_id: "leanpowers-pass-small-explicit-feature-strict",
+    provenance: "simulated",
+    completion: "complete",
+    task_success: structuredClone(baselineCategory.task_success),
+    composite_quality: baselineCategory.composite_quality,
+  };
+  assert.equal(compareRuns(baseline, candidate).decision, "DIAGNOSTIC_ONLY");
+
+  candidate.categories[0].strict_rerun.provenance = "live";
+  candidate.categories[0].strict_rerun.completion = "incomplete";
+  assert.equal(compareRuns(baseline, candidate).decision, "DIAGNOSTIC_ONLY");
+
+  candidate.categories[0].strict_rerun.completion = "complete";
+  candidate.categories[0].strict_rerun.task_success.passed -= 1;
+  assert.equal(compareRuns(baseline, candidate).decision, "BLOCK");
+
+  candidate.categories[0].strict_rerun.task_success.passed += 1;
+  candidate.categories[0].strict_rerun.composite_quality -= 0.01;
+  assert.equal(compareRuns(baseline, candidate).decision, "BLOCK");
+
+  candidate.categories[0].strict_rerun.composite_quality += 0.01;
   assert.equal(compareRuns(baseline, candidate).decision, "PASS");
+});
+
+test("strict rerun evidence requires IDs distinct from the parent and other evidence", () => {
+  const candidate = structuredClone(passing);
+  candidate.categories[0].strict_rerun = {
+    run_id: candidate.run_id,
+    provenance: "live",
+    completion: "complete",
+    task_success: structuredClone(candidate.categories[0].task_success),
+    composite_quality: candidate.categories[0].composite_quality,
+  };
+  assert.ok(
+    validateBenchmarkRun(candidate).some((error) => error.includes("run_id must be distinct")),
+  );
+
+  const duplicate = structuredClone(passing);
+  duplicate.categories[1].strict_rerun = {
+    ...structuredClone(duplicate.categories[0].strict_rerun),
+    task_success: structuredClone(duplicate.categories[1].task_success),
+  };
+  assert.ok(
+    validateBenchmarkRun(duplicate).some((error) => error.includes("run_id must be distinct")),
+  );
 });
 
 test("diagnostic runs preserve observed hard failures without granting a release verdict", async () => {

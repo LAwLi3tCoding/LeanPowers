@@ -311,7 +311,8 @@ Explicit invocation uses `$leanpowers:<skill>` in Codex and `/leanpowers:<skill>
 ### 10.4 Other Agent Skills runtimes
 
 - Standard skills only.
-- Single-agent fallback.
+- Single-agent execution for ordinary work.
+- Strict or high-risk completion remains incomplete until a separate agent, fresh session, qualified human, or external review result supplies the independent perspective.
 - No guarantee of hooks or custom subagents.
 - Hard quality rules remain applicable.
 
@@ -583,7 +584,7 @@ Release only after non-inferiority and efficiency gates pass.
 
 Optional future packages may provide authoring, visual brainstorming, large-team orchestration, or frontend-specific workflows. They do not enter the core plugin.
 
-## 22. V1 acceptance criteria
+## 22. Stable 1.0 acceptance criteria
 
 1. Codex and Claude Code packages both install and validate.
 2. All six skills support automatic and explicit invocation.

@@ -82,6 +82,20 @@ test("the source set states every non-negotiable quality invariant", async () =>
   }
 });
 
+test("strict review never degrades to implementer self-review", async () => {
+  const policy = await readFile(
+    new URL("../references/subagent-policy.md", import.meta.url),
+    "utf8",
+  );
+  const verify = await readFile(
+    new URL("../skills/verify/SKILL.md", import.meta.url),
+    "utf8",
+  );
+  assert.match(policy, /genuinely independent agent, fresh session, qualified human/i);
+  assert.match(policy, /do not pass `verify` or enter `ship`/i);
+  assert.match(verify, /return `incomplete` and do not transition to `ship`/i);
+});
+
 function parseSkill(content) {
   const match = content.match(/^---\n([\s\S]*?)\n---\n/);
   assert.ok(match, "missing YAML frontmatter");

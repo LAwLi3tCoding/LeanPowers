@@ -23,17 +23,26 @@ export function validateBenchmarkRun(run) {
   }
 
   const errors = [];
-  requireInteger(run, "schema_version", errors, { minimum: 1 });
+  if (run.schema_version !== 1) {
+    errors.push("schema_version must equal 1");
+  }
   requireText(run, "run_id", errors);
   requireText(run, "workflow", errors);
+  if (
+    typeof run.workflow === "string" &&
+    !/^(?:superpowers|leanpowers)-\S+$/.test(run.workflow)
+  ) {
+    errors.push("workflow must identify superpowers-<version> or leanpowers-<version>");
+  }
   requireEnum(run, "provenance", ["live", "simulated"], errors);
   requireEnum(run, "completion", ["complete", "incomplete"], errors);
   validateConditions(run.conditions, errors);
   validateCoverage(run.coverage, errors);
   validateQuality(run.quality, errors);
   validateEfficiency(run.efficiency, errors);
-  validateCategories(run.categories, errors);
+  validateCategories(run.categories, run.coverage, run.quality, run.run_id, errors);
   validateHardFailures(run.hard_failures, errors);
+  validateAggregateTotals(run.coverage, run.quality, errors);
   return errors;
 }
 
@@ -50,7 +59,11 @@ export function compareRuns(baseline, candidate) {
   const quality = qualityDeltas(baseline, candidate);
   const efficiency = efficiencyDeltas(baseline, candidate);
   const hardFailures = collectHardFailures(baseline, candidate);
-  const diagnosticReasons = comparabilityReasons(baseline, candidate);
+  const categoryReruns = assessCategoryReruns(baseline, candidate);
+  const diagnosticReasons = [
+    ...comparabilityReasons(baseline, candidate),
+    ...categoryReruns.diagnosticReasons,
+  ];
   if (diagnosticReasons.length > 0) {
     return {
       decision: "DIAGNOSTIC_ONLY",
@@ -118,7 +131,7 @@ export function compareRuns(baseline, candidate) {
     `standard agent-call reduction ${formatPercent(efficiency.standard_agent_calls_reduction)} is below 60.00%`,
   );
 
-  for (const reason of categoryFallbackFailures(baseline, candidate)) {
+  for (const reason of categoryReruns.blockReasons) {
     reasons.push(reason);
   }
   for (const failure of hardFailures) {
@@ -172,6 +185,17 @@ function validateCoverage(coverage, errors) {
   }
   if (!Array.isArray(coverage.scenario_classes) || coverage.scenario_classes.length === 0) {
     errors.push("coverage.scenario_classes must be a non-empty array");
+  } else {
+    const scenarioClasses = new Set();
+    for (const [index, scenarioClass] of coverage.scenario_classes.entries()) {
+      if (typeof scenarioClass !== "string" || scenarioClass.trim() === "") {
+        errors.push(`coverage.scenario_classes[${index}] must be a non-empty string`);
+      } else if (scenarioClasses.has(scenarioClass)) {
+        errors.push("coverage.scenario_classes must be unique");
+      } else {
+        scenarioClasses.add(scenarioClass);
+      }
+    }
   }
 }
 
@@ -220,12 +244,15 @@ function validateEfficiency(efficiency, errors) {
   }
 }
 
-function validateCategories(categories, errors) {
+function validateCategories(categories, coverage, quality, parentRunId, errors) {
   if (!Array.isArray(categories) || categories.length === 0) {
     errors.push("categories must be a non-empty array");
     return;
   }
   const names = new Set();
+  const runIds = new Set([parentRunId]);
+  let categoryTotal = 0;
+  let categoryPassed = 0;
   for (const [index, category] of categories.entries()) {
     const prefix = `categories[${index}]`;
     if (!isRecord(category)) {
@@ -240,9 +267,94 @@ function validateCategories(categories, errors) {
       names.add(category.name);
     }
     validateRatioCount(category.task_success, `${prefix}.task_success`, "passed", errors);
+    if (Number.isInteger(category.task_success?.total)) {
+      categoryTotal += category.task_success.total;
+    }
+    if (Number.isInteger(category.task_success?.passed)) {
+      categoryPassed += category.task_success.passed;
+    }
     validateRate(category.composite_quality, `${prefix}.composite_quality`, errors);
-    if (typeof category.strict_fallback !== "boolean") {
-      errors.push(`${prefix}.strict_fallback must be boolean`);
+    if (!(category.strict_rerun === null || isRecord(category.strict_rerun))) {
+      errors.push(`${prefix}.strict_rerun must be null or an object`);
+    } else if (isRecord(category.strict_rerun)) {
+      validateStrictRerun(category.strict_rerun, category, prefix, runIds, errors);
+    }
+  }
+
+  if (Array.isArray(coverage?.scenario_classes)) {
+    const categoryNames = [...names].sort();
+    const scenarioClasses = [...new Set(coverage.scenario_classes)].sort();
+    if (!sameValue(categoryNames, scenarioClasses)) {
+      errors.push("categories must exactly partition coverage.scenario_classes");
+    }
+  }
+  if (
+    Number.isInteger(coverage?.completed_cases) &&
+    categoryTotal !== coverage.completed_cases
+  ) {
+    errors.push("category task_success totals must equal coverage.completed_cases");
+  }
+  if (
+    Number.isInteger(quality?.task_success?.passed) &&
+    categoryPassed !== quality.task_success.passed
+  ) {
+    errors.push("category task_success passed counts must equal quality.task_success.passed");
+  }
+}
+
+function validateStrictRerun(rerun, category, prefix, runIds, errors) {
+  requireText(rerun, "run_id", errors, `${prefix}.strict_rerun.`);
+  requireEnumAtPath(
+    rerun,
+    "provenance",
+    ["live", "simulated"],
+    errors,
+    `${prefix}.strict_rerun.`,
+  );
+  requireEnumAtPath(
+    rerun,
+    "completion",
+    ["complete", "incomplete"],
+    errors,
+    `${prefix}.strict_rerun.`,
+  );
+  validateRatioCount(
+    rerun.task_success,
+    `${prefix}.strict_rerun.task_success`,
+    "passed",
+    errors,
+  );
+  validateRate(
+    rerun.composite_quality,
+    `${prefix}.strict_rerun.composite_quality`,
+    errors,
+  );
+  if (
+    Number.isInteger(rerun.task_success?.total) &&
+    Number.isInteger(category.task_success?.total) &&
+    rerun.task_success.total !== category.task_success.total
+  ) {
+    errors.push(`${prefix}.strict_rerun.task_success.total must equal category total`);
+  }
+  if (typeof rerun.run_id === "string" && rerun.run_id.trim() !== "") {
+    if (runIds.has(rerun.run_id)) {
+      errors.push(`${prefix}.strict_rerun.run_id must be distinct`);
+    }
+    runIds.add(rerun.run_id);
+  }
+}
+
+function validateAggregateTotals(coverage, quality, errors) {
+  if (!Number.isInteger(coverage?.completed_cases) || !isRecord(quality)) {
+    return;
+  }
+  for (const [path, value] of [
+    ["quality.task_success.total", quality.task_success?.total],
+    ["quality.introduced_regressions.total", quality.introduced_regressions?.total],
+    ["quality.scope_violations.total", quality.scope_violations?.total],
+  ]) {
+    if (Number.isInteger(value) && value !== coverage.completed_cases) {
+      errors.push(`${path} must equal coverage.completed_cases`);
     }
   }
 }
@@ -265,6 +377,27 @@ function validateHardFailures(hardFailures, errors) {
 
 function comparabilityReasons(baseline, candidate) {
   const reasons = [];
+  if (baseline.run_id === candidate.run_id) {
+    reasons.push("baseline and candidate run_id values must be distinct");
+  }
+  if (!isWorkflowIdentity(baseline.workflow, "superpowers")) {
+    reasons.push("baseline workflow must identify superpowers-<version>");
+  }
+  if (!isWorkflowIdentity(candidate.workflow, "leanpowers")) {
+    reasons.push("candidate workflow must identify leanpowers-<version>");
+  }
+  const evidenceRunIds = new Set([baseline.run_id, candidate.run_id]);
+  for (const run of [baseline, candidate]) {
+    for (const category of run.categories) {
+      const rerunId = category.strict_rerun?.run_id;
+      if (rerunId && evidenceRunIds.has(rerunId)) {
+        reasons.push(`strict rerun run_id must be distinct: ${rerunId}`);
+      }
+      if (rerunId) {
+        evidenceRunIds.add(rerunId);
+      }
+    }
+  }
   if (baseline.provenance !== "live" || candidate.provenance !== "live") {
     reasons.push("both runs must use live provenance");
   }
@@ -376,24 +509,44 @@ function collectHardFailures(baseline, candidate) {
   return [...failures].sort();
 }
 
-function categoryFallbackFailures(baseline, candidate) {
+function assessCategoryReruns(baseline, candidate) {
   const baselineByName = new Map(
     baseline.categories.map((category) => [category.name, category]),
   );
-  const failures = [];
+  const blockReasons = [];
+  const diagnosticReasons = [];
   for (const category of candidate.categories) {
     const reference = baselineByName.get(category.name);
     const regressed =
       ratio(category.task_success, "passed") <
         ratio(reference.task_success, "passed") ||
       category.composite_quality < reference.composite_quality;
-    if (regressed && !category.strict_fallback) {
-      failures.push(
-        `category ${category.name} regressed without a strict fallback`,
+    if (!regressed) {
+      continue;
+    }
+    const rerun = category.strict_rerun;
+    if (rerun === null) {
+      blockReasons.push(`category ${category.name} regressed without a strict rerun`);
+      continue;
+    }
+    if (rerun.provenance !== "live" || rerun.completion !== "complete") {
+      diagnosticReasons.push(
+        `category ${category.name} strict rerun must be live and complete`,
+      );
+      continue;
+    }
+    const recovered =
+      atLeast(
+        ratio(rerun.task_success, "passed"),
+        ratio(reference.task_success, "passed"),
+      ) && atLeast(rerun.composite_quality, reference.composite_quality);
+    if (!recovered) {
+      blockReasons.push(
+        `category ${category.name} strict rerun did not meet the baseline category`,
       );
     }
   }
-  return failures;
+  return { blockReasons, diagnosticReasons };
 }
 
 function recommendationsFor(reasons, hardFailures) {
@@ -470,6 +623,12 @@ function requireEnum(record, field, values, errors) {
   }
 }
 
+function requireEnumAtPath(record, field, values, errors, prefix) {
+  if (!values.includes(record?.[field])) {
+    errors.push(`${prefix}${field} must be one of: ${values.join(", ")}`);
+  }
+}
+
 function requireInteger(record, field, errors, options = {}) {
   const value = record?.[field];
   const minimum = options.minimum ?? Number.MIN_SAFE_INTEGER;
@@ -492,6 +651,10 @@ function sameValue(left, right) {
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isWorkflowIdentity(workflow, identity) {
+  return typeof workflow === "string" && workflow.startsWith(`${identity}-`);
 }
 
 function formatPercent(value) {

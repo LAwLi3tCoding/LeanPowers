@@ -1,11 +1,14 @@
 import { access, readFile, readdir, stat } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { expectedArtifacts } from "./generate.mjs";
 import { projectRoot, readMetadata } from "./lib/project.mjs";
 
 const ROOT = fileURLToPath(projectRoot);
+const execFileAsync = promisify(execFile);
 const PACKAGE_ROOTS = [
   path.join(ROOT, "plugins/codex/leanpowers"),
   path.join(ROOT, "plugins/claude/leanpowers"),
@@ -113,6 +116,17 @@ async function validateCommonPackage(packageRoot, errors) {
     if (/\b(?:TODO|TBD|CHANGEME)\b/u.test(content)) {
       errors.push(`${relative(file)}: contains placeholder text`);
     }
+    if (path.extname(file) === ".md") {
+      for (const target of markdownTargets(content)) {
+        if (/^(?:https?:|mailto:|#)/u.test(target)) {
+          continue;
+        }
+        const localPath = path.resolve(path.dirname(file), target.split("#", 1)[0]);
+        if (!isSameOrAncestor(packageRoot, localPath) || !(await exists(localPath))) {
+          errors.push(`${relative(file)}: unresolved package link ${target}`);
+        }
+      }
+    }
   }
 }
 
@@ -135,8 +149,12 @@ async function validateRuntimeIsolation(errors) {
 }
 
 async function validateClaudeHook(errors) {
+  const packageRoot = PACKAGE_ROOTS[1];
   const hook = path.join(PACKAGE_ROOTS[1], "hooks/session-start");
+  const descriptorPath = path.join(packageRoot, "hooks/hooks.json");
   try {
+    const descriptor = JSON.parse(await readFile(descriptorPath, "utf8"));
+    errors.push(...validateHookDescriptor(descriptor));
     const hookStat = await stat(hook);
     if ((hookStat.mode & 0o111) === 0) {
       errors.push("plugins/claude/leanpowers/hooks/session-start: must be executable");
@@ -148,9 +166,68 @@ async function validateClaudeHook(errors) {
     if (/(?:curl|wget|git |find |rg |grep |rm |mv |cp )/u.test(content)) {
       errors.push("plugins/claude/leanpowers/hooks/session-start: contains a forbidden side-effect command");
     }
+
+    const { stdout, stderr } = await execFileAsync(hook, [], {
+      cwd: packageRoot,
+      env: {
+        CLAUDE_PLUGIN_ROOT: packageRoot,
+        PATH: "/usr/bin:/bin",
+      },
+      timeout: 5000,
+    });
+    if (stderr !== "") {
+      errors.push("plugins/claude/leanpowers/hooks/session-start: wrote to stderr");
+    }
+    try {
+      errors.push(...validateHookOutput(JSON.parse(stdout)));
+    } catch (error) {
+      errors.push(`plugins/claude/leanpowers/hooks/session-start: invalid JSON output (${error.message})`);
+    }
   } catch (error) {
     errors.push(`plugins/claude/leanpowers/hooks/session-start: ${error.message}`);
   }
+}
+
+export function validateHookDescriptor(descriptor) {
+  const errors = [];
+  const entries = descriptor?.hooks?.SessionStart;
+  if (!Array.isArray(entries) || entries.length !== 1) {
+    return ["plugins/claude/leanpowers/hooks/hooks.json: requires one SessionStart entry"];
+  }
+  const commandHooks = entries[0]?.hooks;
+  if (
+    typeof entries[0]?.matcher !== "string" ||
+    !entries[0].matcher.includes("startup")
+  ) {
+    errors.push("plugins/claude/leanpowers/hooks/hooks.json: SessionStart matcher must include startup");
+  }
+  if (!Array.isArray(commandHooks) || commandHooks.length !== 1) {
+    errors.push("plugins/claude/leanpowers/hooks/hooks.json: requires one command hook");
+    return errors;
+  }
+  const command = commandHooks[0];
+  if (
+    command.type !== "command" ||
+    command.async !== false ||
+    command.command !== '"${CLAUDE_PLUGIN_ROOT}/hooks/session-start"'
+  ) {
+    errors.push("plugins/claude/leanpowers/hooks/hooks.json: command wiring is invalid");
+  }
+  return errors;
+}
+
+export function validateHookOutput(output) {
+  const errors = [];
+  if (output?.hookSpecificOutput?.hookEventName !== "SessionStart") {
+    errors.push("plugins/claude/leanpowers/hooks/session-start: hookEventName must be SessionStart");
+  }
+  const charter = output?.hookSpecificOutput?.additionalContext;
+  if (typeof charter !== "string" || charter.trim() === "") {
+    errors.push("plugins/claude/leanpowers/hooks/session-start: additionalContext must be non-empty");
+  } else if (wordCount(charter) > 200) {
+    errors.push("plugins/claude/leanpowers/hooks/session-start: additionalContext exceeds 200 words");
+  }
+  return errors;
 }
 
 function frontmatterFields(content) {
@@ -199,6 +276,18 @@ async function exists(target) {
 
 function wordCount(value) {
   return value.trim().split(/\s+/u).filter(Boolean).length;
+}
+
+function markdownTargets(content) {
+  return [...content.matchAll(/\]\(([^)]+)\)/gu)].map((match) => match[1]);
+}
+
+function isSameOrAncestor(parent, child) {
+  const relativePath = path.relative(parent, child);
+  return (
+    relativePath === "" ||
+    (!relativePath.startsWith("..") && !path.isAbsolute(relativePath))
+  );
 }
 
 function relative(target) {

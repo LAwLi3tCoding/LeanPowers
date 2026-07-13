@@ -8,7 +8,7 @@
 
 LeanPowers keeps the safeguards that matter—bounded requirements, regression evidence, root-cause debugging, independent review, current verification, and safe delivery—while selecting the smallest workflow justified by risk. It is a workflow microkernel, not a large always-on prompt or orchestration service.
 
-> **Benchmark status:** the deterministic scorer and fixtures are implemented, but a paired live LeanPowers-versus-Superpowers benchmark has not yet been run. Efficiency and non-inferiority thresholds below are release gates, not measured product claims.
+> **Release status:** `0.1.0` is a technical preview. The deterministic scorer and fixtures are implemented, but a paired live LeanPowers-versus-Superpowers benchmark has not yet been run. Efficiency and non-inferiority thresholds below are gates for the stable `1.0.0` release, not measured product claims.
 
 ## Why LeanPowers
 
@@ -118,7 +118,7 @@ Evidence is keyed to the relevant revision and scope. Unchanged evidence may be 
 | --- | --- | --- | --- |
 | Six shared skills | Yes | Yes | Yes |
 | Startup injection | None | Compact routing charter | None assumed |
-| Optional reviewer/verifier agents | Runtime-native task prompts | Packaged agents | Single-agent fallback |
+| Optional reviewer/verifier agents | Runtime-native task prompts | Packaged agents | Single-agent execution; strict review must come from an external perspective |
 | Core quality gates | Yes | Yes | Yes |
 
 LeanPowers does not require Node.js, an MCP server, a daemon, network access, or repository-local runtime state after installation. Node.js 20+ is required only to develop, validate, benchmark, or build this repository.

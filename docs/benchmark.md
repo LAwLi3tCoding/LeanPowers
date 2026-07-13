@@ -22,6 +22,8 @@ Run each scenario twice: once with Superpowers 6.1.1 and once with the candidate
 
 The evaluator must not know which workflow produced an artifact. Record raw transcripts and command output outside the result summary so audits can reproduce each score.
 
+The machine-readable workflow identity is deterministic: the baseline `workflow` must begin with `superpowers-`, the candidate must begin with `leanpowers-`, and their `run_id` values must differ. Schema version `1` is the only accepted result format; future versions require an explicit comparator update.
+
 ## Scenario coverage
 
 The canonical catalog is [evals/benchmark-suite.json](../evals/benchmark-suite.json):
@@ -60,6 +62,10 @@ Each run must conform to [schemas/benchmark-result.schema.json](../schemas/bench
 ```
 
 Quality records task success, composite score, critical defect escapes, introduced regressions, scope violations, false completion claims, unauthorized actions, and review severity accuracy. Efficiency records standard-task median tokens, wall seconds, and agent calls.
+
+Every aggregate denominator (`task_success.total`, `introduced_regressions.total`, and `scope_violations.total`) must equal `coverage.completed_cases`. Category names must be a one-to-one partition of `coverage.scenario_classes`; category task totals and passed counts must reconcile to the aggregate task-success counts. These rules prevent partial or double-counted coverage from receiving a release verdict.
+
+Each category includes nullable `strict_rerun` evidence. When present it records a distinct `run_id`, `live` or `simulated` provenance, `complete` or `incomplete` status, task-success counts, and composite quality. A regressing category is cleared only by a live, complete rerun whose task-success rate and composite quality both meet or exceed that baseline category. Missing or insufficient live evidence blocks; simulated or incomplete evidence makes the comparison `DIAGNOSTIC_ONLY`.
 
 ## Compare two runs
 
@@ -104,7 +110,7 @@ All gates must pass:
 | Standard-task median wall-time reduction | at least `40%` |
 | Standard-task median agent-call reduction | at least `60%` |
 
-Hard failures dominate aggregate scores. A critical escape, unauthorized high-risk action, known false completion, or equivalent hard failure blocks release. A regressing scenario category must receive a stricter fallback and be rerun before release.
+Hard failures dominate aggregate scores. A critical escape, unauthorized high-risk action, known false completion, or equivalent hard failure blocks release. A regressing scenario category must be rerun through strict mode and meet its baseline before release.
 
 ## Comparability rules
 

@@ -4,11 +4,11 @@
 
 *Essential workflows. Less ceremony.*
 
-[简体中文](README.zh-CN.md) · [Superpowers comparison](docs/comparison-superpowers.md) · [Benchmark protocol](docs/benchmark.md) · [Migration guide](docs/migration.md)
+[简体中文](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/README.zh-CN.md) · [Superpowers comparison](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/comparison-superpowers.md) · [Benchmark protocol](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/benchmark.md) · [Migration guide](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/migration.md)
 
 LeanPowers keeps the safeguards that matter—bounded requirements, regression evidence, root-cause debugging, independent review, current verification, and safe delivery—while selecting the smallest workflow justified by risk. It is a workflow microkernel, not a large always-on prompt or orchestration service.
 
-> **Benchmark status:** the deterministic scorer and fixtures are implemented, but a paired live LeanPowers-versus-Superpowers benchmark has not yet been run. Efficiency and non-inferiority thresholds below are release gates, not measured product claims.
+> **Release status:** `0.1.0` is a technical preview. The deterministic scorer and fixtures are implemented, but a paired live LeanPowers-versus-Superpowers benchmark has not yet been run. Efficiency and non-inferiority thresholds below are gates for the stable `1.0.0` release, not measured product claims.
 
 ## Why LeanPowers
 
@@ -118,7 +118,7 @@ Evidence is keyed to the relevant revision and scope. Unchanged evidence may be 
 | --- | --- | --- | --- |
 | Six shared skills | Yes | Yes | Yes |
 | Startup injection | None | Compact routing charter | None assumed |
-| Optional reviewer/verifier agents | Runtime-native task prompts | Packaged agents | Single-agent fallback |
+| Optional reviewer/verifier agents | Runtime-native task prompts | Packaged agents | Single-agent execution; strict review must come from an external perspective |
 | Core quality gates | Yes | Yes | Yes |
 
 LeanPowers does not require Node.js, an MCP server, a daemon, network access, or repository-local runtime state after installation. Node.js 20+ is required only to develop, validate, benchmark, or build this repository.
@@ -131,17 +131,17 @@ LeanPowers does not require Node.js, an MCP server, a daemon, network access, or
 - Evidence is ephemeral by default; only strict cross-session work may use runtime plugin data, never repository-local state by default.
 - Full command output stays local; bounded summaries enter the model context.
 
-Agent instructions are not a security boundary. Review commands and diffs before authorizing destructive, production, or credential-sensitive actions. See [SECURITY.md](SECURITY.md).
+Agent instructions are not a security boundary. Review commands and diffs before authorizing destructive, production, or credential-sensitive actions. See [SECURITY.md](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/SECURITY.md).
 
 ## Compared with Superpowers 6.1.1
 
 LeanPowers consolidates 14 Superpowers skills into six workflows and moves repeated process into five short shared policies. The checked-in V1 skills contain 2,196 words versus 18,516 words across Superpowers 6.1.1 primary `SKILL.md` files, measured with the same `wc -w` method. Structural reduction is verified; equal real-world quality and the targeted efficiency gains are not yet established by a live paired run.
 
-The retained safeguards and intentional differences are documented in [docs/comparison-superpowers.md](docs/comparison-superpowers.md). If you are migrating, read [docs/migration.md](docs/migration.md)—do not enable both systems as automatic workflow routers in the same session.
+The retained safeguards and intentional differences are documented in [docs/comparison-superpowers.md](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/comparison-superpowers.md). If you are migrating, read [docs/migration.md](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/migration.md)—do not enable both systems as automatic workflow routers in the same session.
 
 ## Benchmark
 
-The comparator accepts paired result documents conforming to [schemas/benchmark-result.schema.json](schemas/benchmark-result.schema.json):
+The comparator accepts paired result documents conforming to [schemas/benchmark-result.schema.json](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/schemas/benchmark-result.schema.json):
 
 ```bash
 node scripts/benchmark.mjs compare \
@@ -150,7 +150,7 @@ node scripts/benchmark.mjs compare \
   --out path/to/report
 ```
 
-A release-eligible result must use complete, live, blind, identically paired runs. Simulated or incomplete input produces `DIAGNOSTIC_ONLY`; any hard failure blocks release. See [docs/benchmark.md](docs/benchmark.md) for scenarios, metrics, thresholds, and the current evidence gap.
+A release-eligible result must use complete, live, blind, identically paired runs. Simulated or incomplete input produces `DIAGNOSTIC_ONLY`; any hard failure blocks release. See [docs/benchmark.md](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/benchmark.md) for scenarios, metrics, thresholds, and the current evidence gap.
 
 ## Development
 
@@ -164,8 +164,8 @@ npm run validate         # package sync, structure, budgets, and tests
 npm run build            # create validated release artifacts in dist/
 ```
 
-Canonical sources live in `metadata/`, `skills/`, `references/`, `agent-specs/`, and `adapters/`. Do not edit `plugins/` by hand; regenerate it. Contribution rules are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Canonical sources live in `metadata/`, `skills/`, `references/`, `agent-specs/`, and `adapters/`. Do not edit `plugins/` by hand; regenerate it. Contribution rules are in [CONTRIBUTING.md](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/CONTRIBUTING.md).
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/LICENSE)

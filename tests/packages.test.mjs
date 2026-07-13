@@ -36,6 +36,18 @@ test("shared references live outside the skill discovery namespace", async () =>
   }
 });
 
+test("installed risk policy preserves mode floors and highest-signal routing", async () => {
+  for (const packageRoot of [codexRoot, claudeRoot]) {
+    const policy = await readFile(
+      path.join(packageRoot, "references/risk-policy.md"),
+      "utf8",
+    );
+    assert.match(policy, /highest applicable signal/i);
+    assert.match(policy, /cannot disable safety or evidence gates/i);
+    assert.match(policy, /classification is uncertain, use `standard`/i);
+  }
+});
+
 test("installable packages include user guidance and license without source-only files", async () => {
   const forbidden = [
     "adapters",
@@ -66,6 +78,16 @@ test("package text contains no machine-specific paths or placeholders", async ()
       assert.doesNotMatch(content, /(?:\/Users\/|\/home\/|[A-Za-z]:\\Users\\)/);
       assert.doesNotMatch(content, /\b(?:TODO|TBD|CHANGEME)\b/);
     }
+  }
+});
+
+test("packaged README contains no unresolved repository-relative links", async () => {
+  for (const packageRoot of [codexRoot, claudeRoot]) {
+    const readme = await readFile(path.join(packageRoot, "README.md"), "utf8");
+    const relativeTargets = [...readme.matchAll(/\]\(([^)]+)\)/gu)]
+      .map((match) => match[1])
+      .filter((target) => !/^(?:https?:|mailto:|#)/u.test(target));
+    assert.deepEqual(relativeTargets, []);
   }
 });
 

@@ -10,4 +10,4 @@ Default to one agent. Delegate only when at least two tasks are independent, ind
 - Require conclusions, changed files, evidence, and blockers; omit full process logs.
 - Verify child work from the shared workspace before accepting it.
 
-If subagents are unavailable, continue in one agent without reducing quality gates.
+If subagents are unavailable, ordinary lean and standard work may continue in one agent without weakening the other quality gates. Strict or high-risk work still requires a genuinely independent agent, fresh session, qualified human, or external review result. If none is available, report the validation gap and do not pass `verify` or enter `ship`.

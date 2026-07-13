@@ -4,6 +4,7 @@ import {
   mkdir,
   readFile,
   readdir,
+  rename,
   rm,
   stat,
   writeFile,
@@ -87,8 +88,12 @@ export async function expectedArtifacts() {
   await addTree(artifacts, "skills", "plugins/claude/leanpowers/skills");
   await addTree(artifacts, "references", "plugins/codex/leanpowers/references");
   await addTree(artifacts, "references", "plugins/claude/leanpowers/references");
-  await addFile(artifacts, "README.md", "plugins/codex/leanpowers/README.md");
-  await addFile(artifacts, "README.md", "plugins/claude/leanpowers/README.md");
+  const readme = packageReadme(
+    await readFile(new URL("README.md", projectRoot), "utf8"),
+    metadata.repository,
+  );
+  artifacts.set("plugins/codex/leanpowers/README.md", readme);
+  artifacts.set("plugins/claude/leanpowers/README.md", readme);
   await addFile(artifacts, "LICENSE", "plugins/codex/leanpowers/LICENSE");
   await addFile(artifacts, "LICENSE", "plugins/claude/leanpowers/LICENSE");
   await addTree(artifacts, "agent-specs", "plugins/claude/leanpowers/agents");
@@ -135,19 +140,17 @@ export async function buildArtifacts({ check = false } = {}) {
   if (!check) {
     const rebuildPackages = changedPaths.some(isPackageArtifact);
     if (rebuildPackages) {
-      for (const packageRoot of PACKAGE_ROOTS) {
-        await rm(new URL(`${packageRoot}/`, projectRoot), {
-          force: true,
-          recursive: true,
-        });
-      }
+      await replacePackagesAtomically(artifacts);
     }
 
     for (const [relativePath, expected] of artifacts) {
+      if (isPackageArtifact(relativePath)) {
+        continue;
+      }
       if (!rebuildPackages && !changed.has(relativePath)) {
         continue;
       }
-      if (rebuildPackages && !isPackageArtifact(relativePath) && !changed.has(relativePath)) {
+      if (rebuildPackages && !changed.has(relativePath)) {
         continue;
       }
       const url = new URL(relativePath, projectRoot);
@@ -160,6 +163,85 @@ export async function buildArtifacts({ check = false } = {}) {
   }
 
   return { changed: changedPaths };
+}
+
+async function replacePackagesAtomically(artifacts) {
+  const nonce = `${process.pid}-${Date.now()}`;
+  const staged = [];
+
+  try {
+    for (const packageRoot of PACKAGE_ROOTS) {
+      const packageUrl = new URL(`${packageRoot}/`, projectRoot);
+      const parentUrl = new URL("../", packageUrl);
+      const name = path.posix.basename(packageRoot);
+      const stageUrl = new URL(`.${name}.stage-${nonce}/`, parentUrl);
+      const backupUrl = new URL(`.${name}.backup-${nonce}/`, parentUrl);
+      staged.push({ packageUrl, stageUrl, backupUrl });
+      await rm(stageUrl, { force: true, recursive: true });
+      await rm(backupUrl, { force: true, recursive: true });
+
+      const expected = [...artifacts]
+        .filter(([relativePath]) => relativePath.startsWith(`${packageRoot}/`))
+        .map(([relativePath, content]) => [
+          relativePath.slice(packageRoot.length + 1),
+          content,
+        ]);
+      for (const [relativePath, content] of expected) {
+        const outputUrl = new URL(relativePath, stageUrl);
+        await mkdir(new URL("./", outputUrl), { recursive: true });
+        await writeFile(outputUrl, content, "utf8");
+        if (
+          packageRoot === "plugins/claude/leanpowers" &&
+          relativePath === "hooks/session-start"
+        ) {
+          await chmod(outputUrl, 0o755);
+        }
+      }
+      await verifyStagedPackage(stageUrl, expected, packageRoot);
+    }
+
+    for (const entry of staged) {
+      const hadPackage = await exists(entry.packageUrl);
+      try {
+        if (hadPackage) {
+          await rename(entry.packageUrl, entry.backupUrl);
+        }
+        await rename(entry.stageUrl, entry.packageUrl);
+        await rm(entry.backupUrl, { force: true, recursive: true });
+      } catch (error) {
+        if (hadPackage && !(await exists(entry.packageUrl)) && (await exists(entry.backupUrl))) {
+          await rename(entry.backupUrl, entry.packageUrl);
+        }
+        throw error;
+      }
+    }
+  } finally {
+    for (const { packageUrl, stageUrl, backupUrl } of staged) {
+      await rm(stageUrl, { force: true, recursive: true });
+      if (await exists(packageUrl)) {
+        await rm(backupUrl, { force: true, recursive: true });
+      }
+    }
+  }
+}
+
+async function verifyStagedPackage(stageUrl, expected, packageRoot) {
+  const expectedPaths = expected.map(([relativePath]) => relativePath).sort();
+  const actualPaths = (await listFiles(stageUrl)).sort();
+  if (JSON.stringify(actualPaths) !== JSON.stringify(expectedPaths)) {
+    throw new Error(`Staged package file set is incomplete: ${packageRoot}`);
+  }
+  for (const [relativePath, content] of expected) {
+    if ((await readFile(new URL(relativePath, stageUrl), "utf8")) !== content) {
+      throw new Error(`Staged package content mismatch: ${packageRoot}/${relativePath}`);
+    }
+  }
+  if (
+    packageRoot === "plugins/claude/leanpowers" &&
+    !(await isExecutable(new URL("hooks/session-start", stageUrl)))
+  ) {
+    throw new Error("Staged Claude hook is not executable");
+  }
 }
 
 async function addTree(artifacts, sourceDirectory, outputDirectory, options = {}) {
@@ -177,6 +259,18 @@ async function addFile(artifacts, sourcePath, outputPath) {
     outputPath,
     await readFile(new URL(sourcePath, projectRoot), "utf8"),
   );
+}
+
+export function packageReadme(readme, repository) {
+  return readme.replace(/\]\(([^)]+)\)/gu, (match, target) => {
+    if (/^(?:https?:|mailto:|#)/u.test(target)) {
+      return match;
+    }
+    const [file, anchor] = target.split("#", 2);
+    const normalized = file.replace(/^\.\//u, "");
+    const suffix = anchor ? `#${anchor}` : "";
+    return `](${repository}/blob/main/${normalized}${suffix})`;
+  });
 }
 
 async function listFiles(directoryUrl, prefix = "") {
@@ -229,6 +323,18 @@ async function readIfPresent(url) {
   } catch (error) {
     if (error?.code === "ENOENT") {
       return null;
+    }
+    throw error;
+  }
+}
+
+async function exists(url) {
+  try {
+    await access(url);
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return false;
     }
     throw error;
   }

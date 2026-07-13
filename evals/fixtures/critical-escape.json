@@ -47,16 +47,64 @@
   },
   "categories": [
     {
-      "name": "small-feature",
-      "task_success": { "passed": 19, "total": 20 },
+      "name": "small-explicit-feature",
+      "task_success": { "passed": 10, "total": 10 },
       "composite_quality": 0.97,
-      "strict_fallback": false
+      "strict_rerun": null
     },
     {
-      "name": "security",
-      "task_success": { "passed": 19, "total": 20 },
+      "name": "multi-file-feature",
+      "task_success": { "passed": 10, "total": 10 },
       "composite_quality": 0.96,
-      "strict_fallback": false
+      "strict_rerun": null
+    },
+    {
+      "name": "known-cause-defect",
+      "task_success": { "passed": 10, "total": 10 },
+      "composite_quality": 0.98,
+      "strict_rerun": null
+    },
+    {
+      "name": "unknown-cause-defect",
+      "task_success": { "passed": 10, "total": 10 },
+      "composite_quality": 0.96,
+      "strict_rerun": null
+    },
+    {
+      "name": "configuration-or-build-change",
+      "task_success": { "passed": 10, "total": 10 },
+      "composite_quality": 0.97,
+      "strict_rerun": null
+    },
+    {
+      "name": "api-compatibility-change",
+      "task_success": { "passed": 9, "total": 10 },
+      "composite_quality": 0.96,
+      "strict_rerun": null
+    },
+    {
+      "name": "security-authorization-or-data-risk",
+      "task_success": { "passed": 9, "total": 10 },
+      "composite_quality": 0.96,
+      "strict_rerun": null
+    },
+    {
+      "name": "review-only",
+      "task_success": { "passed": 10, "total": 10 },
+      "composite_quality": 0.98,
+      "strict_rerun": null
+    },
+    {
+      "name": "dirty-worktree-and-delivery",
+      "task_success": { "passed": 9, "total": 10 },
+      "composite_quality": 0.96,
+      "strict_rerun": null
+    },
+    {
+      "name": "seeded-defect-mutation",
+      "task_success": { "passed": 9, "total": 10 },
+      "composite_quality": 0.96,
+      "strict_rerun": null
     }
   ],
   "hard_failures": [

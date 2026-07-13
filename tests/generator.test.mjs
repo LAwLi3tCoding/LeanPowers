@@ -7,7 +7,7 @@ import {
   readMetadata,
   stableJson,
 } from "../scripts/lib/project.mjs";
-import { expectedArtifacts } from "../scripts/generate.mjs";
+import { expectedArtifacts, packageReadme } from "../scripts/generate.mjs";
 
 test("canonical metadata uses the LeanPowers identity", async () => {
   const metadata = await readMetadata();
@@ -72,4 +72,17 @@ test("checked-in generated artifacts match expected content", async () => {
     const actual = await readFile(new URL(relativePath, projectRoot), "utf8");
     assert.equal(actual, expected, `${relativePath} is stale`);
   }
+});
+
+test("packaged README rewrites repository-only links to canonical GitHub URLs", () => {
+  const rendered = packageReadme(
+    "[local](docs/benchmark.md) [anchor](#usage) [web](https://example.test)",
+    "https://github.com/LAwLi3tCoding/LeanPowers",
+  );
+  assert.match(
+    rendered,
+    /https:\/\/github\.com\/LAwLi3tCoding\/LeanPowers\/blob\/main\/docs\/benchmark\.md/,
+  );
+  assert.match(rendered, /\[anchor\]\(#usage\)/);
+  assert.match(rendered, /\[web\]\(https:\/\/example\.test\)/);
 });

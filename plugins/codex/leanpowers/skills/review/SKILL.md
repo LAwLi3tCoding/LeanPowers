@@ -7,6 +7,8 @@ description: Use when code, configuration, tests, plans, agent workflows, or del
 
 Judge whether a change is safe and fit for its declared purpose. Review is an independent evidence-based verdict, not a summary of what the author intended.
 
+For strict or high-risk work, the reviewer must be a different agent, fresh session, qualified human, or external review result from the implementer perspective. A self-review may find defects but does not satisfy the independent-review gate; report the gap when no independent perspective is available.
+
 Read [quality gates](../../references/quality-gates.md), [evidence protocol](../../references/evidence-protocol.md), and [subagent policy](../../references/subagent-policy.md).
 
 ## Review procedure

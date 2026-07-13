@@ -18,9 +18,12 @@
     "hard_failures"
   ],
   "properties": {
-    "schema_version": { "type": "integer", "minimum": 1 },
+    "schema_version": { "const": 1 },
     "run_id": { "type": "string", "minLength": 1 },
-    "workflow": { "type": "string", "minLength": 1 },
+    "workflow": {
+      "type": "string",
+      "pattern": "^(superpowers|leanpowers)-\\S+$"
+    },
     "provenance": { "enum": ["live", "simulated"] },
     "completion": { "enum": ["complete", "incomplete"] },
     "conditions": {
@@ -133,12 +136,35 @@
     "category": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "task_success", "composite_quality", "strict_fallback"],
+      "required": ["name", "task_success", "composite_quality", "strict_rerun"],
       "properties": {
         "name": { "type": "string", "minLength": 1 },
         "task_success": { "$ref": "#/$defs/passCount" },
         "composite_quality": { "$ref": "#/$defs/rate" },
-        "strict_fallback": { "type": "boolean" }
+        "strict_rerun": {
+          "anyOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/strictRerun" }
+          ]
+        }
+      }
+    },
+    "strictRerun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "provenance",
+        "completion",
+        "task_success",
+        "composite_quality"
+      ],
+      "properties": {
+        "run_id": { "type": "string", "minLength": 1 },
+        "provenance": { "enum": ["live", "simulated"] },
+        "completion": { "enum": ["complete", "incomplete"] },
+        "task_success": { "$ref": "#/$defs/passCount" },
+        "composite_quality": { "$ref": "#/$defs/rate" }
       }
     },
     "hardFailure": {

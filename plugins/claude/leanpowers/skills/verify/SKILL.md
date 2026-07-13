@@ -13,7 +13,7 @@ Read [quality gates](../../references/quality-gates.md), [evidence protocol](../
 
 1. List the claims the final response or delivery will make.
 2. Determine the smallest command or inspection that can prove each claim.
-3. Check the revision fingerprint and reuse existing evidence only when its scope remains unchanged.
+3. Check the revision fingerprint and reuse existing evidence only when its explicit scope mapping proves all relevant inputs remain unchanged; otherwise invalidate conservatively.
 4. Run missing or invalidated checks: targeted behavior first, then lint, typecheck, static analysis, integration, package, and full-suite checks as applicable.
 5. Read exit codes and relevant output. Do not rely on command launch, log shape, or summaries alone.
 6. Record each claim as `pass`, `fail`, or `unavailable` with its supporting evidence.
@@ -34,6 +34,8 @@ next: ship | build | debug | null
 ```
 
 Use `pass` only when every material claim passes. Any failure produces `fail`. Any unavailable material proof produces `incomplete`, not a weaker form of success.
+
+When strict or high-risk work lacks the independent review required by the quality gates, return `incomplete` and do not transition to `ship`.
 
 ## Efficiency rules
 
