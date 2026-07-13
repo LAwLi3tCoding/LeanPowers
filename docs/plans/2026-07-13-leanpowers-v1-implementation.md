@@ -482,7 +482,7 @@ git commit -m "docs: complete LeanPowers distribution and evaluation guide"
 
 - Codex marketplace install resolves `leanpowers@leanpowers` to the generated Codex package.
 - Claude marketplace validation resolves the generated Claude package.
-- The remote repository is `LAwLi3tCoding/LeanPowers` unless the authenticated GitHub owner differs.
+- The remote repository is `LAwLi3tCoding/LeanPowers`.
 
 - [ ] **Step 1: Test Codex installation in an isolated home**
 
