@@ -1,0 +1,63 @@
+[
+  {
+    "name": "clear-local-edit",
+    "signals": {
+      "clear": true,
+      "establishedValidation": true,
+      "local": true,
+      "reversible": true
+    },
+    "expected": "lean"
+  },
+  {
+    "name": "ordinary-feature",
+    "signals": { "multiFile": true },
+    "expected": "standard"
+  },
+  {
+    "name": "unknown-defect",
+    "signals": { "causeKnown": false, "defect": true },
+    "expected": "standard"
+  },
+  {
+    "name": "public-api-change",
+    "signals": { "publicBoundaryChange": true },
+    "expected": "standard"
+  },
+  {
+    "name": "security-change",
+    "signals": { "security": true },
+    "expected": "strict"
+  },
+  {
+    "name": "production-action",
+    "signals": { "production": true },
+    "expected": "strict"
+  },
+  {
+    "name": "verification-failure",
+    "signals": { "validationFailed": true },
+    "expected": "standard"
+  },
+  {
+    "name": "scope-expansion",
+    "signals": { "scopeExpanded": true },
+    "expected": "standard"
+  },
+  {
+    "name": "highest-signal-wins",
+    "signals": {
+      "clear": true,
+      "establishedValidation": true,
+      "local": true,
+      "reversible": true,
+      "security": true
+    },
+    "expected": "strict"
+  },
+  {
+    "name": "uncertain-default",
+    "signals": {},
+    "expected": "standard"
+  }
+]

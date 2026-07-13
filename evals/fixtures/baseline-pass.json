@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "run_id": "superpowers-baseline-pass",
+  "workflow": "superpowers-6.1.1",
+  "provenance": "live",
+  "completion": "complete",
+  "conditions": {
+    "blind_evaluation": true,
+    "evaluator": "same-evaluator",
+    "model": "same-model",
+    "repository_revision": "fixture-revision",
+    "prompt_set": "leanpowers-v1",
+    "seeds": [11, 22, 33]
+  },
+  "coverage": {
+    "planned_cases": 100,
+    "completed_cases": 100,
+    "scenario_classes": [
+      "small-explicit-feature",
+      "multi-file-feature",
+      "known-cause-defect",
+      "unknown-cause-defect",
+      "configuration-or-build-change",
+      "api-compatibility-change",
+      "security-authorization-or-data-risk",
+      "review-only",
+      "dirty-worktree-and-delivery",
+      "seeded-defect-mutation"
+    ]
+  },
+  "quality": {
+    "task_success": { "passed": 92, "total": 100 },
+    "composite_quality": 0.94,
+    "critical_defect_escapes": 0,
+    "introduced_regressions": { "count": 2, "total": 100 },
+    "scope_violations": { "count": 1, "total": 100 },
+    "false_completion_claims": 0,
+    "unauthorized_actions": 0,
+    "review_severity_accuracy": 0.9
+  },
+  "efficiency": {
+    "standard": {
+      "median_tokens": 10000,
+      "median_wall_seconds": 100,
+      "median_agent_calls": 5
+    }
+  },
+  "categories": [
+    {
+      "name": "small-feature",
+      "task_success": { "passed": 19, "total": 20 },
+      "composite_quality": 0.95,
+      "strict_fallback": false
+    },
+    {
+      "name": "security",
+      "task_success": { "passed": 18, "total": 20 },
+      "composite_quality": 0.92,
+      "strict_fallback": false
+    }
+  ],
+  "hard_failures": []
+}

@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/LAwLi3tCoding/LeanPowers/schemas/benchmark-result.schema.json",
+  "title": "LeanPowers paired benchmark run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "workflow",
+    "provenance",
+    "completion",
+    "conditions",
+    "coverage",
+    "quality",
+    "efficiency",
+    "categories",
+    "hard_failures"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "workflow": { "type": "string", "minLength": 1 },
+    "provenance": { "enum": ["live", "simulated"] },
+    "completion": { "enum": ["complete", "incomplete"] },
+    "conditions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "repository_revision",
+        "prompt_set",
+        "evaluator",
+        "seeds",
+        "blind_evaluation"
+      ],
+      "properties": {
+        "model": { "type": "string", "minLength": 1 },
+        "repository_revision": { "type": "string", "minLength": 1 },
+        "prompt_set": { "type": "string", "minLength": 1 },
+        "evaluator": { "type": "string", "minLength": 1 },
+        "seeds": { "type": "array", "minItems": 2, "uniqueItems": true },
+        "blind_evaluation": { "type": "boolean" }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["planned_cases", "completed_cases", "scenario_classes"],
+      "properties": {
+        "planned_cases": { "type": "integer", "minimum": 1 },
+        "completed_cases": { "type": "integer", "minimum": 0 },
+        "scenario_classes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_success",
+        "composite_quality",
+        "critical_defect_escapes",
+        "introduced_regressions",
+        "scope_violations",
+        "false_completion_claims",
+        "unauthorized_actions",
+        "review_severity_accuracy"
+      ],
+      "properties": {
+        "task_success": { "$ref": "#/$defs/passCount" },
+        "composite_quality": { "$ref": "#/$defs/rate" },
+        "critical_defect_escapes": { "type": "integer", "minimum": 0 },
+        "introduced_regressions": { "$ref": "#/$defs/eventCount" },
+        "scope_violations": { "$ref": "#/$defs/eventCount" },
+        "false_completion_claims": { "type": "integer", "minimum": 0 },
+        "unauthorized_actions": { "type": "integer", "minimum": 0 },
+        "review_severity_accuracy": { "$ref": "#/$defs/rate" }
+      }
+    },
+    "efficiency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["standard"],
+      "properties": {
+        "standard": { "$ref": "#/$defs/efficiencyBlock" }
+      }
+    },
+    "categories": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/category" }
+    },
+    "hard_failures": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/hardFailure" }
+    }
+  },
+  "$defs": {
+    "rate": { "type": "number", "minimum": 0, "maximum": 1 },
+    "passCount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "total"],
+      "properties": {
+        "passed": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "eventCount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "total"],
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "efficiencyBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["median_tokens", "median_wall_seconds", "median_agent_calls"],
+      "properties": {
+        "median_tokens": { "type": "number", "exclusiveMinimum": 0 },
+        "median_wall_seconds": { "type": "number", "exclusiveMinimum": 0 },
+        "median_agent_calls": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "category": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "task_success", "composite_quality", "strict_fallback"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "task_success": { "$ref": "#/$defs/passCount" },
+        "composite_quality": { "$ref": "#/$defs/rate" },
+        "strict_fallback": { "type": "boolean" }
+      }
+    },
+    "hardFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "severity", "summary"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "severity": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "pairing_requirements": [
+    "model",
+    "repository_revision",
+    "prompt_set",
+    "evaluator",
+    "seeds",
+    "blind_evaluation"
+  ],
+  "scenario_classes": [
+    "small-explicit-feature",
+    "multi-file-feature",
+    "known-cause-defect",
+    "unknown-cause-defect",
+    "configuration-or-build-change",
+    "api-compatibility-change",
+    "security-authorization-or-data-risk",
+    "review-only",
+    "dirty-worktree-and-delivery",
+    "seeded-defect-mutation"
+  ],
+  "release_gates": {
+    "agent_calls_reduction_min": 0.6,
+    "composite_quality_ratio_min": 0.95,
+    "critical_escape_delta_max": 0,
+    "regression_rate_delta_max": 0.02,
+    "scope_violation_rate_delta_max": 0.02,
+    "standard_tokens_reduction_min": 0.5,
+    "standard_wall_reduction_min": 0.4,
+    "task_success_delta_min": -0.03
+  }
+}
