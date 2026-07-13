@@ -36,6 +36,39 @@ test("shared references live outside the skill discovery namespace", async () =>
   }
 });
 
+test("installable packages include user guidance and license without source-only files", async () => {
+  const forbidden = [
+    "adapters",
+    "evals",
+    "metadata",
+    "schemas",
+    "scripts",
+    "tests",
+    "package.json",
+  ];
+  for (const packageRoot of [codexRoot, claudeRoot]) {
+    assert.equal(await exists(path.join(packageRoot, "README.md")), true);
+    assert.equal(await exists(path.join(packageRoot, "LICENSE")), true);
+    for (const entry of forbidden) {
+      assert.equal(
+        await exists(path.join(packageRoot, entry)),
+        false,
+        `${packageRoot} contains source-only ${entry}`,
+      );
+    }
+  }
+});
+
+test("package text contains no machine-specific paths or placeholders", async () => {
+  for (const packageRoot of [codexRoot, claudeRoot]) {
+    for (const file of await textFiles(packageRoot)) {
+      const content = await readFile(file, "utf8");
+      assert.doesNotMatch(content, /(?:\/Users\/|\/home\/|[A-Za-z]:\\Users\\)/);
+      assert.doesNotMatch(content, /\b(?:TODO|TBD|CHANGEME)\b/);
+    }
+  }
+});
+
 test("Claude package includes only the compact native adapter assets", async () => {
   assert.equal(await exists(path.join(claudeRoot, "hooks/hooks.json")), true);
   assert.equal(await exists(path.join(claudeRoot, "hooks/session-start")), true);
@@ -85,6 +118,20 @@ async function exists(target) {
     }
     throw error;
   }
+}
+
+async function textFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await textFiles(target)));
+    } else if (entry.isFile()) {
+      files.push(target);
+    }
+  }
+  return files;
 }
 
 function wordCount(value) {

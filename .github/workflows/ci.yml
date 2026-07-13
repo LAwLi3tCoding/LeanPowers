@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-build:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Validate source and generated packages
+        run: npm run validate
+
+      - name: Build release packages
+        run: npm run build
+
+      - name: Upload release packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: leanpowers-node-${{ matrix.node }}
+          path: dist/
+          if-no-files-found: error

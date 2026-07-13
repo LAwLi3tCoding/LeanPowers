@@ -441,12 +441,12 @@ Behavior budgets:
 
 ## 16. Comparison with Superpowers 6.1.1
 
-The local Superpowers 6.1.1 installation contains 14 skills and about 18,514 words of primary `SKILL.md` text. Its principal cost drivers are broad mandatory routing, serial approval gates, micro-task planning, per-task implementer and reviewer dispatch, and repeated completion verification.
+The local Superpowers 6.1.1 installation contains 14 skills and 18,516 words of primary `SKILL.md` text. Its principal cost drivers are broad mandatory routing, serial approval gates, micro-task planning, per-task implementer and reviewer dispatch, and repeated completion verification.
 
 | Dimension | Superpowers | LeanPowers |
 | --- | --- | --- |
 | Core skills | 14 | 6 |
-| Primary skill text | about 18,514 words | target <= 5,000 words |
+| Primary skill text | 18,516 words | target <= 5,000 words |
 | Workflow selection | broad skill mandate | risk-adaptive minimum safe path |
 | Creative changes | mandatory brainstorm and approval chain | shaping only when risk or ambiguity requires it |
 | Planning | 2-5 minute micro-steps, often with code | 1-5 delivery slices focused on interfaces and evidence |

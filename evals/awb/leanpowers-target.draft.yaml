@@ -1,0 +1,76 @@
+schemaVersion: 0.1.0
+id: leanpowers
+name: LeanPowers
+targetType: directory
+root: plugins/codex/leanpowers
+entrypoints:
+  - id: shape
+    kind: file
+    path: skills/shape/SKILL.md
+  - id: build
+    kind: file
+    path: skills/build/SKILL.md
+  - id: debug
+    kind: file
+    path: skills/debug/SKILL.md
+  - id: review
+    kind: file
+    path: skills/review/SKILL.md
+  - id: verify
+    kind: file
+    path: skills/verify/SKILL.md
+  - id: ship
+    kind: file
+    path: skills/ship/SKILL.md
+roles:
+  - id: shape
+    path: skills/shape/SKILL.md
+    ownerScopes: [planning, design]
+  - id: build
+    path: skills/build/SKILL.md
+    ownerScopes: [implementation]
+  - id: debug
+    path: skills/debug/SKILL.md
+    ownerScopes: [triage]
+  - id: review
+    path: skills/review/SKILL.md
+    ownerScopes: [review]
+  - id: verify
+    path: skills/verify/SKILL.md
+    ownerScopes: [qa, dod]
+  - id: ship
+    path: skills/ship/SKILL.md
+    ownerScopes: [dod]
+contracts:
+  statuses: [PASS, BLOCK, DIAGNOSTIC_ONLY, INCOMPLETE]
+  requiredOwners:
+    planning: shape
+    design: shape
+    implementation: build
+    triage: debug
+    review: review
+    qa: verify
+    dod: verify
+  routing:
+    forbidden:
+      - id: unknown-cause-repair
+        from: build
+        to: ship
+        when: causeKnown == false
+      - id: unverified-delivery
+        from: build
+        to: ship
+        when: currentEvidence == false
+      - id: unauthorized-high-risk-action
+        from: ship
+        to: external-system
+        when: authorization == false
+  joins: []
+  artifacts: []
+  states: []
+  budgets:
+    wallClockSeconds: 120
+    tokenTotal: 12000
+commandPolicy:
+  allowedExecutables: [git, node, npm]
+  forbiddenArgs: [--force]

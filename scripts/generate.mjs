@@ -87,6 +87,10 @@ export async function expectedArtifacts() {
   await addTree(artifacts, "skills", "plugins/claude/leanpowers/skills");
   await addTree(artifacts, "references", "plugins/codex/leanpowers/references");
   await addTree(artifacts, "references", "plugins/claude/leanpowers/references");
+  await addFile(artifacts, "README.md", "plugins/codex/leanpowers/README.md");
+  await addFile(artifacts, "README.md", "plugins/claude/leanpowers/README.md");
+  await addFile(artifacts, "LICENSE", "plugins/codex/leanpowers/LICENSE");
+  await addFile(artifacts, "LICENSE", "plugins/claude/leanpowers/LICENSE");
   await addTree(artifacts, "agent-specs", "plugins/claude/leanpowers/agents");
   await addTree(artifacts, "adapters/claude", "plugins/claude/leanpowers/hooks", {
     rename: new Map([["hooks.json", "hooks.json"], ["session-start", "session-start"]]),
@@ -166,6 +170,13 @@ async function addTree(artifacts, sourceDirectory, outputDirectory, options = {}
     const content = await readFile(new URL(relativePath, sourceUrl), "utf8");
     artifacts.set(path.posix.join(outputDirectory, outputName), content);
   }
+}
+
+async function addFile(artifacts, sourcePath, outputPath) {
+  artifacts.set(
+    outputPath,
+    await readFile(new URL(sourcePath, projectRoot), "utf8"),
+  );
 }
 
 async function listFiles(directoryUrl, prefix = "") {

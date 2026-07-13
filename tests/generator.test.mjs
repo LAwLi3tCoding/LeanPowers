@@ -38,6 +38,8 @@ test("generator defines both runtime manifests and marketplaces", async () => {
     "plugins/codex/leanpowers/.codex-plugin/plugin.json",
     "plugins/claude/leanpowers/skills/shape/SKILL.md",
     "plugins/codex/leanpowers/skills/shape/SKILL.md",
+    "plugins/claude/leanpowers/README.md",
+    "plugins/codex/leanpowers/LICENSE",
   ]) {
     assert.ok(paths.includes(required), `missing generated artifact: ${required}`);
   }
