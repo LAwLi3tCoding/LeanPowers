@@ -183,7 +183,7 @@ git commit -m "feat: add dual-runtime plugin generator"
 
 **Interfaces:**
 
-- Each skill frontmatter exposes only portable Agent Skills fields: `name`, `description`, `license`, `compatibility`, and `metadata`.
+- Each skill frontmatter contains only `name` and `description`; runtime and license metadata belong at plugin level.
 - Each workflow declares `Use when`, `Do not use when`, `Inputs`, `Workflow`, `Hard gates`, `Output`, and `Transitions`.
 - Shared references are addressed as `../_shared/<file>.md` from skill directories.
 
@@ -535,4 +535,3 @@ gh repo view LAwLi3tCoding/LeanPowers --json nameWithOwner,url,defaultBranchRef,
 - [ ] **Step 6: Report delivery evidence**
 
 Report the repository URL, final commit SHA, validation commands, install paths, benchmark status, and any live-run gap without claiming unexecuted evidence.
-

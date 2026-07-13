@@ -1,0 +1,42 @@
+{
+  "author": {
+    "name": "LAwLi3tCoding",
+    "url": "https://github.com/LAwLi3tCoding"
+  },
+  "description": "Lightweight, high-rigor engineering workflows for Codex and Claude Code.",
+  "homepage": "https://github.com/LAwLi3tCoding/LeanPowers#readme",
+  "interface": {
+    "brandColor": "#2F6B5F",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "category": "Developer Tools",
+    "defaultPrompt": [
+      "Build this feature with the lightest safe workflow.",
+      "Debug this failure and prove the root cause.",
+      "Review and verify these changes before delivery."
+    ],
+    "developerName": "LAwLi3tCoding",
+    "displayName": "LeanPowers",
+    "longDescription": "Risk-adaptive engineering workflows for shaping, building, debugging, reviewing, verifying, and shipping software with less workflow overhead.",
+    "shortDescription": "High-rigor workflows with less ceremony."
+  },
+  "keywords": [
+    "agent-skills",
+    "claude-code",
+    "codex",
+    "debugging",
+    "planning",
+    "review",
+    "tdd",
+    "verification",
+    "workflow"
+  ],
+  "license": "MIT",
+  "name": "leanpowers",
+  "repository": "https://github.com/LAwLi3tCoding/LeanPowers",
+  "skills": "./skills/",
+  "version": "0.1.0"
+}

@@ -1,0 +1,23 @@
+{
+  "author": {
+    "name": "LAwLi3tCoding",
+    "url": "https://github.com/LAwLi3tCoding"
+  },
+  "description": "Lightweight, high-rigor engineering workflows for Codex and Claude Code.",
+  "homepage": "https://github.com/LAwLi3tCoding/LeanPowers#readme",
+  "keywords": [
+    "agent-skills",
+    "claude-code",
+    "codex",
+    "debugging",
+    "planning",
+    "review",
+    "tdd",
+    "verification",
+    "workflow"
+  ],
+  "license": "MIT",
+  "name": "leanpowers",
+  "repository": "https://github.com/LAwLi3tCoding/LeanPowers",
+  "version": "0.1.0"
+}

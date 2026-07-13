@@ -1,0 +1,20 @@
+{
+  "interface": {
+    "displayName": "LeanPowers"
+  },
+  "name": "leanpowers",
+  "plugins": [
+    {
+      "category": "Developer Tools",
+      "name": "leanpowers",
+      "policy": {
+        "authentication": "ON_INSTALL",
+        "installation": "AVAILABLE"
+      },
+      "source": {
+        "source": "url",
+        "url": "./plugins/codex/leanpowers"
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "leanpowers",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build-release.mjs",
+    "generate": "node scripts/generate.mjs",
+    "generate:check": "node scripts/generate.mjs --check",
+    "test": "node --test",
+    "validate": "npm run generate:check && node scripts/validate-package.mjs && node --test"
+  }
+}

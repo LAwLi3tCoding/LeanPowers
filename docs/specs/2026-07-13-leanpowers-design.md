@@ -286,6 +286,7 @@ Explicit invocation uses `$leanpowers:<skill>` in Codex and `/leanpowers:<skill>
 ### 10.1 Shared
 
 - Six standard Agent Skills.
+- Skill frontmatter uses only the cross-runtime `name` and `description` fields.
 - Risk policy and hard quality gates.
 - Evidence and subagent protocols.
 - Canonical reviewer and verifier semantics.
