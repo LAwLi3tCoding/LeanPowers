@@ -5,13 +5,13 @@ description: Use when starting engineering work without a selected LeanPowers wo
 
 # Route
 
-Choose the lowest-safe owner. Route material request/scope ambiguity to `shape` first. Otherwise, a reported defect with known cause declares `build`; every other reported defect MUST declare `debug` and at least `standard`. Capsule handles clear builds and deterministic single-component defects only. Debug capsule must reproduce, locate first wrong transition, add failure-path regression evidence. Intermittent/disputed/cross-component defects load installed `debug`; otherwise load selected Skill.
+Choose the lowest-safe owner. Route material request/scope ambiguity to `shape` first. Otherwise, a reported defect with known cause declares `build`; every other reported defect MUST declare `debug` and at least `standard`. Capsule handles clear builds and deterministic single-component defects only. Intermittent/disputed/cross-component defects load installed `debug`; otherwise load selected Skill.
 
 `lean`: clear, local, reversible, validated, no public boundary. `strict`: security/authentication/credentials/secrets/cryptography/signatures, authorization, payment, privacy, migration, concurrency, production, irreversible work, or large refactor. Otherwise `standard`; preference cannot lower risk.
 
 `OWNER`: explicit or `adapt` feedback, `verify` evidence, `ship` delivery, `review` assessment; otherwise `shape` material request/scope ambiguity, `debug` reported defect with unknown cause, `build` known-cause defect/change; never a risk. `RISK`: `lean`, `standard`, or `strict`.
 
-First message starts with these four lines; resolve `OWNER`, `RISK`, `GATES`; no fence, label, bullet, or prefix. Prose follows one blank line:
+BEFORE any prose or tool, output exactly these four resolved plain lines once; no label, bullet, fence, or prefix. Then one blank line and prose:
 
 entrypoint: leanpowers:route
 workflow: OWNER
@@ -22,8 +22,8 @@ Strict `GATES` is `[independent_review, current_evidence]`; otherwise `[current_
 
 Stage counts are green-path tool budgets, not quality ceilings: `build` = INSPECT(1)→PATCH(1)→VALIDATE(1); `debug` = INSPECT(1)→REPRODUCE/TRACE(1)→PATCH(1)→VALIDATE(1). Expand only when a call returns concrete failed, missing, or contradictory evidence; wanting more context is not evidence. Expand only that stage and restart invalidated gates.
 
-1. INSPECT is ONE combined shell call that both locates and prints full affected implementation, tests, and validation metadata; no search-only/probe call or later green-path read. DEBUG then, before any edit, uses ONE focused command to execute the real failing path and show both its failure and first wrong transition; inspection or inference is not reproduction.
-2. Before editing, output a clause→test ledger for every literal `must`/`only`/`exact`/`preserve`/`reject`; each rejection mutates one property of an asserted-passing case. PATCH is ONE repository-relative multi-file call containing all code and regression-test changes; never split edits or repatch on green evidence.
+1. INSPECT is exactly ONE compound shell invocation: discover candidate paths and print their contents plus validation metadata inside that same command (for example, one loop over filtered `rg --files`); never search then read, probe, or later green-path read. DEBUG then, before any edit, uses ONE focused command to execute the real failing path and show both its failure and first wrong transition; inspection or inference is not reproduction.
+2. Before editing, output a clause→test ledger for every literal `must`/`only`/`exact`/`preserve`/`reject`; each rejection mutates one property of an asserted-passing case. PATCH is ONE repository-relative multi-file call containing all code and failure-path regression-test changes; never split edits or repatch on green evidence.
 3. VALIDATE is ONE applicable command; debug reruns the reproduction/regression and affected checks. Failure enters `debug`; never claim completion. Green lean/standard may finish; strict **MUST NOT answer**; continue below.
 
 **Mandatory strict gate — final answer forbidden until exact pass**

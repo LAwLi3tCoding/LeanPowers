@@ -48,7 +48,7 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
     assert.match(body, new RegExp(`\\b${workflow}\\b`, "i"), workflow);
   }
   assert.doesNotMatch(body, /1%|before any response|you do not have a choice/i);
-  assert.ok(wordCount(content) <= 588, `route has ${wordCount(content)} words`);
+  assert.ok(wordCount(content) <= 593, `route has ${wordCount(content)} words`);
 });
 
 test("direct workflow entry loads one compact runtime contract at most once", async () => {
@@ -109,27 +109,29 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /reported defect with known cause declares `build`/i);
   assert.match(route, /every other reported defect MUST declare `debug` and at least `standard`/i);
   assert.match(route, /deterministic single-component defects only/i);
-  assert.match(route, /Debug capsule must reproduce, locate first wrong transition/i);
-  assert.match(route, /add failure-path regression evidence/i);
+  assert.match(route, /failure-path regression-test changes/i);
   assert.match(route, /Intermittent\/disputed\/cross-component defects load installed `debug`/i);
   assert.match(route, /`shape` material request\/scope ambiguity/i);
   assert.match(route, /`debug` reported defect with unknown cause/i);
   assert.match(route, /`build` known-cause defect\/change/i);
   assert.match(route, /Otherwise load selected Skill/i);
+  assert.match(route, /BEFORE any prose or tool, output exactly these four resolved plain lines once/i);
+  assert.match(route, /Then one blank line and prose/i);
   assert.match(route, /Stage counts are green-path tool budgets/i);
   assert.match(route, /not quality ceilings/i);
   assert.match(route, /`build` = INSPECT\(1\)→PATCH\(1\)→VALIDATE\(1\)/i);
   assert.match(route, /`debug` = INSPECT\(1\)→REPRODUCE\/TRACE\(1\)→PATCH\(1\)→VALIDATE\(1\)/i);
   assert.match(route, /Expand only when a call returns concrete failed, missing, or contradictory evidence/i);
   assert.match(route, /wanting more context is not evidence/i);
-  assert.match(route, /INSPECT is ONE combined shell call/i);
-  assert.match(route, /no search-only\/probe call or later green-path read/i);
+  assert.match(route, /INSPECT is exactly ONE compound shell invocation/i);
+  assert.match(route, /discover candidate paths and print their contents plus validation metadata inside that same command/i);
+  assert.match(route, /one loop over filtered `rg --files`/i);
+  assert.match(route, /never search then read, probe, or later green-path read/i);
   assert.match(route, /before any edit[\s\S]{0,100}execute the real failing path/i);
   assert.match(route, /show both its failure and first wrong transition/i);
   assert.match(route, /inspection or inference is not reproduction/i);
   assert.match(route, /each rejection mutates one property of an asserted-passing case/i);
-  assert.match(route, /both locates and prints full affected implementation, tests, and validation metadata/i);
-  assert.match(route, /PATCH is ONE repository-relative multi-file call containing all code and regression-test changes/i);
+  assert.match(route, /PATCH is ONE repository-relative multi-file call containing all code and failure-path regression-test changes/i);
   assert.match(route, /never split edits or repatch on green evidence/i);
   assert.match(route, /output a clause→test ledger/i);
   assert.match(route, /VALIDATE is ONE applicable command/i);
