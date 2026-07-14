@@ -172,6 +172,7 @@ test("Codex JSONL usage and completion are independently parsed", () => {
       read_calls: 0,
       read_output_chars: 0,
       skills_observed: [],
+      independent_review_observed: false,
     },
   });
   assert.equal(parseCodexResult('{"type":"turn.failed"}').tokens, null);
@@ -232,7 +233,71 @@ test("Codex trace records tool types and exact workflow file reads", () => {
     read_calls: 1,
     read_output_chars: 14,
     skills_observed: ["build"],
+    independent_review_observed: false,
   });
+});
+
+test("Codex trace proves independent review only after reviewer spawn and completed wait", () => {
+  const parsed = parseCodexResult([
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "collab_tool_call",
+        tool: "spawn_agent",
+        prompt: "Review the strict-risk diff and tests.",
+        receiver_thread_ids: ["reviewer"],
+        agents_states: { reviewer: { status: "running" } },
+        status: "completed",
+      },
+    }),
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "collab_tool_call",
+        tool: "wait",
+        agents_states: { reviewer: { status: "completed", message: "PASS" } },
+        status: "completed",
+      },
+    }),
+    JSON.stringify({
+      type: "turn.completed",
+      usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 },
+    }),
+  ].join("\n"));
+
+  assert.equal(parsed.workflow_trace.independent_review_observed, true);
+});
+
+test("Codex trace rejects failed, unrelated, or out-of-order review evidence", () => {
+  const event = (item) => JSON.stringify({ type: "item.completed", item });
+  const turn = JSON.stringify({
+    type: "turn.completed",
+    usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 },
+  });
+  const spawn = (status = "completed") => event({
+    type: "collab_tool_call",
+    tool: "spawn_agent",
+    prompt: "Review the strict-risk diff.",
+    receiver_thread_ids: ["reviewer"],
+    status,
+  });
+  const wait = (agentId = "reviewer") => event({
+    type: "collab_tool_call",
+    tool: "wait",
+    agents_states: { [agentId]: { status: "completed", message: "PASS" } },
+    status: "completed",
+  });
+
+  for (const raw of [
+    [spawn("failed"), wait(), turn],
+    [spawn(), wait("other-agent"), turn],
+    [wait(), spawn(), turn],
+  ]) {
+    assert.equal(
+      parseCodexResult(raw.join("\n")).workflow_trace.independent_review_observed,
+      false,
+    );
+  }
 });
 
 test("changed-path evaluation separates product changes, workflow artifacts, and violations", () => {
@@ -297,6 +362,7 @@ test("workflow declaration and risk classification are separate conformance evid
       activation_reported: true,
       declared_risk: "strict",
       risk_level: "strict",
+      telemetry: { workflow_trace: { independent_review_observed: true } },
     }),
     { status: "PASS", reasons: [] },
   );
@@ -306,6 +372,7 @@ test("workflow declaration and risk classification are separate conformance evid
       activation_reported: false,
       declared_risk: "standard",
       risk_level: "strict",
+      telemetry: { workflow_trace: { independent_review_observed: false } },
     }).status,
     "FAIL",
   );
@@ -315,6 +382,17 @@ test("workflow declaration and risk classification are separate conformance evid
       activation_reported: true,
       declared_risk: null,
       risk_level: "standard",
+      telemetry: { workflow_trace: { independent_review_observed: false } },
+    }).status,
+    "FAIL",
+  );
+  assert.equal(
+    evaluateWorkflowConformance({
+      workflow: "leanpowers-0.2.0",
+      activation_reported: true,
+      declared_risk: "strict",
+      risk_level: "strict",
+      telemetry: { workflow_trace: { independent_review_observed: false } },
     }).status,
     "FAIL",
   );

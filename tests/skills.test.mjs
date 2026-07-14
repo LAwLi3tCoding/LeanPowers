@@ -25,7 +25,10 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
   const { frontmatter, body } = parseSkill(content);
 
   assert.match(frontmatter.description, /start(?:ing| of) .*engineering work/i);
-  assert.match(frontmatter.description, /no specific .*workflow .*selected/i);
+  assert.match(
+    frontmatter.description,
+    /no specific .*workflow .*selected|without a selected .*workflow/i,
+  );
   for (const trigger of ["plan", "implement", "fix", "review", "verify", "deliver"]) {
     assert.match(frontmatter.description, new RegExp(trigger, "i"), trigger);
   }
