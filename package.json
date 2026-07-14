@@ -3,6 +3,19 @@
   "version": "0.2.0",
   "description": "Lightweight, high-rigor engineering workflows with opt-in project-local learning.",
   "private": true,
+  "license": "MIT",
+  "author": {
+    "name": "LAwLi3tCoding",
+    "url": "https://github.com/LAwLi3tCoding"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LAwLi3tCoding/LeanPowers.git"
+  },
+  "homepage": "https://github.com/LAwLi3tCoding/LeanPowers#readme",
+  "bugs": {
+    "url": "https://github.com/LAwLi3tCoding/LeanPowers/issues"
+  },
   "type": "module",
   "keywords": [
     "adaptive-learning",

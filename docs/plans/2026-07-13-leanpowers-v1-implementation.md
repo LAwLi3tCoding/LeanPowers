@@ -300,7 +300,7 @@ Run:
 ```bash
 npm run generate
 node --test tests/packages.test.mjs
-python3 ${HOME}/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/codex/leanpowers
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/plugin-creator/scripts/validate_plugin.py" plugins/codex/leanpowers
 ```
 
 Expected: all checks PASS.
@@ -436,7 +436,7 @@ README documents identity, installation, automatic routing, explicit commands, s
 Run:
 
 ```bash
-${HOME}/.codex/plugins/cache/agent-workflow-benchmark/agent-workflow-benchmark/0.1.0+codex.20260706202456/bin/awb \
+awb \
   init-target --agent-root plugins/codex/leanpowers --target-id leanpowers \
   --name LeanPowers --target-type directory \
   --out evals/awb/leanpowers-target.draft.yaml \
@@ -456,7 +456,7 @@ Run:
 ```bash
 npm run validate
 npm run build
-python3 ${HOME}/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py dist/codex/leanpowers
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/plugin-creator/scripts/validate_plugin.py" dist/codex/leanpowers
 git diff --check
 ```
 
@@ -489,7 +489,7 @@ git commit -m "docs: complete LeanPowers distribution and evaluation guide"
 Run with a temporary `CODEX_HOME`:
 
 ```bash
-codex plugin marketplace add ${HOME}/github-code/LeanPowers --json
+codex plugin marketplace add "$PWD" --json
 codex plugin add leanpowers@leanpowers --json
 codex plugin list --json
 ```
@@ -513,7 +513,7 @@ Run:
 ```bash
 npm run validate
 npm run build
-python3 ${HOME}/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py dist/codex/leanpowers
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/plugin-creator/scripts/validate_plugin.py" dist/codex/leanpowers
 git status --short
 git log --oneline --decorate -8
 ```
