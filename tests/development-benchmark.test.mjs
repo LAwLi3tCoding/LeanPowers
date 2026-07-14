@@ -109,6 +109,7 @@ function passingCapsuleStage(workflow = "build") {
     workflow,
     route_ledger_occurrences: 1,
     ledger_before_tools_observed: true,
+    canonical_route_declaration_observed: true,
     ledger_keys_after_initial_observed: false,
     highest_presented_risk: "standard",
     workflow_read_calls: 0,
@@ -132,7 +133,12 @@ function passingCapsuleStage(workflow = "build") {
     required_read_paths: ["src/index.mjs", "test/index.test.mjs"],
     validation_metadata_read_observed: true,
     reproduce_observed: workflow === "debug" ? true : null,
+    pre_patch_clause_test_ledger_structure_observed: true,
     pre_patch_clause_test_ledger_observed: true,
+    clause_test_mapping_count: 1,
+    grounded_clause_test_mapping_count: 1,
+    task_constraint_marker_count: 1,
+    clause_marker_cardinality_observed: true,
     post_patch_clause_test_ledger_observed: false,
     patch_batches: 1,
     patch_file_events: 2,
@@ -142,6 +148,8 @@ function passingCapsuleStage(workflow = "build") {
     multi_file_patch_observed: true,
     post_change_command_calls: 1,
     validation_observed: true,
+    post_change_validation_mode: "canonical",
+    green_path_validation_budget_observed: true,
     post_change_reproduction_replayed: false,
     post_validation_tool_calls: 0,
     ordinary_stop_observed: true,
@@ -183,12 +191,15 @@ function capsuleTraceEvents({
   nonReviewTail = false,
   patchBatches = 1,
   patchPaths = ["src/index.mjs", "test/index.test.mjs"],
+  prePatchProgress = [],
   prePatchLedger = "Clause→test ledger:\n- preserve behavior → existing regression",
   postValidationReview = false,
   readCommand = "tail -n +1 -- src/index.mjs test/index.test.mjs package.json",
   readOutput = "source and test contents",
   reproduceCommand = capsuleReproductionContract.command,
   reproduceOutput = capsuleReproductionOutput,
+  routeDeclaration = null,
+  separatePostReproduction = false,
   validationExitCode = 0,
   validationCommand = "npm test",
   workflowRead = false,
@@ -201,12 +212,13 @@ function capsuleTraceEvents({
     "",
     "Starting work.",
   ].join("\n");
+  const declaration = routeDeclaration ?? ledger;
   const completed = (item) => ({ type: "item.completed", item });
   const events = [];
   if (!ledgerAfterDiscover) {
     events.push(completed({
       type: "agent_message",
-      text: initialExtra === null ? ledger : `${ledger}\n${initialExtra}`,
+      text: initialExtra === null ? declaration : `${declaration}\n${initialExtra}`,
     }));
   }
   if (workflowRead) {
@@ -235,7 +247,7 @@ function capsuleTraceEvents({
     status: "completed",
   }));
   if (ledgerAfterDiscover) {
-    events.push(completed({ type: "agent_message", text: ledger }));
+    events.push(completed({ type: "agent_message", text: declaration }));
   }
   for (const attempt of failedReadAttempts) {
     events.push(completed({
@@ -298,6 +310,9 @@ function capsuleTraceEvents({
       status: "completed",
     }));
   }
+  for (const text of prePatchProgress) {
+    events.push(completed({ type: "agent_message", text }));
+  }
   if (prePatchLedger !== null) {
     events.push(completed({ type: "agent_message", text: prePatchLedger }));
   }
@@ -317,6 +332,15 @@ function capsuleTraceEvents({
     if (patchBatches > 1 && index < changes.length - 1) {
       events.push(completed({ type: "agent_message", text: "Starting another patch." }));
     }
+  }
+  if (separatePostReproduction) {
+    events.push(completed({
+      type: "command_execution",
+      command: reproduceCommand,
+      aggregated_output: "reproduction replayed",
+      exit_code: 0,
+      status: "completed",
+    }));
   }
   events.push(completed({
     type: "command_execution",
@@ -377,7 +401,7 @@ function capsuleTraceEvents({
   }
   events.push(completed({
     type: "agent_message",
-    text: duplicateLedger ? ledger : finalMessage,
+    text: duplicateLedger ? declaration : finalMessage,
   }));
   events.push({
     type: "turn.completed",
@@ -451,7 +475,7 @@ test("the Codex runner is writable, non-interactive, ephemeral, and model-paired
   assert.ok(!args.join(" ").includes("leanpowers-0.2.0"));
 });
 
-test("LeanPowers activation requires its exact first-progress entrypoint marker", () => {
+test("LeanPowers activation requires an unambiguous first-progress route declaration", () => {
   const message = "Activating the `route` workflow with standard? strict owner selection.";
   const declaredRisk = extractDeclaredRisk(message);
 
@@ -483,7 +507,7 @@ test("LeanPowers activation requires its exact first-progress entrypoint marker"
   assert.equal(
     reportsWorkflowActivation({
       entrypoint: "$leanpowers:route",
-      message: "entrypoint: leanpowers:route\nworkflow: build\nrisk: strict",
+      message: "leanpowers:route | workflow=build | risk=strict",
       workflow: "leanpowers-0.2.0",
     }),
     true,
@@ -491,7 +515,8 @@ test("LeanPowers activation requires its exact first-progress entrypoint marker"
   assert.equal(
     reportsWorkflowActivation({
       entrypoint: "$leanpowers:route",
-      message: "- entrypoint: `leanpowers:route`\n- workflow: build\n- risk: strict",
+      message:
+        "Routing selected: `leanpowers:route` workflow is `build`; risk is `strict`; required gates are `[independent_review, current_evidence]`.",
       workflow: "leanpowers-0.2.0",
     }),
     true,
@@ -525,7 +550,7 @@ test("LeanPowers activation requires its exact first-progress entrypoint marker"
   }
 });
 
-test("LeanPowers route ledger starts with exactly four resolved plain lines", () => {
+test("LeanPowers route declaration accepts compact semantic and legacy forms", () => {
   assert.deepEqual(
     parseLeanRouteLedger([
       "entrypoint: leanpowers:route",
@@ -539,6 +564,81 @@ test("LeanPowers route ledger starts with exactly four resolved plain lines", ()
       required_gates: "[independent_review, current_evidence]",
     },
   );
+  assert.deepEqual(
+    parseLeanRouteLedger("leanpowers:route | workflow=debug | risk=standard"),
+    {
+      workflow: "debug",
+      risk: "standard",
+      required_gates: "[current_evidence]",
+    },
+  );
+  assert.deepEqual(
+    parseLeanRouteLedger(
+      "leanpowers:route: owner=debug; risk=standard; gates=[current_evidence]",
+    ),
+    {
+      workflow: "debug",
+      risk: "standard",
+      required_gates: "[current_evidence]",
+    },
+  );
+  assert.deepEqual(
+    parseLeanRouteLedger(
+      "leanpowers:route | workflow=review | risk=strict | gates=[current_evidence, independent_review]",
+    ),
+    {
+      workflow: "review",
+      risk: "strict",
+      required_gates: "[independent_review, current_evidence]",
+    },
+  );
+  assert.deepEqual(
+    parseLeanRouteLedger(
+      "Routing selected: `leanpowers:route` workflow is `debug`; risk is `standard`; required gate is `[current_evidence]`.",
+    ),
+    {
+      workflow: "debug",
+      risk: "standard",
+      required_gates: "[current_evidence]",
+    },
+  );
+  assert.deepEqual(
+    parseLeanRouteLedger(
+      "Routing selected: leanpowers:route workflow is debug; risk is standard; I will not change the public API.",
+    ),
+    {
+      workflow: "debug",
+      risk: "standard",
+      required_gates: "[current_evidence]",
+    },
+  );
+  assert.deepEqual(
+    parseLeanRouteLedger(
+      "leanpowers:route | workflow=debug | risk=standard; if validation fails I will debug.",
+    ),
+    {
+      workflow: "debug",
+      risk: "standard",
+      required_gates: "[current_evidence]",
+    },
+  );
+  for (const declaration of [
+    "leanpowers:route | workflow=debug | risk=standard; existing workflow is not changed.",
+    "leanpowers:route | workflow=debug | risk=standard; risk is not increased by this fix.",
+    "leanpowers:route | workflow=debug | risk=standard; required gates are not modified.",
+    "leanpowers:route | workflow=debug | risk=standard; workflow is not build.",
+    "leanpowers:route | workflow=debug | risk=standard; risk is not strict.",
+    "leanpowers:route | workflow=debug | risk=standard; gates are not [independent_review, current_evidence].",
+    "leanpowers:route | workflow=debug | risk=standard\nI will not use the network.",
+    "leanpowers:route | workflow=debug | risk=standard\nI am not using the parent repository.",
+    "leanpowers:route | workflow=debug | risk=standard\nI did not use the cached result.",
+  ]) {
+    assert.deepEqual(parseLeanRouteLedger(declaration), {
+      workflow: "debug",
+      risk: "standard",
+      required_gates: "[current_evidence]",
+    });
+  }
   assert.deepEqual(
     parseLeanRouteLedger([
       "entrypoint: leanpowers:route",
@@ -578,6 +678,43 @@ test("LeanPowers route ledger starts with exactly four resolved plain lines", ()
     "\nentrypoint: leanpowers:route\nworkflow: build\nrisk: strict\nrequired_gates: [independent_review, current_evidence]",
     " entrypoint: leanpowers:route\nworkflow: build\nrisk: strict\nrequired_gates: [independent_review, current_evidence]",
     "entrypoint: leanpowers:route\nworkflow: build\nrisk: strict\nrequired_gates: [independent_review, current_evidence]\n \nprose after whitespace",
+    "leanpowers:route | workflow=build | workflow=debug | risk=standard",
+    "leanpowers:route | workflow=debug | risk=lean | risk=strict",
+    "leanpowers:route | workflow=debug | risk=standard | gates=[independent_review, current_evidence]",
+    "Previous workflow=build and risk=standard; now considering leanpowers:route.",
+    "Considering leanpowers:route | workflow=build | risk=lean",
+    "If available, leanpowers:route | workflow=build | risk=lean",
+    "Maybe leanpowers:route | workflow=build | risk=lean",
+    "not leanpowers:route | workflow=build | risk=lean",
+    "I am not using leanpowers:route | workflow=build | risk=lean",
+    "I did not select leanpowers:route | workflow=build | risk=lean",
+    "without leanpowers:route | workflow=build | risk=lean",
+    "skipping leanpowers:route | workflow=build | risk=lean",
+    "declining leanpowers:route | workflow=build | risk=lean",
+    "leanpowers:route | workflow=build | risk=lean; do not use workflow=build",
+    "leanpowers:route | workflow=build | risk=lean; workflow is not build",
+    "leanpowers:route | workflow=build | risk=lean; owner is not build",
+    "leanpowers:route | workflow=build | risk=lean; risk is not lean",
+    "leanpowers:route | workflow=build | risk=lean; gates are not [current_evidence]",
+    "leanpowers:route | workflow=build | risk=lean; not workflow build",
+    "leanpowers:route | workflow=debug | risk=standard | activation failed",
+    "leanpowers:route | workflow=build | risk=lean\nI did not activate it.",
+    [
+      "entrypoint: leanpowers:route",
+      "workflow: build",
+      "risk: strict",
+      "required_gates: [independent_review, current_evidence]",
+      "",
+      "I am not using this workflow.",
+    ].join("\n"),
+    [
+      "entrypoint: leanpowers:route",
+      "workflow: build",
+      "risk: strict",
+      "required_gates: [independent_review, current_evidence]",
+      "",
+      "Activation did not succeed.",
+    ].join("\n"),
   ]) {
     assert.equal(parseLeanRouteLedger(invalid), null, invalid);
   }
@@ -800,6 +937,7 @@ test("Codex trace observes the complete debug capsule stage protocol", () => {
     {
       ...passingCapsuleStage("debug"),
       post_change_reproduction_replayed: true,
+      post_change_validation_mode: "combined",
     },
   );
   const wrappedReproAndTestValidation = parseCodexResult(
@@ -814,6 +952,21 @@ test("Codex trace observes the complete debug capsule stage protocol", () => {
     {
       ...passingCapsuleStage("debug"),
       post_change_reproduction_replayed: true,
+      post_change_validation_mode: "combined",
+    },
+  );
+  const separateReproAndTestValidation = parseCodexResult(
+    capsuleTraceEvents({ separatePostReproduction: true }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  );
+  assert.deepEqual(
+    separateReproAndTestValidation.workflow_trace.capsule_stage,
+    {
+      ...passingCapsuleStage("debug"),
+      green_path_validation_budget_observed: false,
+      post_change_command_calls: 2,
+      post_change_reproduction_replayed: true,
+      post_change_validation_mode: "separate",
     },
   );
 });
@@ -879,7 +1032,9 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
     }).map(JSON.stringify).join("\n"),
     capsuleTraceOptions("debug"),
   ).workflow_trace.capsule_stage;
+  assert.equal(unrelatedStage.pre_patch_clause_test_ledger_structure_observed, true);
   assert.equal(unrelatedStage.pre_patch_clause_test_ledger_observed, false);
+  assert.equal(unrelatedStage.grounded_clause_test_mapping_count, 0);
   assert.equal(unrelatedStage.protocol_observed, false);
 
   const twoClauseOptions = {
@@ -890,14 +1045,16 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
     capsuleTraceEvents().map(JSON.stringify).join("\n"),
     twoClauseOptions,
   ).workflow_trace.capsule_stage;
-  assert.equal(missingClauseStage.pre_patch_clause_test_ledger_observed, false);
+  assert.equal(missingClauseStage.pre_patch_clause_test_ledger_observed, true);
+  assert.equal(missingClauseStage.clause_marker_cardinality_observed, false);
   const reusedMappingStage = parseCodexResult(
     capsuleTraceEvents({
       prePatchLedger: "Clause→test ledger:\n- preserve behavior and reject input → one generic test",
     }).map(JSON.stringify).join("\n"),
     twoClauseOptions,
   ).workflow_trace.capsule_stage;
-  assert.equal(reusedMappingStage.pre_patch_clause_test_ledger_observed, false);
+  assert.equal(reusedMappingStage.pre_patch_clause_test_ledger_observed, true);
+  assert.equal(reusedMappingStage.clause_marker_cardinality_observed, false);
   const completeClauseStage = parseCodexResult(
     capsuleTraceEvents({
       prePatchLedger: [
@@ -910,6 +1067,57 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
   ).workflow_trace.capsule_stage;
   assert.equal(completeClauseStage.pre_patch_clause_test_ledger_observed, true);
 
+  const normalizedMarkerStage = parseCodexResult(
+    capsuleTraceEvents({
+      prePatchLedger: [
+        "Clause→test ledger:",
+        "- preserve cache identity → same-locale cache test",
+        "- exact separator-safe identity → separator regression test",
+      ].join("\n"),
+    }).map(JSON.stringify).join("\n"),
+    {
+      ...capsuleTraceOptions("debug"),
+      expectedReviewContract: "Cache identity must remain unambiguous.",
+    },
+  ).workflow_trace.capsule_stage;
+  assert.equal(normalizedMarkerStage.pre_patch_clause_test_ledger_observed, true);
+  assert.equal(normalizedMarkerStage.protocol_observed, true);
+
+  const naturalRouteStage = parseCodexResult(
+    capsuleTraceEvents({
+      routeDeclaration:
+        "Routing selected: `leanpowers:route` workflow is `debug`; risk is `standard`; required gate is `[current_evidence]`.",
+      validationCommand: `${capsuleReproductionContract.command} && npm test`,
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(naturalRouteStage.route_ledger_occurrences, 1);
+  assert.equal(naturalRouteStage.ledger_before_tools_observed, true);
+  assert.equal(naturalRouteStage.protocol_observed, true);
+
+  const strictEscalationStage = parseCodexResult(
+    capsuleTraceEvents({
+      expectedWorkflow: "build",
+      routeDeclaration: "leanpowers:route | workflow=build | risk=standard",
+      prePatchProgress: [
+        "New evidence raises this to risk=strict; independent review is required.",
+      ],
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("build"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(strictEscalationStage.highest_presented_risk, "strict");
+  assert.equal(strictEscalationStage.ordinary_stop_observed, null);
+
+  const negatedRiskStage = parseCodexResult(
+    capsuleTraceEvents({
+      expectedWorkflow: "build",
+      routeDeclaration: "leanpowers:route | workflow=build | risk=standard",
+      prePatchProgress: ["The risk is not strict."],
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("build"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(negatedRiskStage.highest_presented_risk, "standard");
+
   const sameSentenceOptions = {
     ...capsuleTraceOptions("debug"),
     expectedReviewContract: "Accept only the exact format; reject drift and preserve compatibility.",
@@ -920,13 +1128,18 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
     }).map(JSON.stringify).join("\n"),
     sameSentenceOptions,
   ).workflow_trace.capsule_stage;
-  assert.equal(collapsedSentenceStage.pre_patch_clause_test_ledger_observed, false);
+  assert.equal(collapsedSentenceStage.pre_patch_clause_test_ledger_observed, true);
+  assert.equal(collapsedSentenceStage.clause_marker_cardinality_observed, false);
 
   const asciiStage = parseCodexResult(
     capsuleTraceEvents({
       prePatchLedger: "Clause->boundary ledger before edit:\n1) preserve backward compatibility -> integration contract",
     }).map(JSON.stringify).join("\n"),
-    capsuleTraceOptions("debug"),
+    {
+      ...capsuleTraceOptions("debug"),
+      expectedReviewContract:
+        "Preserve backward compatibility for the integration contract.",
+    },
   ).workflow_trace.capsule_stage;
   assert.equal(asciiStage.pre_patch_clause_test_ledger_observed, true);
   assert.equal(asciiStage.protocol_observed, true);
@@ -1254,30 +1467,9 @@ test("debug capsule stage protocol rejects one-property trace regressions", () =
     "",
     "Done",
   ].join("\n");
-  const boldLedger = [
-    "**entrypoint:** leanpowers:route",
-    "**workflow:** debug",
-    "**risk:** standard",
-    "**required_gates:** [current_evidence]",
-  ].join("\n");
-  const outsideColonLedger = [
-    "**entrypoint**: leanpowers:route",
-    "_workflow_: debug",
-    "`risk`: standard",
-    "***required_gates***: [current_evidence]",
-  ].join("\n");
   const cases = [
     [{ duplicateLedger: true }, "route_ledger_occurrences"],
     [{ finalMessage: trailingWhitespaceLedger }, "route_ledger_occurrences"],
-    [{ finalMessage: trailingWhitespaceLedger }, "ledger_keys_after_initial_observed"],
-    [{ finalMessage: boldLedger }, "ledger_keys_after_initial_observed"],
-    [{ finalMessage: outsideColonLedger }, "ledger_keys_after_initial_observed"],
-    [{ finalMessage: "> 1. `risk:` strict" }, "ledger_keys_after_initial_observed"],
-    [{ finalMessage: "> 1. `risk`: strict" }, "ledger_keys_after_initial_observed"],
-    [{ finalMessage: "**risk: strict**" }, "ledger_keys_after_initial_observed"],
-    [{ finalMessage: "**risk**: **strict**" }, "highest_presented_risk"],
-    [{ initialExtra: "**risk**: **strict**" }, "ledger_keys_after_initial_observed"],
-    [{ initialExtra: "**risk**: **strict**" }, "highest_presented_risk"],
     [{ ledgerAfterDiscover: true }, "ledger_before_tools_observed"],
     [{ workflowRead: true }, "workflow_read_calls"],
     [{ discoverCommand: "rg -n -- 'cache|locale' ." }, "discover_observed"],
@@ -2577,7 +2769,7 @@ test("capsule stage telemetry independently gates workflow conformance", () => {
     [null, "capsule stage trace was unavailable"],
     [{ route_ledger_occurrences: 2 }, "route ledger was not emitted exactly once"],
     [{ ledger_before_tools_observed: false }, "route ledger was not emitted before task tools"],
-    [{ ledger_keys_after_initial_observed: true }, "route ledger keys were repeated after the initial declaration"],
+    [{ ledger_keys_after_initial_observed: true }, null],
     [{ workflow_read_calls: 1 }, "capsule reloaded a Skill or reference"],
     [{
       pre_change_command_calls: 3,
@@ -2596,11 +2788,11 @@ test("capsule stage telemetry independently gates workflow conformance", () => {
     [{ implementation_patch_observed: false }, "one contiguous multi-file PATCH batch was not observed"],
     [{ test_patch_observed: false }, "one contiguous multi-file PATCH batch was not observed"],
     [{ multi_file_patch_observed: false }, "one contiguous multi-file PATCH batch was not observed"],
-    [{ post_change_command_calls: 2 }, "one successful post-edit VALIDATE was not observed"],
+    [{ post_change_command_calls: 2 }, null],
     [{
       validation_observed: false,
       ordinary_stop_observed: false,
-    }, "one successful post-edit VALIDATE was not observed"],
+    }, "supported successful post-edit validation was not observed"],
     [{
       post_validation_tool_calls: 1,
       ordinary_stop_observed: false,

@@ -668,6 +668,9 @@ function traceCapsuleStage(
     routeLedgers.length === 1 &&
     initialRouteLedger !== undefined &&
     parseLeanRouteLedger(initialRouteLedger.event.item.text) !== null;
+  const canonicalRouteDeclarationObserved =
+    initialRouteLedger !== undefined &&
+    isCanonicalLeanRouteDeclaration(initialRouteLedger.event.item.text);
   const declaredRisk = highestPresentedLeanRouteRisk(indexed) ??
     (initialRouteLedger ?? routeLedgers[0])?.ledger.risk ?? null;
   const ledgerKeysAfterInitialObserved =
@@ -754,16 +757,31 @@ function traceCapsuleStage(
     changePolicy,
   );
   const lastPreChangeCommandIndex = preChangeCommands.at(-1)?.index ?? -1;
-  const prePatchClauseTestLedgerObserved =
+  const prePatchClauseTestLedger =
     lastPreChangeCommandIndex >= 0 &&
-    taskFirstPatchIndex > lastPreChangeCommandIndex &&
-    indexed.some(({ event, index }) =>
-      index > lastPreChangeCommandIndex &&
-      index < taskFirstPatchIndex &&
-      event?.type === "item.completed" &&
-      event?.item?.type === "agent_message" &&
-      hasClauseTestLedgerPacket(event.item.text, expectedReviewContract)
-    );
+    taskFirstPatchIndex > lastPreChangeCommandIndex
+      ? indexed.flatMap(({ event, index }) => {
+          if (
+            index <= lastPreChangeCommandIndex ||
+            index >= taskFirstPatchIndex ||
+            event?.type !== "item.completed" ||
+            event?.item?.type !== "agent_message"
+          ) {
+            return [];
+          }
+          const packet = parseClauseTestLedgerPacket(event.item.text);
+          return packet === null ? [] : [packet];
+        })[0] ?? null
+      : null;
+  const prePatchClauseTestLedgerStructureObserved = prePatchClauseTestLedger !== null;
+  const groundedClauseTestMappings = prePatchClauseTestLedger === null
+    ? []
+    : groundedLedgerMappings(
+        expectedReviewContract,
+        prePatchClauseTestLedger.mappings,
+      );
+  const prePatchClauseTestLedgerObserved = groundedClauseTestMappings.length > 0;
+  const taskConstraintMarkerCount = literalTaskMarkers(expectedReviewContract).length;
   const postPatchClauseTestLedgerObserved =
     taskFirstPatchIndex >= 0 &&
     indexed.some(({ event, index }) =>
@@ -788,18 +806,14 @@ function traceCapsuleStage(
     patchBatches.length === 1 &&
     implementationPatchObserved &&
     testPatchObserved;
-  const validation =
-    postChangeCommands.length === 1 &&
-    postChangeCommands[0].event.item.exit_code === 0
-      ? parsePostChangeValidation(
-          postChangeCommands[0].event.item.command,
-          expectedWorkflow,
-          reproductionContract,
-        )
-      : null;
+  const validation = parsePostChangeValidationSequence(
+    postChangeCommands,
+    expectedWorkflow,
+    reproductionContract,
+  );
   const validationObserved = validation !== null;
   const postValidationToolCalls = validationObserved
-    ? countToolCallsAfter(indexed, postChangeCommands[0].index)
+    ? countToolCallsAfter(indexed, validation.final_index)
     : 0;
   const ordinaryStopObserved = declaredRisk === "strict"
     ? null
@@ -807,7 +821,6 @@ function traceCapsuleStage(
   const protocolObserved =
     routeLedgerOccurrences === 1 &&
     ledgerBeforeToolsObserved &&
-    !ledgerKeysAfterInitialObserved &&
     workflowReads.length === 0 &&
     preChangeStage.protocol_observed &&
     prePatchClauseTestLedgerObserved &&
@@ -820,6 +833,7 @@ function traceCapsuleStage(
     workflow: expectedWorkflow,
     route_ledger_occurrences: routeLedgerOccurrences,
     ledger_before_tools_observed: ledgerBeforeToolsObserved,
+    canonical_route_declaration_observed: canonicalRouteDeclarationObserved,
     ledger_keys_after_initial_observed: ledgerKeysAfterInitialObserved,
     highest_presented_risk: declaredRisk,
     workflow_read_calls: workflowReads.length,
@@ -841,7 +855,14 @@ function traceCapsuleStage(
     validation_metadata_read_observed:
       preChangeStage.validation_metadata_read_observed,
     reproduce_observed: reproduceObserved,
+    pre_patch_clause_test_ledger_structure_observed:
+      prePatchClauseTestLedgerStructureObserved,
     pre_patch_clause_test_ledger_observed: prePatchClauseTestLedgerObserved,
+    clause_test_mapping_count: prePatchClauseTestLedger?.mappings.length ?? 0,
+    grounded_clause_test_mapping_count: groundedClauseTestMappings.length,
+    task_constraint_marker_count: taskConstraintMarkerCount,
+    clause_marker_cardinality_observed:
+      (prePatchClauseTestLedger?.mappings.length ?? 0) >= taskConstraintMarkerCount,
     post_patch_clause_test_ledger_observed: postPatchClauseTestLedgerObserved,
     patch_batches: patchBatches.length,
     patch_file_events: taskChanges.length,
@@ -851,6 +872,9 @@ function traceCapsuleStage(
     multi_file_patch_observed: multiFilePatchObserved,
     post_change_command_calls: postChangeCommands.length,
     validation_observed: validationObserved,
+    post_change_validation_mode: validation?.mode ?? null,
+    green_path_validation_budget_observed:
+      validationObserved && postChangeCommands.length === 1,
     post_change_reproduction_replayed:
       validation?.reproduction_replayed ?? false,
     post_validation_tool_calls: postValidationToolCalls,
@@ -870,10 +894,10 @@ function hasClauseTestLedgerHeader(value) {
     .some(isClauseTestLedgerHeaderLine);
 }
 
-function hasClauseTestLedgerPacket(value, task) {
+function parseClauseTestLedgerPacket(value) {
   const lines = String(value ?? "").split(/\r?\n/u);
   const headerIndex = lines.findIndex(isClauseTestLedgerHeaderLine);
-  if (headerIndex < 0) return false;
+  if (headerIndex < 0) return null;
   const mappings = lines.slice(headerIndex + 1).flatMap((line) => {
     const entry = line
       .replace(/^\s*(?:[-*+]\s+|\d+[.)]\s*)/u, "")
@@ -883,8 +907,12 @@ function hasClauseTestLedgerPacket(value, task) {
       ? []
       : [{ clause: mapping[1].trim(), test: mapping[2].trim() }];
   });
-  if (mappings.length === 0) return false;
-  return hasDistinctLiteralMarkerMappings(literalTaskMarkers(task), mappings);
+  if (mappings.length === 0) return null;
+  const distinctMappings = [...new Map(mappings.map((mapping) => [
+    `${mapping.clause}\u0000${mapping.test}`,
+    mapping,
+  ])).values()];
+  return { mappings: distinctMappings };
 }
 
 function literalTaskMarkers(value) {
@@ -892,23 +920,36 @@ function literalTaskMarkers(value) {
     .map((match) => match[1].toLocaleLowerCase("en-US"));
 }
 
-function hasDistinctLiteralMarkerMappings(markers, mappings, markerIndex = 0, used = new Set()) {
-  if (markerIndex >= markers.length) return true;
-  const marker = markers[markerIndex];
-  for (const [mappingIndex, mapping] of mappings.entries()) {
-    if (
-      used.has(mappingIndex) ||
-      !new RegExp(`\\b${marker}\\b`, "iu").test(mapping.clause)
-    ) {
-      continue;
+const LEDGER_TOKEN_STOPWORDS = new Set([
+  "after", "also", "among", "another", "before", "being", "between",
+  "could", "does", "during", "either", "every", "from", "have", "into",
+  "itself", "other", "should", "since", "their", "there", "these", "they",
+  "those", "through", "under", "until", "using", "when", "where", "which",
+  "while", "with", "would",
+]);
+
+function groundedLedgerMappings(task, mappings) {
+  const taskTokens = ledgerContentTokens(task);
+  if (taskTokens.size < 2) return [];
+  return mappings.filter(({ clause, test }) => {
+    const mappingTokens = ledgerContentTokens(`${clause} ${test}`);
+    let overlap = 0;
+    for (const token of mappingTokens) {
+      if (taskTokens.has(token)) overlap += 1;
+      if (overlap >= 2) return true;
     }
-    used.add(mappingIndex);
-    if (hasDistinctLiteralMarkerMappings(markers, mappings, markerIndex + 1, used)) {
-      return true;
-    }
-    used.delete(mappingIndex);
-  }
-  return false;
+    return false;
+  });
+}
+
+function ledgerContentTokens(value) {
+  const normalized = String(value ?? "")
+    .replace(/([\p{Ll}\d])([\p{Lu}])/gu, "$1 $2")
+    .toLocaleLowerCase("en-US");
+  return new Set(
+    (normalized.match(/[\p{L}\p{N}]+/gu) ?? [])
+      .filter((token) => token.length >= 4 && !LEDGER_TOKEN_STOPWORDS.has(token)),
+  );
 }
 
 function countToolCallsAfter(indexed, afterIndex) {
@@ -1538,6 +1579,48 @@ function parsePostChangeValidation(command, expectedWorkflow, reproductionContra
   return { command: text, reproduction_replayed: true };
 }
 
+function parsePostChangeValidationSequence(
+  commands,
+  expectedWorkflow,
+  reproductionContract,
+) {
+  if (commands.length === 1 && commands[0].event.item.exit_code === 0) {
+    const validation = parsePostChangeValidation(
+      commands[0].event.item.command,
+      expectedWorkflow,
+      reproductionContract,
+    );
+    if (validation === null) return null;
+    return {
+      ...validation,
+      final_index: commands[0].index,
+      mode: validation.reproduction_replayed ? "combined" : "canonical",
+    };
+  }
+  if (
+    expectedWorkflow !== "debug" ||
+    commands.length !== 2 ||
+    commands.some(({ event }) => event.item.exit_code !== 0)
+  ) {
+    return null;
+  }
+  const reproductionCommand = reproductionContract?.command;
+  if (
+    typeof reproductionCommand !== "string" ||
+    canonicalReproductionCommand(commands[0].event.item.command) !== reproductionCommand
+  ) {
+    return null;
+  }
+  const testCommand = canonicalValidationCommand(commands[1].event.item.command);
+  if (testCommand === null) return null;
+  return {
+    command: testCommand,
+    final_index: commands[1].index,
+    mode: "separate",
+    reproduction_replayed: true,
+  };
+}
+
 function canonicalValidationCommand(command) {
   const text = unwrapShellInvocation(command);
   if (text === null) return null;
@@ -1656,7 +1739,7 @@ export function evaluateWorkflowConformance(run) {
   if (!run.activation_reported) reasons.push("top-level workflow declaration was not reported");
   if (run.workflow === "leanpowers-0.2.0") {
     if (!run.route_ledger_reported) {
-      reasons.push("exact four-line LeanPowers route-ledger prefix was not reported");
+      reasons.push("structured LeanPowers route declaration was not reported");
     }
     if (
       run.expected_workflow &&
@@ -1687,9 +1770,6 @@ export function evaluateWorkflowConformance(run) {
         }
         if (!capsule.ledger_before_tools_observed) {
           reasons.push("route ledger was not emitted before task tools");
-        }
-        if (capsule.ledger_keys_after_initial_observed) {
-          reasons.push("route ledger keys were repeated after the initial declaration");
         }
         if (capsule.workflow_read_calls !== 0) {
           reasons.push("capsule reloaded a Skill or reference");
@@ -1729,11 +1809,8 @@ export function evaluateWorkflowConformance(run) {
         ) {
           reasons.push("one contiguous multi-file PATCH batch was not observed");
         }
-        if (
-          capsule.post_change_command_calls !== 1 ||
-          !capsule.validation_observed
-        ) {
-          reasons.push("one successful post-edit VALIDATE was not observed");
+        if (!capsule.validation_observed) {
+          reasons.push("supported successful post-edit validation was not observed");
         }
         if (
           capsule.highest_presented_risk !== "strict" &&
@@ -2031,7 +2108,7 @@ export function renderDevelopmentReport(result) {
     "## Interpretation boundary",
     "",
     "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    "- LeanPowers conformance requires one exact four-line route ledger before any task tool and forbids every later ledger-key line. Build/debug capsule traces must show no Skill/reference reload, the exact root-relative `rg --files .; rg -n -- 'TERMS' .` discovery shape with a nontrivial literal pattern and option terminator, batched reads, fixture-owned structured pre-edit reproduction for debug, a pre-PATCH clause-to-test packet with one distinct mapping per literal marker, one contiguous multi-file patch batch, and one supported successful validation call. Debug validation may prefix the exact reproduction command to the canonical test/build command with one `&&`; no other chain is accepted. Replay telemetry proves only that this exact command ran inside the successful call, not that its diagnostic meaning changed; task effect remains verifier-owned. Clause-ledger telemetry proves timing, structure, and literal-marker cardinality, not semantic correctness. Codex JSONL emits one file-change item per changed file and no patch-call identifier, so contiguous file-change items are an explicit call-cardinality proxy; immediately adjacent independent patch calls with no intervening JSONL event are indistinguishable and may be coalesced. The proxy does not prove exact patch-call cardinality. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Each strict review cycle additionally requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
+    "- LeanPowers conformance requires one unambiguous semantic route declaration before any task tool; canonical-format adherence remains diagnostic only. Build/debug capsule traces must show no Skill/reference reload, the exact root-relative `rg --files .; rg -n -- 'TERMS' .` discovery shape with a nontrivial literal pattern and option terminator, batched reads, fixture-owned structured pre-edit reproduction for debug, a pre-PATCH clause-to-test packet with at least one mapping grounded by two nontrivial task terms, one contiguous multi-file patch batch, and supported successful validation. Debug may validate with one exact reproduction-plus-test composite or two ordered successful calls; call count remains an efficiency metric, not a correctness gate. Replay telemetry proves only that the exact reproduction command ran, not that its diagnostic meaning changed; task effect remains verifier-owned. Clause-ledger grounding rejects unrelated packets but does not prove complete semantic coverage; marker and mapping counts remain diagnostic. Codex JSONL emits one file-change item per changed file and no patch-call identifier, so contiguous file-change items are an explicit call-cardinality proxy; immediately adjacent independent patch calls with no intervening JSONL event are indistinguishable and may be coalesced. The proxy does not prove exact patch-call cardinality. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Each strict review cycle additionally requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
     "- Codex JSONL does not expose raw spawn arguments such as `fork_context`; observable spawn/wait behavior is checked dynamically, while exact argument shape is covered by static workflow tests and remains a runtime telemetry gap.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
@@ -2847,8 +2924,12 @@ function finiteNumber(value) {
 }
 
 export function extractDeclaredRisk(message) {
+  const routeDeclaration = parseLeanRouteLedger(message);
+  if (routeDeclaration !== null) return routeDeclaration.risk;
   const text = String(message ?? "");
-  const afterRisk = text.match(/\brisk(?:\s+(?:profile|level))?\s*[:=]?\s*`?(lean|standard|strict)`?/iu);
+  const afterRisk = text.match(
+    /\brisk(?:\s+(?:profile|level))?\s*(?:[:=]|\bis\b)?\s*`?(lean|standard|strict)`?/iu,
+  );
   if (afterRisk) return afterRisk[1].toLowerCase();
   const beforeRisk = text.match(/`?(lean|standard|strict)`?\s+risk\b/iu);
   if (beforeRisk) return beforeRisk[1].toLowerCase();
@@ -2857,6 +2938,122 @@ export function extractDeclaredRisk(message) {
 }
 
 export function parseLeanRouteLedger(message) {
+  const text = String(message ?? "");
+  const firstLine = text.split(/\r?\n/u)[0];
+  if (
+    /\bactivation\s+(?:failed|did\s+not\s+succeed|was\s+unsuccessful)\b/iu.test(text) ||
+    /\bleanpowers:route\b[^\r\n.]{0,48}\b(?:not|never)\s+activat(?:e|ed|ing)\b/iu.test(text) ||
+    /\b(?:(?:do|does|did|am|is|are|was|were|will|would|have|has)\s+not|(?:don't|doesn't|didn't|isn't|aren't|wasn't|weren't|won't|wouldn't|haven't|hasn't))\s+(?:use|using|activate|activating|select|selecting|invoke|invoking|follow|following)\s+(?:it|this\s+(?:route|workflow)|that\s+(?:route|workflow)|the\s+(?:route(?:\s+workflow)?|workflow)|leanpowers:route)\b/iu.test(text)
+  ) {
+    return null;
+  }
+  const exact = parseExactLeanRouteLedger(message);
+  if (exact !== null) return exact;
+
+  const routeMatch = /\bleanpowers:route\b/iu.exec(firstLine);
+  if (routeMatch === null) return null;
+  const throughRoute = firstLine.slice(
+    0,
+    routeMatch.index + routeMatch[0].length,
+  );
+  if (!isAssertiveLeanRoutePrefix(throughRoute)) return null;
+  if (
+    /\b(?:if|maybe|perhaps|possibly|tentatively|provisionally|assuming)\b[^.;]{0,80}\bleanpowers:route\b/iu.test(throughRoute) ||
+    /\b(?:do\s+not|don't|never|cannot|can't|won't|unable\s+to)\s+(?:use|select|activate|invoke)\b[^.;]{0,32}\bleanpowers:route\b/iu.test(throughRoute) ||
+    /\b(?:not|without|skip(?:ping)?|declin(?:e|ing))\s+(?:(?:use|using|select|selecting|activate|activating|invoke|invoking)\s+)?\bleanpowers:route\b/iu.test(throughRoute) ||
+    /\bwithout\s+(?:using|selecting|activating|invoking)\b[^.;]{0,32}\bleanpowers:route\b/iu.test(throughRoute) ||
+    /\bleanpowers:route\b[^.]{0,48}\b(?:unavailable|disabled|not available|cannot be used)\b/iu.test(firstLine) ||
+    /\b(?:not|never)\s+activat(?:e|ed|ing)\b|\bactivation\s+(?:failed|did\s+not\s+succeed|was\s+unsuccessful)\b/iu.test(firstLine)
+  ) {
+    return null;
+  }
+  const routeAndFields = firstLine.slice(routeMatch.index);
+  const workflowMatches = [...routeAndFields.matchAll(
+    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(shape|build|debug|review|verify|ship|adapt)\b`?/giu,
+  )];
+  const riskMatches = [...routeAndFields.matchAll(
+    /\brisk\s*(?:[:=]|\bis\b)\s*`?(lean|standard|strict)\b`?/giu,
+  )];
+  const workflows = new Set(workflowMatches.map(
+    (match) => match[1].toLocaleLowerCase("en-US"),
+  ));
+  const risks = new Set(riskMatches.map(
+    (match) => match[1].toLocaleLowerCase("en-US"),
+  ));
+  if (workflows.size !== 1 || risks.size !== 1) return null;
+  const workflow = [...workflows][0];
+  const risk = [...risks][0];
+  const expectedGates = expectedLeanRouteGates(risk);
+  const gateMatches = [...routeAndFields.matchAll(
+    /\b(?:required[_\s]+gates?|gates?)\s*(?:[:=]|\b(?:is|are)\b)\s*`?(\[[^\]\r\n]*\])`?/giu,
+  )];
+  const declarationEnd = Math.max(
+    ...[...workflowMatches, ...riskMatches, ...gateMatches].map(
+      (match) => match.index + match[0].length,
+    ),
+  );
+  const declaration = routeAndFields.slice(0, declarationEnd);
+  if (
+    /\b(?:if|maybe|perhaps|possibly|tentatively|provisionally|assuming)\b/iu.test(declaration) ||
+    /\b(?:not|never|without|skip(?:ping)?|declin(?:e|ing)|unavailable|unable(?:\s+to)?|cannot|can't|won't|do\s+not|don't)\b/iu.test(declaration)
+  ) {
+    return null;
+  }
+  const presentedGates = gateMatches.map(
+    (match) => normalizeLeanRouteGates(match[1]),
+  );
+  if (
+    presentedGates.some((gates) => gates === null || gates !== expectedGates) ||
+    new Set(presentedGates).size > 1
+  ) {
+    return null;
+  }
+  if (negatesLeanRouteDeclaration(firstLine, { workflow, risk, expectedGates })) {
+    return null;
+  }
+  return { workflow, risk, required_gates: expectedGates };
+}
+
+function negatesLeanRouteDeclaration(text, { workflow, risk, expectedGates }) {
+  const negatedWorkflows = [
+    ...String(text ?? "").matchAll(
+      /\b(?:workflow|owner)\s*(?:(?:is\s+not)|isn't)\s*`?(shape|build|debug|review|verify|ship|adapt)\b/giu,
+    ),
+    ...String(text ?? "").matchAll(
+      /\bnot\s+(?:the\s+)?(?:workflow|owner)\s*(?:[:=]|\bis\b)?\s*`?(shape|build|debug|review|verify|ship|adapt)\b/giu,
+    ),
+  ].map((match) => match[1].toLocaleLowerCase("en-US"));
+  const negatedRisks = [
+    ...String(text ?? "").matchAll(
+      /\brisk\s*(?:(?:is\s+not)|isn't)\s*`?(lean|standard|strict)\b/giu,
+    ),
+    ...String(text ?? "").matchAll(
+      /\bnot\s+(?:the\s+)?risk\s*(?:[:=]|\bis\b)?\s*`?(lean|standard|strict)\b/giu,
+    ),
+  ].map((match) => match[1].toLocaleLowerCase("en-US"));
+  const negatedGates = [
+    ...String(text ?? "").matchAll(
+      /\b(?:required[_\s]+gates?|gates?)\s*(?:(?:(?:is|are)\s+not)|(?:isn't|aren't))\s*`?(\[[^\]\r\n]*\])`?/giu,
+    ),
+    ...String(text ?? "").matchAll(
+      /\bnot\s+(?:the\s+)?(?:required[_\s]+gates?|gates?)\s*(?:[:=]|\b(?:is|are)\b)?\s*`?(\[[^\]\r\n]*\])`?/giu,
+    ),
+  ].map((match) => normalizeLeanRouteGates(match[1]));
+  return negatedWorkflows.includes(workflow) ||
+    negatedRisks.includes(risk) ||
+    negatedGates.includes(expectedGates);
+}
+
+function isAssertiveLeanRoutePrefix(value) {
+  const normalized = String(value ?? "")
+    .replace(/[*_`]/gu, "")
+    .trim()
+    .replace(/\s+/gu, " ");
+  return /^(?:leanpowers:route|(?:(?:routing|route) selected|selected|using|activated|activating|entrypoint)\s*:?\s*leanpowers:route|I(?:'m| am)?\s+(?:use|using|select|selected|activate|activated|invoke|invoking)\s+leanpowers:route)$/iu
+    .test(normalized);
+}
+
+function parseExactLeanRouteLedger(message) {
   const lines = String(message ?? "").split(/\r?\n/u);
   const suffix = lines.slice(4);
   const suffixValid =
@@ -2876,18 +3073,46 @@ export function parseLeanRouteLedger(message) {
   const risk = lines[2].match(/^risk: (lean|standard|strict)$/u)?.[1];
   if (!workflow || !risk) return null;
   const requiredGates = lines[3].match(/^required_gates: (\[[^\]]*\])$/u)?.[1];
-  const expectedGates =
-    risk === "strict"
-      ? "[independent_review, current_evidence]"
-      : "[current_evidence]";
+  const expectedGates = expectedLeanRouteGates(risk);
   if (requiredGates !== expectedGates) return null;
   return { workflow, risk, required_gates: requiredGates };
 }
 
+function expectedLeanRouteGates(risk) {
+  return risk === "strict"
+    ? "[independent_review, current_evidence]"
+    : "[current_evidence]";
+}
+
+function normalizeLeanRouteGates(value) {
+  const text = String(value ?? "").trim();
+  if (!/^\[[^\]]*\]$/u.test(text)) return null;
+  const gates = text.slice(1, -1).split(",").map((gate) => gate.trim());
+  const allowed = ["independent_review", "current_evidence"];
+  if (
+    gates.some((gate) => !allowed.includes(gate)) ||
+    new Set(gates).size !== gates.length
+  ) {
+    return null;
+  }
+  return `[${allowed.filter((gate) => gates.includes(gate)).join(", ")}]`;
+}
+
+function isCanonicalLeanRouteDeclaration(message) {
+  if (parseExactLeanRouteLedger(message) !== null) return true;
+  const firstLine = String(message ?? "").split(/\r?\n/u)[0];
+  return /^leanpowers:route \| workflow=(?:shape|build|debug|review|verify|ship|adapt) \| risk=(?:lean|standard|strict)$/u
+    .test(firstLine);
+}
+
 function parseLeanRouteLedgerCandidate(message) {
+  const semantic = parseLeanRouteLedger(message);
+  if (semantic !== null) return semantic;
   const lines = String(message ?? "").split(/\r?\n/u);
   if (lines.length < 4) return null;
-  return parseLeanRouteLedger(lines.slice(0, 4).map((line) => line.trimEnd()).join("\n"));
+  return parseExactLeanRouteLedger(
+    lines.slice(0, 4).map((line) => line.trimEnd()).join("\n"),
+  );
 }
 
 function hasForbiddenLeanRouteLedgerKey(message) {
@@ -2907,16 +3132,40 @@ function highestPresentedLeanRouteRisk(indexedEvents) {
     ) {
       continue;
     }
-    for (const line of String(event.item.text ?? "").split(/\r?\n/u)) {
-      const risk = normalizeLeanRouteLedgerPresentation(line).match(
-        /^risk(?:[*_`]+)?:[ \t]*(?:[*_`]+)?[ \t]*(lean|standard|strict)(?:[*_`]+)?(?:[ \t]|$)/u,
-      )?.[1] ?? null;
+    for (const risk of affirmativePresentedLeanRouteRisks(event.item.text)) {
       if (risk !== null && (highest === null || order.indexOf(risk) > order.indexOf(highest))) {
         highest = risk;
       }
     }
   }
   return highest;
+}
+
+function affirmativePresentedLeanRouteRisks(message) {
+  const risks = [];
+  for (const rawLine of String(message ?? "").split(/\r?\n/u)) {
+    const line = normalizeLeanRouteLedgerPresentation(rawLine);
+    for (const match of line.matchAll(
+      /\brisk(?:\s+(?:profile|level))?\s*(?::|=|\bis\b)\s*`?(lean|standard|strict)\b`?/giu,
+    )) {
+      const prefix = line.slice(0, match.index);
+      const clauseStart = Math.max(
+        prefix.lastIndexOf("."),
+        prefix.lastIndexOf(";"),
+        prefix.lastIndexOf("!"),
+        prefix.lastIndexOf("?"),
+      ) + 1;
+      const localPrefix = prefix.slice(clauseStart);
+      if (
+        /\b(?:if|maybe|perhaps|possibly|tentatively|provisionally|assuming)\b[^,;:.!?]{0,48}$/iu.test(localPrefix) ||
+        /\b(?:not|never|without)\s*$/iu.test(localPrefix)
+      ) {
+        continue;
+      }
+      risks.push(match[1].toLocaleLowerCase("en-US"));
+    }
+  }
+  return risks;
 }
 
 function normalizeLeanRouteLedgerPresentation(line) {
@@ -2949,12 +3198,7 @@ export function reportsWorkflowActivation({ entrypoint, message, workflow }) {
   );
   if (negatedBefore.test(text) || unavailableAfter.test(text)) return false;
   if (workflow === "leanpowers-0.2.0") {
-    const activationDenied = /\b(?:not|never)\s+activat(?:e|ed|ing)\b|\b(?:activation|entrypoint|workflow|skill)\s+(?:is\s+)?(?:unavailable|disabled|failed)\b|\bactivation\s+(?:did\s+not\s+succeed|was\s+unsuccessful)\b/iu;
-    const exactEntrypoint = new RegExp(
-      `(?:^|\\n)\\s*(?:[-*]\\s*)?entrypoint\\s*[:=]\\s*\`?${escapeRegex(entrypoint.slice(1))}\`?\\s*(?=\\n|$)`,
-      "iu",
-    );
-    return exactEntrypoint.test(text) && !activationDenied.test(text);
+    return parseLeanRouteLedger(text) !== null;
   }
   const structured = new RegExp(
     `(?:^|\\n)\\s*(?:[-*]\\s*)?(?:entrypoint|workflow|skill)\\s*[:=]\\s*(?:${target})(?:\\s|$)`,
