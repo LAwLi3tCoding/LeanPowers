@@ -48,7 +48,7 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
     assert.match(body, new RegExp(`\\b${workflow}\\b`, "i"), workflow);
   }
   assert.doesNotMatch(body, /1%|before any response|you do not have a choice/i);
-  assert.ok(wordCount(content) <= 593, `route has ${wordCount(content)} words`);
+  assert.ok(wordCount(content) <= 599, `route has ${wordCount(content)} words`);
 });
 
 test("direct workflow entry loads one compact runtime contract at most once", async () => {
@@ -119,14 +119,15 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /Then one blank line and prose/i);
   assert.match(route, /Stage counts are green-path tool budgets/i);
   assert.match(route, /not quality ceilings/i);
-  assert.match(route, /`build` = INSPECT\(1\)→PATCH\(1\)→VALIDATE\(1\)/i);
-  assert.match(route, /`debug` = INSPECT\(1\)→REPRODUCE\/TRACE\(1\)→PATCH\(1\)→VALIDATE\(1\)/i);
+  assert.match(route, /`build` = DISCOVER\(1\)→READ\(1\)→PATCH\(1\)→VALIDATE\(1\)/i);
+  assert.match(route, /`debug` = DISCOVER\(1\)→READ\(1\)→REPRODUCE\/TRACE\(1\)→PATCH\(1\)→VALIDATE\(1\)/i);
   assert.match(route, /Expand only when a call returns concrete failed, missing, or contradictory evidence/i);
   assert.match(route, /wanting more context is not evidence/i);
-  assert.match(route, /INSPECT is exactly ONE compound shell invocation/i);
-  assert.match(route, /discover candidate paths and print their contents plus validation metadata inside that same command/i);
-  assert.match(route, /one loop over filtered `rg --files`/i);
-  assert.match(route, /never search then read, probe, or later green-path read/i);
+  assert.match(route, /DISCOVER is ONE content-aware shell call combining path listing with symbol\/content search/i);
+  assert.match(route, /never filter by filename keywords alone/i);
+  assert.match(route, /affected implementation, imports\/callers, tests, and validation manifests/i);
+  assert.match(route, /READ is ONE compound command printing every discovered candidate plus validation metadata/i);
+  assert.match(route, /no later green-path read/i);
   assert.match(route, /before any edit[\s\S]{0,100}execute the real failing path/i);
   assert.match(route, /show both its failure and first wrong transition/i);
   assert.match(route, /inspection or inference is not reproduction/i);
@@ -166,7 +167,7 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /one-line clause→boundary evidence; no task restatement/i);
   assert.match(route, /repository-relative changed paths/i);
   assert.match(route, /exit=0.*exact validation command/i);
-  assert.match(route, /Findings require repair\/retest, then restart step 4 with a fresh reviewer and current Test result/i);
+  assert.match(route, /Findings require repair\/retest, then restart step 5 with a fresh reviewer and current Test result/i);
   assert.match(route, /Blocked\/unavailable returns incomplete/i);
   assert.match(route, /Never rewait\/retry a reviewer, add reviewers within a cycle, or overrule findings/i);
   assert.match(route, /Return Review YAML raw/i);
@@ -197,7 +198,7 @@ test("strict route protocol rejects one-property instruction regressions", async
     "No other review-tool action.",
     "Copy original task byte-for-byte—including case/punctuation—under `Original task:`.",
     "Spawn message MUST equal the filled template, starting at its invocation line; omit only the runtime label.",
-    "Findings require repair/retest, then restart step 4 with a fresh reviewer and current Test result.",
+    "Findings require repair/retest, then restart step 5 with a fresh reviewer and current Test result.",
   ];
   const preservesStrictProtocol = (candidate) =>
     clauses.every((clause) => candidate.includes(clause));

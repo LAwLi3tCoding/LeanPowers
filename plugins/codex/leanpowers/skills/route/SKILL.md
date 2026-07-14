@@ -20,15 +20,16 @@ required_gates: GATES
 
 Strict `GATES` is `[independent_review, current_evidence]`; otherwise `[current_evidence]`.
 
-Stage counts are green-path tool budgets, not quality ceilings: `build` = INSPECT(1)→PATCH(1)→VALIDATE(1); `debug` = INSPECT(1)→REPRODUCE/TRACE(1)→PATCH(1)→VALIDATE(1). Expand only when a call returns concrete failed, missing, or contradictory evidence; wanting more context is not evidence. Expand only that stage and restart invalidated gates.
+Stage counts are green-path tool budgets, not quality ceilings: `build` = DISCOVER(1)→READ(1)→PATCH(1)→VALIDATE(1); `debug` = DISCOVER(1)→READ(1)→REPRODUCE/TRACE(1)→PATCH(1)→VALIDATE(1). Expand only when a call returns concrete failed, missing, or contradictory evidence; wanting more context is not evidence. Expand only that stage and restart invalidated gates.
 
-1. INSPECT is exactly ONE compound shell invocation: discover candidate paths and print their contents plus validation metadata inside that same command (for example, one loop over filtered `rg --files`); never search then read, probe, or later green-path read. DEBUG then, before any edit, uses ONE focused command to execute the real failing path and show both its failure and first wrong transition; inspection or inference is not reproduction.
-2. Before editing, output a clause→test ledger for every literal `must`/`only`/`exact`/`preserve`/`reject`; each rejection mutates one property of an asserted-passing case. PATCH is ONE repository-relative multi-file call containing all code and failure-path regression-test changes; never split edits or repatch on green evidence.
-3. VALIDATE is ONE applicable command; debug reruns the reproduction/regression and affected checks. Failure enters `debug`; never claim completion. Green lean/standard may finish; strict **MUST NOT answer**; continue below.
+1. DISCOVER is ONE content-aware shell call combining path listing with symbol/content search; never filter by filename keywords alone. It identifies affected implementation, imports/callers, tests, and validation manifests.
+2. READ is ONE compound command printing every discovered candidate plus validation metadata; no later green-path read. DEBUG then, before any edit, uses ONE focused command to execute the real failing path and show both its failure and first wrong transition; inspection or inference is not reproduction.
+3. Before editing, output a clause→test ledger for every literal `must`/`only`/`exact`/`preserve`/`reject`; each rejection mutates one property of an asserted-passing case. PATCH is ONE repository-relative multi-file call containing all code and failure-path regression-test changes; never split edits or repatch on green evidence.
+4. VALIDATE is ONE applicable command; debug reruns the reproduction/regression and affected checks. Failure enters `debug`; never claim completion. Green lean/standard may finish; strict **MUST NOT answer**; continue below.
 
 **Mandatory strict gate — final answer forbidden until exact pass**
 
-4. Freeze diff. Codex: if either V1/native tool is hidden, call exactly `tool_search(query="wait_agent targets spawn_agent fork_context", limit=2)`. Spawn only if its result exposes both; otherwise return incomplete before any spawn. Call `multi_agent_v1.spawn_agent` once with only `message`, `fork_context:false`; save ID, then call `multi_agent_v1.wait_agent` once with `targets:[ID]`. No other review-tool action. Claude calls one Agent. Never probe or use `items`, retry, fallback, second/placeholder/`noop`, or “as above”. Copy original task byte-for-byte—including case/punctuation—under `Original task:`. Spawn message MUST equal the filled template, starting at its invocation line; omit only the runtime label.
+5. Freeze diff. Codex: if either V1/native tool is hidden, call exactly `tool_search(query="wait_agent targets spawn_agent fork_context", limit=2)`. Spawn only if its result exposes both; otherwise return incomplete before any spawn. Call `multi_agent_v1.spawn_agent` once with only `message`, `fork_context:false`; save ID, then call `multi_agent_v1.wait_agent` once with `targets:[ID]`. No other review-tool action. Claude calls one Agent. Never probe or use `items`, retry, fallback, second/placeholder/`noop`, or “as above”. Copy original task byte-for-byte—including case/punctuation—under `Original task:`. Spawn message MUST equal the filled template, starting at its invocation line; omit only the runtime label.
 
 Codex message:
 
@@ -64,4 +65,4 @@ verdict: pass
 findings: []
 unverified_areas: []
 
-5. Read result. Exact pass freezes files; finish. Findings require repair/retest, then restart step 4 with a fresh reviewer and current Test result. Blocked/unavailable returns incomplete. Never rewait/retry a reviewer, add reviewers within a cycle, or overrule findings.
+6. Read result. Exact pass freezes files; finish. Findings require repair/retest, then restart step 5 with a fresh reviewer and current Test result. Blocked/unavailable returns incomplete. Never rewait/retry a reviewer, add reviewers within a cycle, or overrule findings.
