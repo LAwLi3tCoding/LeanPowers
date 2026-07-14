@@ -109,19 +109,24 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /not a quality ceiling/i);
   assert.match(route, /Expand only for missing, contradictory, or failed evidence/i);
   assert.match(route, /one green-path inspection tool call/i);
+  assert.match(route, /one-property mutations of valid cases/i);
   assert.match(route, /one shell command/i);
-  assert.match(route, /one multi-file patch call for implementation and tests/i);
-  assert.match(route, /never patch the same file twice on the green path/i);
+  assert.match(route, /one multi-file patch(?: call)? for (?:implementation and tests|code\/tests)/i);
+  assert.match(route, /never (?:patch the same file twice|repatch) on the green path/i);
   assert.match(route, /output one concise clause→test ledger/i);
   assert.match(route, /Run one applicable validation command/i);
   assert.match(route, /strict \*\*MUST NOT answer\*\*/i);
   assert.match(route, /Mandatory strict gate/i);
   assert.match(route, /multi_agent_v1\.spawn_agent[\s\S]{0,220}wait_agent/i);
+  assert.match(route, /`tool_search` once[\s\S]{0,80}`spawn_agent wait_agent`[\s\S]{0,40}limit 2/i);
+  assert.match(route, /if either remains unavailable, return incomplete/i);
+  assert.match(route, /save ID, then call `multi_agent_v1\.wait_agent` once with `targets:\[ID\]`/i);
+  assert.match(route, /No other review-tool action\./i);
   assert.match(route, /fork_context:false/i);
-  assert.match(route, /original user task verbatim/i);
+  assert.match(route, /original (?:user )?task verbatim/i);
   assert.match(route, /spawn_agent` once/i);
-  assert.match(route, /with `message` only[\s\S]{0,220}Never use `items`/i);
-  assert.match(route, /second\/placeholder\/`noop` reviewer/i);
+  assert.match(route, /with (?:`message` only|only `message`)[\s\S]{0,220}Never use `items`/i);
+  assert.match(route, /second\/placeholder\/`noop`/i);
   assert.match(route, /as above/i);
   assert.match(route, /\$leanpowers:review/i);
   assert.match(route, /\/leanpowers:review/i);
@@ -129,11 +134,11 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /Claude message:\s*\/leanpowers:review\s*Original task:/i);
   assert.match(route, /replace every `\{\.\.\.\}`[\s\S]{0,100}never improvise, omit lines/i);
   assert.match(route, /do not edit(?: or |\/)delegate/i);
-  assert.match(route, /copy the entire original user task verbatim and unchanged/i);
+  assert.match(route, /copy the (?:entire )?original (?:user )?task verbatim/i);
   assert.match(route, /under `Original task:`/i);
-  assert.match(route, /Codex calls wait once for only that ID/i);
+  assert.match(route, /wait_agent` once with `targets:\[ID\]`/i);
   assert.match(route, /blocking runtimes do not wait again/i);
-  assert.match(route, /optional suggestions without editing/i);
+  assert.match(route, /suggestions without editing/i);
   assert.match(route, /Review schema on findings or uncertainty/i);
   assert.match(route, /only a true pass returns/i);
   assert.match(route, /verdict: pass[\s\S]{0,80}findings: \[\][\s\S]{0,80}unverified_areas: \[\]/i);
@@ -145,6 +150,28 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(runtime, /multi_agent_v1\.spawn_agent[\s\S]{0,100}wait_agent/i);
   assert.match(runtime, /fork_context:false/i);
   assert.match(runtime, /verbatim task/i);
+});
+
+test("strict route protocol rejects one-property instruction regressions", async () => {
+  const route = await readFile(path.join(skillsRoot, "route", "SKILL.md"), "utf8");
+  const clauses = [
+    "if either V1/native tool is hidden, call `tool_search` once (`spawn_agent wait_agent`, limit 2) to load both",
+    "if either remains unavailable, return incomplete. Call `multi_agent_v1.spawn_agent` once",
+    "with only `message`, `fork_context:false`; save ID, then call `multi_agent_v1.wait_agent` once with `targets:[ID]`",
+    "No other review-tool action.",
+    "Copy the original task verbatim under `Original task:`.",
+  ];
+  const preservesStrictProtocol = (candidate) =>
+    clauses.every((clause) => candidate.includes(clause));
+
+  assert.equal(preservesStrictProtocol(route), true);
+  for (const [index, clause] of clauses.entries()) {
+    assert.equal(
+      preservesStrictProtocol(route.replace(clause, `[mutated strict clause ${index}]`)),
+      false,
+      clause,
+    );
+  }
 });
 
 test("skill frontmatter is portable and descriptions are discovery-focused", async () => {

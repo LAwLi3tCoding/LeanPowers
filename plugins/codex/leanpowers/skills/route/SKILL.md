@@ -22,13 +22,13 @@ Strict `GATES` is `[independent_review, current_evidence]`; otherwise `[current_
 
 Stages 1–3 target one call each, not a quality ceiling. Expand only for missing, contradictory, or failed evidence; restart affected gates.
 
-1. Use one green-path inspection tool call; on Codex, one shell command prints implementation/tests and validation metadata without guessed paths.
-2. Before editing, output one concise clause→test ledger for every literal `must`/`only`/`exact`/`preserve`/`reject` and positive/negative boundary. Self-check; use one multi-file patch call for implementation and tests; never patch the same file twice on the green path.
+1. Use one green-path inspection tool call; one shell command locates/prints implementation/tests and all validation metadata.
+2. Before editing, output one concise clause→test ledger for every literal `must`/`only`/`exact`/`preserve`/`reject`; test rejections with one-property mutations of valid cases. Self-check; use one multi-file patch for code/tests; never repatch on the green path.
 3. Run one applicable validation command. Failure enters `debug`; never claim completion. Green lean/standard may finish; strict **MUST NOT answer**; continue below.
 
 **Mandatory strict gate — final answer forbidden until exact pass**
 
-4. Freeze the diff. Codex calls V1 `multi_agent_v1.spawn_agent` once (load if hidden) with `message` only and `fork_context:false`; save ID; load `multi_agent_v1.wait_agent` if hidden. Claude calls one blocking Agent. Never use `items`, retry, fallback, second/placeholder/`noop` reviewer, or “as above”. Copy the entire original user task verbatim and unchanged under `Original task:`. Before reviewer call replace every `{...}` in the matching template; never improvise, omit lines, or copy the `Codex message:`/`Claude message:` heading.
+4. Freeze diff. Codex: before spawn, if either V1/native tool is hidden, call `tool_search` once (`spawn_agent wait_agent`, limit 2) to load both; if either remains unavailable, return incomplete. Call `multi_agent_v1.spawn_agent` once with only `message`, `fork_context:false`; save ID, then call `multi_agent_v1.wait_agent` once with `targets:[ID]`. No other review-tool action. Claude calls one blocking Agent. Never use `items`, retry, fallback, second/placeholder/`noop`, or “as above”. Copy the original task verbatim under `Original task:`. Replace every `{...}` in the matching template; never improvise, omit lines, or copy its heading.
 
 Codex message:
 
@@ -64,4 +64,4 @@ verdict: pass
 findings: []
 unverified_areas: []
 
-5. Codex calls wait once for only that ID; blocking runtimes do not wait again. Exact pass freezes reviewed files: record optional suggestions without editing, reuse tests, finish. Otherwise return incomplete or repair; no retry or added reviewer this cycle. Implementers cannot overrule findings.
+5. Read that result; blocking runtimes do not wait again. Exact pass freezes files: record suggestions without editing, reuse tests, finish. Otherwise return incomplete or repair; no retry or added reviewer this cycle. Implementers cannot overrule findings.
