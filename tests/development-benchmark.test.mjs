@@ -133,12 +133,17 @@ function passingCapsuleStage(workflow = "build") {
     required_read_paths: ["src/index.mjs", "test/index.test.mjs"],
     validation_metadata_read_observed: true,
     reproduce_observed: workflow === "debug" ? true : null,
+    ordered_reproduce_observed: workflow === "debug" ? true : null,
     pre_patch_clause_test_ledger_structure_observed: true,
+    pre_patch_clause_test_ledger_packet_count: 1,
     pre_patch_clause_test_ledger_observed: true,
-    clause_test_mapping_count: 1,
-    grounded_clause_test_mapping_count: 1,
-    task_constraint_marker_count: 1,
-    clause_marker_cardinality_observed: true,
+    clause_test_mapping_count: 2,
+    grounded_clause_test_mapping_count: 2,
+    task_boundary_count: 1,
+    distinct_boundary_coverage_observed: true,
+    clause_coverage_observed: true,
+    counterexample_presentation_count: 1,
+    pre_patch_counterexample_observed: true,
     post_patch_clause_test_ledger_observed: false,
     patch_batches: 1,
     patch_file_events: 2,
@@ -148,9 +153,10 @@ function passingCapsuleStage(workflow = "build") {
     multi_file_patch_observed: true,
     post_change_command_calls: 1,
     validation_observed: true,
-    post_change_validation_mode: "canonical",
-    green_path_validation_budget_observed: true,
-    post_change_reproduction_replayed: false,
+    post_change_validation_mode: workflow === "debug" ? "combined" : "canonical",
+    final_validation_budget_observed: true,
+    capsule_green_path_observed: true,
+    post_change_reproduction_replayed: workflow === "debug",
     post_validation_tool_calls: 0,
     ordinary_stop_observed: true,
     protocol_observed: true,
@@ -192,16 +198,22 @@ function capsuleTraceEvents({
   patchBatches = 1,
   patchPaths = ["src/index.mjs", "test/index.test.mjs"],
   prePatchProgress = [],
-  prePatchLedger = "Clause→test ledger:\n- preserve behavior → existing regression",
+  prePatchLedger = [
+    "Clause→test ledger:",
+    "- preserve behavior → existing regression",
+    "- benchmark fixture change → focused change test",
+    "Counterexample: behavior=current→changed→preserve current behavior",
+  ].join("\n"),
   postValidationReview = false,
   readCommand = "tail -n +1 -- src/index.mjs test/index.test.mjs package.json",
   readOutput = "source and test contents",
+  reproduceBeforeRead = false,
   reproduceCommand = capsuleReproductionContract.command,
   reproduceOutput = capsuleReproductionOutput,
   routeDeclaration = null,
   separatePostReproduction = false,
   validationExitCode = 0,
-  validationCommand = "npm test",
+  validationCommand = null,
   workflowRead = false,
 } = {}) {
   const ledger = [
@@ -213,6 +225,11 @@ function capsuleTraceEvents({
     "Starting work.",
   ].join("\n");
   const declaration = routeDeclaration ?? ledger;
+  const resolvedValidationCommand = validationCommand ?? (
+    expectedWorkflow === "debug" && !separatePostReproduction
+      ? `${reproduceCommand} && npm test`
+      : "npm test"
+  );
   const completed = (item) => ({ type: "item.completed", item });
   const events = [];
   if (!ledgerAfterDiscover) {
@@ -248,6 +265,15 @@ function capsuleTraceEvents({
   }));
   if (ledgerAfterDiscover) {
     events.push(completed({ type: "agent_message", text: declaration }));
+  }
+  if (expectedWorkflow === "debug" && reproduceBeforeRead) {
+    events.push(completed({
+      type: "command_execution",
+      command: reproduceCommand,
+      aggregated_output: reproduceOutput,
+      exit_code: 0,
+      status: "completed",
+    }));
   }
   for (const attempt of failedReadAttempts) {
     events.push(completed({
@@ -293,13 +319,15 @@ function capsuleTraceEvents({
         status: "completed",
       }));
     }
-    events.push(completed({
-      type: "command_execution",
-      command: reproduceCommand,
-      aggregated_output: reproduceOutput,
-      exit_code: 0,
-      status: "completed",
-    }));
+    if (!reproduceBeforeRead) {
+      events.push(completed({
+        type: "command_execution",
+        command: reproduceCommand,
+        aggregated_output: reproduceOutput,
+        exit_code: 0,
+        status: "completed",
+      }));
+    }
   }
   if (extraReadAfterReproduce) {
     events.push(completed({
@@ -344,7 +372,7 @@ function capsuleTraceEvents({
   }
   events.push(completed({
     type: "command_execution",
-    command: validationCommand,
+    command: resolvedValidationCommand,
     aggregated_output: validationExitCode === 0 ? "pass" : "fail",
     exit_code: validationExitCode,
     status: "completed",
@@ -602,6 +630,16 @@ test("LeanPowers route declaration accepts compact semantic and legacy forms", (
       required_gates: "[current_evidence]",
     },
   );
+  for (const declaration of [
+    "Following leanpowers:route | workflow=debug | risk=standard",
+    "Invoking leanpowers:route | workflow=debug | risk=standard",
+  ]) {
+    assert.deepEqual(parseLeanRouteLedger(declaration), {
+      workflow: "debug",
+      risk: "standard",
+      required_gates: "[current_evidence]",
+    });
+  }
   assert.deepEqual(
     parseLeanRouteLedger(
       "Routing selected: leanpowers:route workflow is debug; risk is standard; I will not change the public API.",
@@ -679,8 +717,32 @@ test("LeanPowers route declaration accepts compact semantic and legacy forms", (
     " entrypoint: leanpowers:route\nworkflow: build\nrisk: strict\nrequired_gates: [independent_review, current_evidence]",
     "entrypoint: leanpowers:route\nworkflow: build\nrisk: strict\nrequired_gates: [independent_review, current_evidence]\n \nprose after whitespace",
     "leanpowers:route | workflow=build | workflow=debug | risk=standard",
+    "leanpowers:route | workflow=OWNER | risk=standard",
     "leanpowers:route | workflow=debug | risk=lean | risk=strict",
     "leanpowers:route | workflow=debug | risk=standard | gates=[independent_review, current_evidence]",
+    "leanpowers:route | workflow=review | risk=strict | gates=current_evidence",
+    "leanpowers:route | workflow=review | risk=strict | gates=[current_evidence",
+    "leanpowers:route | workflow=review | risk=strict | gates=none",
+    "leanpowers:route | workflow=review | risk=strict | required_gates=disabled",
+    "leanpowers:route | workflow=debug | risk=standard | workflow=OWNER | risk=RISK",
+    "leanpowers:route | workflow=debug | risk=standard\nworkflow=OWNER | risk=RISK",
+    "leanpowers:route | workflow=debug | workflow=debug | risk=standard",
+    "leanpowers:route | workflow=debug | risk=standard | risk=standard",
+    "leanpowers:route | workflow=debug-ish | risk=standard",
+    "leanpowers:route | workflow=debug | risk=standard-ish",
+    "leanpowers:route | workflow=debug | risk=standard | workflow=\"build\"",
+    "leanpowers:route | workflow=debug | risk=standard | gates=\"none\"",
+    "leanpowers:route | workflow=debug | risk=standard | unknown=anything",
+    "leanpowers:route | workflow=debug/build | risk=standard",
+    "leanpowers:route | workflow=debug\"build\" | risk=standard",
+    "leanpowers:route | workflow=debug坏 | risk=standard",
+    "leanpowers:route | workflow=debug | risk=standard/strict",
+    "leanpowers:route | workflow=debug | risk=standard坏",
+    "leanpowers:route | workflow=debug | risk=standard | gates=[current_evidence]/none",
+    "leanpowers:route | workflow=debug | risk=standard | gates=[current_evidence]\"junk\"",
+    "leanpowers:route | workflow=debug | risk=standard | 未知=anything",
+    "Invoking leanpowers:route failed | workflow=debug | risk=standard",
+    "Using leanpowers:route? workflow is build; risk is standard",
     "Previous workflow=build and risk=standard; now considering leanpowers:route.",
     "Considering leanpowers:route | workflow=build | risk=lean",
     "If available, leanpowers:route | workflow=build | risk=lean",
@@ -718,6 +780,16 @@ test("LeanPowers route declaration accepts compact semantic and legacy forms", (
   ]) {
     assert.equal(parseLeanRouteLedger(invalid), null, invalid);
   }
+  assert.deepEqual(
+    parseLeanRouteLedger(
+      "Invoking leanpowers:route to investigate a failed test | workflow=debug | risk=standard",
+    ),
+    {
+      workflow: "debug",
+      risk: "standard",
+      required_gates: "[current_evidence]",
+    },
+  );
 });
 
 test("agent and verifier environments expose only a fixed non-sensitive allowlist", () => {
@@ -955,6 +1027,16 @@ test("Codex trace observes the complete debug capsule stage protocol", () => {
       post_change_validation_mode: "combined",
     },
   );
+  const validationWithoutReplay = parseCodexResult(
+    capsuleTraceEvents({ validationCommand: "npm test" })
+      .map(JSON.stringify)
+      .join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(validationWithoutReplay.validation_observed, false);
+  assert.equal(validationWithoutReplay.post_change_reproduction_replayed, false);
+  assert.equal(validationWithoutReplay.capsule_green_path_observed, false);
+  assert.equal(validationWithoutReplay.protocol_observed, false);
   const separateReproAndTestValidation = parseCodexResult(
     capsuleTraceEvents({ separatePostReproduction: true }).map(JSON.stringify).join("\n"),
     capsuleTraceOptions("debug"),
@@ -963,12 +1045,21 @@ test("Codex trace observes the complete debug capsule stage protocol", () => {
     separateReproAndTestValidation.workflow_trace.capsule_stage,
     {
       ...passingCapsuleStage("debug"),
-      green_path_validation_budget_observed: false,
+      final_validation_budget_observed: false,
+      capsule_green_path_observed: false,
       post_change_command_calls: 2,
       post_change_reproduction_replayed: true,
       post_change_validation_mode: "separate",
     },
   );
+  const outOfOrderReproduction = parseCodexResult(
+    capsuleTraceEvents({ reproduceBeforeRead: true }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(outOfOrderReproduction.reproduce_observed, true);
+  assert.equal(outOfOrderReproduction.ordered_reproduce_observed, false);
+  assert.equal(outOfOrderReproduction.pre_change_stage_protocol_observed, false);
+  assert.equal(outOfOrderReproduction.capsule_green_path_observed, false);
 });
 
 test("capsule clause-to-test ledger must appear before PATCH, not only in final", () => {
@@ -982,6 +1073,102 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
 
   assert.equal(stage.pre_patch_clause_test_ledger_observed, false);
   assert.equal(stage.protocol_observed, false);
+
+  for (const prePatchLedger of [
+    "Clause→test ledger:\n- preserve behavior → existing regression\n- benchmark fixture change → focused change test",
+    [
+      "Clause→test ledger:",
+      "- preserve behavior → existing regression",
+      "- benchmark fixture change → focused change test",
+      "Counterexample: behavior=current→changed",
+    ].join("\n"),
+    [
+      "Clause→test ledger:",
+      "- preserve behavior → existing regression",
+      "- benchmark fixture change → focused change test",
+      "Counterexample: behavior=current→current→preserve current behavior",
+    ].join("\n"),
+    [
+      "Clause→test ledger:",
+      "- preserve behavior → existing regression",
+      "- benchmark fixture change → focused change test",
+      "Counterexample: unrelated=alpha→beta→unrelated outcome",
+    ].join("\n"),
+    [
+      "Clause→test ledger:",
+      "- preserve behavior → existing regression",
+      "- benchmark fixture change → focused change test",
+      "Counterexample: behavior=current→arbitrary-multi-property-state→totally unrelated outcome",
+    ].join("\n"),
+    [
+      "Clause→test ledger:",
+      "- preserve behavior → existing regression",
+      "- benchmark fixture change → focused change test",
+      "Counterexample: behavior=current→changed→preserve current behavior",
+      "Counterexample: fixture=old→new→focused change",
+    ].join("\n"),
+  ]) {
+    const invalidCounterexample = parseCodexResult(
+      capsuleTraceEvents({ prePatchLedger }).map(JSON.stringify).join("\n"),
+      capsuleTraceOptions("debug"),
+    ).workflow_trace.capsule_stage;
+    assert.equal(invalidCounterexample.pre_patch_counterexample_observed, false);
+    assert.equal(invalidCounterexample.protocol_observed, false);
+  }
+
+  const validCounterexample = parseCodexResult(
+    capsuleTraceEvents().map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(validCounterexample.pre_patch_counterexample_observed, true);
+  assert.equal(validCounterexample.counterexample_presentation_count, 1);
+  assert.equal(validCounterexample.clause_test_mapping_count, 2);
+
+  const repeatedPacket = parseCodexResult(
+    capsuleTraceEvents({
+      prePatchProgress: [[
+        "Clause→test ledger:",
+        "- preserve behavior → existing regression",
+        "- benchmark fixture change → focused change test",
+        "Counterexample: behavior=current→changed→preserve current behavior",
+      ].join("\n")],
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(repeatedPacket.pre_patch_clause_test_ledger_packet_count, 2);
+  assert.equal(repeatedPacket.pre_patch_clause_test_ledger_structure_observed, false);
+  assert.equal(repeatedPacket.protocol_observed, false);
+
+  const repeatedHeaderInOneMessage = parseCodexResult(
+    capsuleTraceEvents({
+      prePatchLedger: [
+        "Clause→test ledger:",
+        "- preserve behavior → existing regression",
+        "- benchmark fixture change → focused change test",
+        "Counterexample: behavior=current→changed→preserve current behavior",
+        "Clause→test ledger:",
+      ].join("\n"),
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(repeatedHeaderInOneMessage.pre_patch_clause_test_ledger_packet_count, 2);
+  assert.equal(repeatedHeaderInOneMessage.protocol_observed, false);
+
+  const fencedPacket = parseCodexResult(
+    capsuleTraceEvents({
+      prePatchLedger: [
+        "```text",
+        "Clause→test ledger:",
+        "- preserve behavior → existing regression",
+        "- benchmark fixture change → focused change test",
+        "Counterexample: behavior=current→changed→preserve current behavior",
+        "```",
+      ].join("\n"),
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(fencedPacket.pre_patch_clause_test_ledger_packet_count, 0);
+  assert.equal(fencedPacket.protocol_observed, false);
 
   const lateEvents = capsuleTraceEvents({ prePatchLedger: null });
   const patchStart = lateEvents.findIndex((event) =>
@@ -1046,7 +1233,8 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
     twoClauseOptions,
   ).workflow_trace.capsule_stage;
   assert.equal(missingClauseStage.pre_patch_clause_test_ledger_observed, true);
-  assert.equal(missingClauseStage.clause_marker_cardinality_observed, false);
+  assert.equal(missingClauseStage.distinct_boundary_coverage_observed, false);
+  assert.equal(missingClauseStage.clause_coverage_observed, false);
   const reusedMappingStage = parseCodexResult(
     capsuleTraceEvents({
       prePatchLedger: "Clause→test ledger:\n- preserve behavior and reject input → one generic test",
@@ -1054,7 +1242,46 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
     twoClauseOptions,
   ).workflow_trace.capsule_stage;
   assert.equal(reusedMappingStage.pre_patch_clause_test_ledger_observed, true);
-  assert.equal(reusedMappingStage.clause_marker_cardinality_observed, false);
+  assert.equal(reusedMappingStage.distinct_boundary_coverage_observed, false);
+  assert.equal(reusedMappingStage.clause_coverage_observed, false);
+  const duplicatedPreserveStage = parseCodexResult(
+    capsuleTraceEvents({
+      prePatchLedger: [
+        "Clause→test ledger:",
+        "- preserve current behavior → behavior regression",
+        "- preserve locale behavior → locale regression",
+        "Counterexample: locale=valid→invalid→reject invalid locale",
+      ].join("\n"),
+    }).map(JSON.stringify).join("\n"),
+    {
+      ...capsuleTraceOptions("debug"),
+      expectedReviewContract: "Preserve current behavior. Reject invalid locale.",
+    },
+  ).workflow_trace.capsule_stage;
+  assert.equal(duplicatedPreserveStage.pre_patch_clause_test_ledger_observed, true);
+  assert.equal(duplicatedPreserveStage.distinct_boundary_coverage_observed, false);
+  assert.equal(duplicatedPreserveStage.clause_coverage_observed, false);
+  assert.equal(duplicatedPreserveStage.protocol_observed, false);
+  const duplicateBoundaryStage = parseCodexResult(
+    capsuleTraceEvents({
+      prePatchLedger: [
+        "Clause→test ledger:",
+        "- preserve cache identity → cache identity regression",
+        "- preserve cache identity for loader → second cache identity test",
+        "Counterexample: locale=en→fr→preserve locale normalization",
+      ].join("\n"),
+    }).map(JSON.stringify).join("\n"),
+    {
+      ...capsuleTraceOptions("debug"),
+      expectedReviewContract:
+        "Preserve cache identity. Preserve locale normalization.",
+    },
+  ).workflow_trace.capsule_stage;
+  assert.equal(duplicateBoundaryStage.pre_patch_clause_test_ledger_observed, true);
+  assert.equal(duplicateBoundaryStage.task_boundary_count, 2);
+  assert.equal(duplicateBoundaryStage.distinct_boundary_coverage_observed, false);
+  assert.equal(duplicateBoundaryStage.clause_coverage_observed, false);
+  assert.equal(duplicateBoundaryStage.protocol_observed, false);
   const completeClauseStage = parseCodexResult(
     capsuleTraceEvents({
       prePatchLedger: [
@@ -1072,7 +1299,8 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
       prePatchLedger: [
         "Clause→test ledger:",
         "- preserve cache identity → same-locale cache test",
-        "- exact separator-safe identity → separator regression test",
+        "- unambiguous cache identity → separator regression test",
+        "Counterexample: cache=welcome-en→welcome-fr→unambiguous cache identity",
       ].join("\n"),
     }).map(JSON.stringify).join("\n"),
     {
@@ -1099,24 +1327,47 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
     capsuleTraceEvents({
       expectedWorkflow: "build",
       routeDeclaration: "leanpowers:route | workflow=build | risk=standard",
-      prePatchProgress: [
-        "New evidence raises this to risk=strict; independent review is required.",
-      ],
+      prePatchProgress: ["leanpowers:risk | risk=strict"],
     }).map(JSON.stringify).join("\n"),
     capsuleTraceOptions("build"),
   ).workflow_trace.capsule_stage;
   assert.equal(strictEscalationStage.highest_presented_risk, "strict");
   assert.equal(strictEscalationStage.ordinary_stop_observed, null);
 
-  const negatedRiskStage = parseCodexResult(
-    capsuleTraceEvents({
-      expectedWorkflow: "build",
-      routeDeclaration: "leanpowers:route | workflow=build | risk=standard",
-      prePatchProgress: ["The risk is not strict."],
-    }).map(JSON.stringify).join("\n"),
-    capsuleTraceOptions("build"),
-  ).workflow_trace.capsule_stage;
-  assert.equal(negatedRiskStage.highest_presented_risk, "standard");
+  for (const progress of [
+    "New evidence raises this to risk=strict; independent review is required.",
+    "New evidence means risk escalated to strict.",
+    "Escalating the risk from standard to strict.",
+    "Escalating from standard to strict risk.",
+    "The risk is now strict.",
+    "Switching this task to strict risk.",
+    "Risk classification is strict.",
+    "The risk has become strict.",
+    "The risk is not strict.",
+    "If validation fails, risk=strict.",
+    "Unless validation succeeds, risk=strict.",
+    "Maybe the risk escalated to strict.",
+    "If validation fails, I am switching this task to strict risk.",
+    "Switching this task to strict risk if validation fails.",
+    "We decided against switching this task to strict risk.",
+    "The fixture contains the literal string risk=strict for parser testing.",
+    "Risk classification is not strict.",
+    "The risk has not become strict.",
+    "> leanpowers:risk | risk=strict",
+    "```text\nleanpowers:risk | risk=strict\n```",
+    "~~~text\nleanpowers:risk | risk=strict\n~~~",
+    "    leanpowers:risk | risk=strict",
+  ]) {
+    const stage = parseCodexResult(
+      capsuleTraceEvents({
+        expectedWorkflow: "build",
+        routeDeclaration: "leanpowers:route | workflow=build | risk=standard",
+        prePatchProgress: [progress],
+      }).map(JSON.stringify).join("\n"),
+      capsuleTraceOptions("build"),
+    ).workflow_trace.capsule_stage;
+    assert.equal(stage.highest_presented_risk, "standard", progress);
+  }
 
   const sameSentenceOptions = {
     ...capsuleTraceOptions("debug"),
@@ -1129,11 +1380,16 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
     sameSentenceOptions,
   ).workflow_trace.capsule_stage;
   assert.equal(collapsedSentenceStage.pre_patch_clause_test_ledger_observed, true);
-  assert.equal(collapsedSentenceStage.clause_marker_cardinality_observed, false);
+  assert.equal(collapsedSentenceStage.distinct_boundary_coverage_observed, false);
 
   const asciiStage = parseCodexResult(
     capsuleTraceEvents({
-      prePatchLedger: "Clause->boundary ledger before edit:\n1) preserve backward compatibility -> integration contract",
+      prePatchLedger: [
+        "Clause->boundary ledger before edit:",
+        "1) preserve backward compatibility -> integration contract",
+        "2) integration contract compatibility -> boundary test",
+        "Counterexample: compatibility=current→changed→preserve integration contract",
+      ].join("\n"),
     }).map(JSON.stringify).join("\n"),
     {
       ...capsuleTraceOptions("debug"),
@@ -1141,8 +1397,9 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
         "Preserve backward compatibility for the integration contract.",
     },
   ).workflow_trace.capsule_stage;
-  assert.equal(asciiStage.pre_patch_clause_test_ledger_observed, true);
-  assert.equal(asciiStage.protocol_observed, true);
+  assert.equal(asciiStage.pre_patch_clause_test_ledger_observed, false);
+  assert.equal(asciiStage.pre_patch_clause_test_ledger_packet_count, 0);
+  assert.equal(asciiStage.protocol_observed, false);
 });
 
 test("capsule stages allow one evidence-backed retry without hiding its cost", () => {
@@ -2783,6 +3040,8 @@ test("capsule stage telemetry independently gates workflow conformance", () => {
     [{ patch_targets_read_observed: false }, "READ omitted discovered files that were later changed"],
     [{ grounded_candidates_read_observed: false }, "READ omitted grounded implementation, caller, or test candidates"],
     [{ pre_patch_clause_test_ledger_observed: false }, "pre-PATCH clause-to-test ledger was not observed"],
+    [{ clause_coverage_observed: false }, "pre-PATCH clause-to-test ledger did not cover required boundaries"],
+    [{ pre_patch_counterexample_observed: false }, "grounded pre-PATCH counterexample was not observed"],
     [{ post_patch_clause_test_ledger_observed: true }, "clause-to-test ledger was repeated after PATCH"],
     [{ patch_batches: 2 }, "one contiguous multi-file PATCH batch was not observed"],
     [{ implementation_patch_observed: false }, "one contiguous multi-file PATCH batch was not observed"],

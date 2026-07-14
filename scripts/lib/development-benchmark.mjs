@@ -757,7 +757,7 @@ function traceCapsuleStage(
     changePolicy,
   );
   const lastPreChangeCommandIndex = preChangeCommands.at(-1)?.index ?? -1;
-  const prePatchClauseTestLedger =
+  const prePatchClauseTestLedgerPresentations =
     lastPreChangeCommandIndex >= 0 &&
     taskFirstPatchIndex > lastPreChangeCommandIndex
       ? indexed.flatMap(({ event, index }) => {
@@ -769,11 +769,27 @@ function traceCapsuleStage(
           ) {
             return [];
           }
-          const packet = parseClauseTestLedgerPacket(event.item.text);
-          return packet === null ? [] : [packet];
-        })[0] ?? null
+          const headerCount = countClauseTestLedgerHeaders(event.item.text);
+          if (headerCount === 0) return [];
+          const packet = headerCount === 1
+            ? parseClauseTestLedgerPacket(event.item.text)
+            : null;
+          return [{ header_count: headerCount, packet }];
+        })
+      : [];
+  const prePatchClauseTestLedgerPacketCount =
+    prePatchClauseTestLedgerPresentations.reduce(
+      (total, presentation) => total + presentation.header_count,
+      0,
+    );
+  const prePatchClauseTestLedger =
+    prePatchClauseTestLedgerPacketCount === 1 &&
+    prePatchClauseTestLedgerPresentations.length === 1
+      ? prePatchClauseTestLedgerPresentations[0].packet
       : null;
-  const prePatchClauseTestLedgerStructureObserved = prePatchClauseTestLedger !== null;
+  const prePatchClauseTestLedgerStructureObserved =
+    prePatchClauseTestLedgerPacketCount === 1 &&
+    prePatchClauseTestLedger !== null;
   const groundedClauseTestMappings = prePatchClauseTestLedger === null
     ? []
     : groundedLedgerMappings(
@@ -781,7 +797,23 @@ function traceCapsuleStage(
         prePatchClauseTestLedger.mappings,
       );
   const prePatchClauseTestLedgerObserved = groundedClauseTestMappings.length > 0;
-  const taskConstraintMarkerCount = literalTaskMarkers(expectedReviewContract).length;
+  const taskBoundaries = taskBoundaryClauses(expectedReviewContract);
+  const taskBoundaryCount = taskBoundaries.length;
+  const distinctBoundaryCoverageObserved = taskBoundariesHaveDistinctCoverage(
+    taskBoundaries,
+    groundedClauseTestMappings,
+  );
+  const clauseCoverageObserved =
+    groundedClauseTestMappings.length >= Math.max(
+      expectedWorkflow === "debug" ? 2 : 1,
+      taskBoundaryCount,
+    ) && distinctBoundaryCoverageObserved;
+  const prePatchCounterexampleObserved =
+    prePatchClauseTestLedger?.counterexample !== null &&
+    groundedCounterexample(
+      expectedReviewContract,
+      prePatchClauseTestLedger?.counterexample,
+    );
   const postPatchClauseTestLedgerObserved =
     taskFirstPatchIndex >= 0 &&
     indexed.some(({ event, index }) =>
@@ -824,6 +856,8 @@ function traceCapsuleStage(
     workflowReads.length === 0 &&
     preChangeStage.protocol_observed &&
     prePatchClauseTestLedgerObserved &&
+    clauseCoverageObserved &&
+    prePatchCounterexampleObserved &&
     !postPatchClauseTestLedgerObserved &&
     multiFilePatchObserved &&
     validationObserved &&
@@ -855,14 +889,20 @@ function traceCapsuleStage(
     validation_metadata_read_observed:
       preChangeStage.validation_metadata_read_observed,
     reproduce_observed: reproduceObserved,
+    ordered_reproduce_observed: preChangeStage.ordered_reproduce_observed,
     pre_patch_clause_test_ledger_structure_observed:
       prePatchClauseTestLedgerStructureObserved,
+    pre_patch_clause_test_ledger_packet_count:
+      prePatchClauseTestLedgerPacketCount,
     pre_patch_clause_test_ledger_observed: prePatchClauseTestLedgerObserved,
     clause_test_mapping_count: prePatchClauseTestLedger?.mappings.length ?? 0,
     grounded_clause_test_mapping_count: groundedClauseTestMappings.length,
-    task_constraint_marker_count: taskConstraintMarkerCount,
-    clause_marker_cardinality_observed:
-      (prePatchClauseTestLedger?.mappings.length ?? 0) >= taskConstraintMarkerCount,
+    task_boundary_count: taskBoundaryCount,
+    distinct_boundary_coverage_observed: distinctBoundaryCoverageObserved,
+    clause_coverage_observed: clauseCoverageObserved,
+    counterexample_presentation_count:
+      prePatchClauseTestLedger?.counterexample_presentation_count ?? 0,
+    pre_patch_counterexample_observed: prePatchCounterexampleObserved,
     post_patch_clause_test_ledger_observed: postPatchClauseTestLedgerObserved,
     patch_batches: patchBatches.length,
     patch_file_events: taskChanges.length,
@@ -873,8 +913,13 @@ function traceCapsuleStage(
     post_change_command_calls: postChangeCommands.length,
     validation_observed: validationObserved,
     post_change_validation_mode: validation?.mode ?? null,
-    green_path_validation_budget_observed:
+    final_validation_budget_observed:
       validationObserved && postChangeCommands.length === 1,
+    capsule_green_path_observed:
+      protocolObserved &&
+      preChangeStage.retry_calls === 0 &&
+      postChangeCommands.length === 1 &&
+      (expectedWorkflow !== "debug" || validation?.mode === "combined"),
     post_change_reproduction_replayed:
       validation?.reproduction_replayed ?? false,
     post_validation_tool_calls: postValidationToolCalls,
@@ -884,24 +929,77 @@ function traceCapsuleStage(
 }
 
 function isClauseTestLedgerHeaderLine(value) {
-  return /^\s*(?:#{1,6}\s*)?(?:\*\*)?clause\s*(?:→|->)\s*(?:test|boundary)\s+ledger(?:\s+before\s+(?:edit(?:s|ing)?|patch(?:ing)?))?\s*:?\s*(?:\*\*)?\s*$/iu
-    .test(String(value ?? ""));
+  return String(value ?? "").trim() === "Clause→test ledger:";
+}
+
+function visibleAssertionLines(value) {
+  const visible = [];
+  let fenceCharacter = null;
+  for (const line of String(value ?? "").split(/\r?\n/u)) {
+    const fence = line.match(/^\s*(`{3,}|~{3,})/u)?.[1] ?? null;
+    if (fence !== null) {
+      const character = fence[0];
+      if (fenceCharacter === null) fenceCharacter = character;
+      else if (fenceCharacter === character) fenceCharacter = null;
+      continue;
+    }
+    if (
+      fenceCharacter !== null ||
+      /^(?: {4}|\t)/u.test(line) ||
+      /^\s*>/u.test(line)
+    ) {
+      continue;
+    }
+    visible.push(line);
+  }
+  return visible;
 }
 
 function hasClauseTestLedgerHeader(value) {
-  return String(value ?? "")
-    .split(/\r?\n/u)
-    .some(isClauseTestLedgerHeaderLine);
+  return countClauseTestLedgerHeaders(value) > 0;
+}
+
+function countClauseTestLedgerHeaders(value) {
+  return visibleAssertionLines(value).filter(isClauseTestLedgerHeaderLine).length;
 }
 
 function parseClauseTestLedgerPacket(value) {
-  const lines = String(value ?? "").split(/\r?\n/u);
-  const headerIndex = lines.findIndex(isClauseTestLedgerHeaderLine);
-  if (headerIndex < 0) return null;
-  const mappings = lines.slice(headerIndex + 1).flatMap((line) => {
+  const lines = visibleAssertionLines(value);
+  const headerIndexes = lines.flatMap((line, index) =>
+    isClauseTestLedgerHeaderLine(line) ? [index] : []
+  );
+  if (headerIndexes.length !== 1) return null;
+  const headerIndex = headerIndexes[0];
+  const packetLines = lines.slice(headerIndex + 1);
+  const counterexamplePresentations = packetLines.filter((line) =>
+    /^\s*(?:[-*+]\s+|\d+[.)]\s*)?counterexample\s*:/iu.test(line)
+  );
+  const parsedCounterexamples = counterexamplePresentations.flatMap((line) => {
     const entry = line
       .replace(/^\s*(?:[-*+]\s+|\d+[.)]\s*)/u, "")
       .trim();
+    const match = entry.match(
+      /^counterexample\s*:\s*([^=→]+?)\s*=\s*([^→]+?)\s*(?:→|->)\s*([^→]+?)\s*(?:→|->)\s*(.+)$/iu,
+    );
+    if (match === null) return [];
+    const [property, passing, mutation, boundary] = match.slice(1).map((part) => part.trim());
+    if (
+      [property, passing, mutation, boundary].some((part) => part.length === 0) ||
+      passing.toLocaleLowerCase("en-US") === mutation.toLocaleLowerCase("en-US")
+    ) {
+      return [];
+    }
+    return [{ property, passing, mutation, boundary }];
+  });
+  const counterexample =
+    counterexamplePresentations.length === 1 && parsedCounterexamples.length === 1
+      ? parsedCounterexamples[0]
+      : null;
+  const mappings = packetLines.flatMap((line) => {
+    const entry = line
+      .replace(/^\s*(?:[-*+]\s+|\d+[.)]\s*)/u, "")
+      .trim();
+    if (/^counterexample\s*:/iu.test(entry)) return [];
     const mapping = entry.match(/^(.+?)\s*(?:→|->)\s*(.+)$/u);
     return mapping === null || mapping[1].trim() === "" || mapping[2].trim() === ""
       ? []
@@ -912,12 +1010,44 @@ function parseClauseTestLedgerPacket(value) {
     `${mapping.clause}\u0000${mapping.test}`,
     mapping,
   ])).values()];
-  return { mappings: distinctMappings };
+  return {
+    counterexample,
+    counterexample_presentation_count: counterexamplePresentations.length,
+    mappings: distinctMappings,
+  };
 }
 
-function literalTaskMarkers(value) {
-  return [...String(value ?? "").matchAll(/\b(must|only|exact|preserve|reject)\b/giu)]
-    .map((match) => match[1].toLocaleLowerCase("en-US"));
+const TASK_BOUNDARY_CUE =
+  /\b(?:compatib\w*|error|exact\w*|intact|invalid|keep|keeping|keeps|kept|malformed|must|only|preserv\w*|reject\w*|remain\w*|throw\w*)\b/iu;
+
+function taskBoundaryClauses(value) {
+  return String(value ?? "")
+    .split(/(?:[.!?;]+\s*|\r?\n)+/u)
+    .map((clause) => clause.trim())
+    .filter((clause) => clause.length > 0 && TASK_BOUNDARY_CUE.test(clause));
+}
+
+function taskBoundariesHaveDistinctCoverage(boundaries, mappings) {
+  function assign(boundaryIndex, usedMappings) {
+    if (boundaryIndex >= boundaries.length) return true;
+    const boundaryTokens = ledgerContentTokens(boundaries[boundaryIndex]);
+    for (const [mappingIndex, mapping] of mappings.entries()) {
+      if (
+        usedMappings.has(mappingIndex) ||
+        tokenOverlapCount(
+          boundaryTokens,
+          `${mapping.clause} ${mapping.test}`,
+        ) < 2
+      ) {
+        continue;
+      }
+      usedMappings.add(mappingIndex);
+      if (assign(boundaryIndex + 1, usedMappings)) return true;
+      usedMappings.delete(mappingIndex);
+    }
+    return false;
+  }
+  return assign(0, new Set());
 }
 
 const LEDGER_TOKEN_STOPWORDS = new Set([
@@ -940,6 +1070,22 @@ function groundedLedgerMappings(task, mappings) {
     }
     return false;
   });
+}
+
+function groundedCounterexample(task, counterexample) {
+  if (counterexample === null || counterexample === undefined) return false;
+  const taskTokens = ledgerContentTokens(task);
+  return tokenOverlapCount(taskTokens, counterexample.property) >= 1 &&
+    tokenOverlapCount(taskTokens, counterexample.boundary) >= 2;
+}
+
+function tokenOverlapCount(referenceTokens, value) {
+  const candidateTokens = ledgerContentTokens(value);
+  let overlap = 0;
+  for (const token of candidateTokens) {
+    if (referenceTokens.has(token)) overlap += 1;
+  }
+  return overlap;
 }
 
 function ledgerContentTokens(value) {
@@ -1037,8 +1183,13 @@ function tracePreChangeStages(
 
   const discoverObserved = successfulItems.has("discover");
   const readObserved = successfulItems.has("read");
-  const reproduceObserved = expectedWorkflow === "debug"
+  const orderedReproduceObserved = expectedWorkflow === "debug"
     ? successfulItems.has("reproduce")
+    : null;
+  const reproduceObserved = expectedWorkflow === "debug"
+    ? commands.some(({ event }) =>
+        isExecutableReproduction(event?.item, reproductionContract)
+      )
     : null;
   const validationMetadataReadObserved = discoverObserved && readObserved
     ? readsDiscoveredValidationMetadata(
@@ -1088,6 +1239,7 @@ function tracePreChangeStages(
     protocol_observed: protocolObserved,
     read_observed: readObserved,
     reproduce_observed: reproduceObserved,
+    ordered_reproduce_observed: orderedReproduceObserved,
     retry_calls: retryCalls,
     required_read_paths: [...new Set(requiredReadPaths)].sort(),
     unexpected_calls: unexpectedCalls,
@@ -1590,7 +1742,12 @@ function parsePostChangeValidationSequence(
       expectedWorkflow,
       reproductionContract,
     );
-    if (validation === null) return null;
+    if (
+      validation === null ||
+      (expectedWorkflow === "debug" && !validation.reproduction_replayed)
+    ) {
+      return null;
+    }
     return {
       ...validation,
       final_index: commands[0].index,
@@ -1797,6 +1954,12 @@ export function evaluateWorkflowConformance(run) {
         }
         if (!capsule.pre_patch_clause_test_ledger_observed) {
           reasons.push("pre-PATCH clause-to-test ledger was not observed");
+        }
+        if (!capsule.clause_coverage_observed) {
+          reasons.push("pre-PATCH clause-to-test ledger did not cover required boundaries");
+        }
+        if (!capsule.pre_patch_counterexample_observed) {
+          reasons.push("grounded pre-PATCH counterexample was not observed");
         }
         if (capsule.post_patch_clause_test_ledger_observed) {
           reasons.push("clause-to-test ledger was repeated after PATCH");
@@ -2942,6 +3105,8 @@ export function parseLeanRouteLedger(message) {
   const firstLine = text.split(/\r?\n/u)[0];
   if (
     /\bactivation\s+(?:failed|did\s+not\s+succeed|was\s+unsuccessful)\b/iu.test(text) ||
+    /\b(?:invok(?:e|ed|ing)|activat(?:e|ed|ing)|select(?:ed|ing)|follow(?:ed|ing)|us(?:e|ed|ing))\s+`?leanpowers:route`?\s*(?:[:—-]\s*)?(?:has\s+)?(?:failed|did\s+not\s+succeed|was\s+unsuccessful)\b/iu.test(text) ||
+    /\b(?:(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(?:OWNER|WORKFLOW)\b|risk\s*(?:[:=]|\bis\b)\s*`?RISK\b)/u.test(text) ||
     /\bleanpowers:route\b[^\r\n.]{0,48}\b(?:not|never)\s+activat(?:e|ed|ing)\b/iu.test(text) ||
     /\b(?:(?:do|does|did|am|is|are|was|were|will|would|have|has)\s+not|(?:don't|doesn't|didn't|isn't|aren't|wasn't|weren't|won't|wouldn't|haven't|hasn't))\s+(?:use|using|activate|activating|select|selecting|invoke|invoking|follow|following)\s+(?:it|this\s+(?:route|workflow)|that\s+(?:route|workflow)|the\s+(?:route(?:\s+workflow)?|workflow)|leanpowers:route)\b/iu.test(text)
   ) {
@@ -2957,6 +3122,8 @@ export function parseLeanRouteLedger(message) {
     routeMatch.index + routeMatch[0].length,
   );
   if (!isAssertiveLeanRoutePrefix(throughRoute)) return null;
+  const afterRoute = firstLine.slice(routeMatch.index + routeMatch[0].length);
+  if (/^[*_`]*\s*\?/u.test(afterRoute)) return null;
   if (
     /\b(?:if|maybe|perhaps|possibly|tentatively|provisionally|assuming)\b[^.;]{0,80}\bleanpowers:route\b/iu.test(throughRoute) ||
     /\b(?:do\s+not|don't|never|cannot|can't|won't|unable\s+to)\s+(?:use|select|activate|invoke)\b[^.;]{0,32}\bleanpowers:route\b/iu.test(throughRoute) ||
@@ -2968,11 +3135,33 @@ export function parseLeanRouteLedger(message) {
     return null;
   }
   const routeAndFields = firstLine.slice(routeMatch.index);
+  const routeFieldText = firstLine.slice(routeMatch.index + routeMatch[0].length);
+  const structuredFields = [...routeFieldText.matchAll(
+    /(?:^|[^\p{L}\p{N}_-])([\p{L}_][\p{L}\p{N}_-]*)\s*[:=]/gu,
+  )].map((match) => match[1].toLocaleLowerCase("en-US"));
+  const allowedStructuredFields = new Set([
+    "gate",
+    "gates",
+    "owner",
+    "required_gate",
+    "required_gates",
+    "risk",
+    "workflow",
+  ]);
+  if (structuredFields.some((field) => !allowedStructuredFields.has(field))) {
+    return null;
+  }
   const workflowMatches = [...routeAndFields.matchAll(
-    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(shape|build|debug|review|verify|ship|adapt)\b`?/giu,
+    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|$))/giu,
   )];
   const riskMatches = [...routeAndFields.matchAll(
-    /\brisk\s*(?:[:=]|\bis\b)\s*`?(lean|standard|strict)\b`?/giu,
+    /\brisk\s*(?:[:=]|\bis\b)\s*`?(lean|standard|strict)`?(?=\s*(?:[|;,.]|$))/giu,
+  )];
+  const workflowPresentations = [...routeAndFields.matchAll(
+    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(?!not\b|never\b)([\p{L}][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|$))/giu,
+  )];
+  const riskPresentations = [...routeAndFields.matchAll(
+    /\brisk\s*(?:[:=]|\bis\b)\s*`?(?!not\b|never\b)([\p{L}][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|$))/giu,
   )];
   const workflows = new Set(workflowMatches.map(
     (match) => match[1].toLocaleLowerCase("en-US"),
@@ -2980,13 +3169,54 @@ export function parseLeanRouteLedger(message) {
   const risks = new Set(riskMatches.map(
     (match) => match[1].toLocaleLowerCase("en-US"),
   ));
-  if (workflows.size !== 1 || risks.size !== 1) return null;
+  const structuredWorkflowMatches = [...routeFieldText.matchAll(
+    /\b(?:workflow|owner)\s*[:=]\s*`?(?:shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|$))/giu,
+  )];
+  const structuredRiskMatches = [...routeFieldText.matchAll(
+    /\brisk\s*[:=]\s*`?(?:lean|standard|strict)`?(?=\s*(?:[|;,.]|$))/giu,
+  )];
+  const structuredWorkflowFields = structuredFields.filter((field) =>
+    field === "workflow" || field === "owner"
+  ).length;
+  const structuredRiskFields = structuredFields.filter((field) => field === "risk").length;
+  if (
+    workflows.size !== 1 ||
+    risks.size !== 1 ||
+    workflowMatches.length !== 1 ||
+    riskMatches.length !== 1 ||
+    workflowPresentations.length !== workflowMatches.length ||
+    riskPresentations.length !== riskMatches.length ||
+    structuredWorkflowFields !== structuredWorkflowMatches.length ||
+    structuredRiskFields !== structuredRiskMatches.length
+  ) {
+    return null;
+  }
   const workflow = [...workflows][0];
   const risk = [...risks][0];
   const expectedGates = expectedLeanRouteGates(risk);
   const gateMatches = [...routeAndFields.matchAll(
-    /\b(?:required[_\s]+gates?|gates?)\s*(?:[:=]|\b(?:is|are)\b)\s*`?(\[[^\]\r\n]*\])`?/giu,
+    /\b(?:required[_\s]+gates?|gates?)\s*(?:[:=]|\b(?:is|are)\b)\s*`?(\[[^\]\r\n]*\])`?(?=\s*(?:[|;,.]|$))/giu,
   )];
+  const gatePresentations = [...routeAndFields.matchAll(
+    /\b(?:required[_\s]+gates?|gates?)\s*(?:[:=]|\b(?:is|are)\b)\s*`?(?!not\b|never\b)(\[[^\]\r\n]*\]|[\p{L}_][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|$))/giu,
+  )];
+  const explicitGatePresentations = [...routeAndFields.matchAll(
+    /\b(?:required[_\s]+gates?|gates?)\s*(?:[:=]|\b(?:is|are)\b)\s*`?(?:\[|current_evidence\b|independent_review\b)/giu,
+  )];
+  const structuredGateMatches = [...routeFieldText.matchAll(
+    /\b(?:required[_\s]+gates?|gates?)\s*[:=]\s*`?\[[^\]\r\n]*\]`?(?=\s*(?:[|;,.]|$))/giu,
+  )];
+  const structuredGateFields = structuredFields.filter((field) =>
+    ["gate", "gates", "required_gate", "required_gates"].includes(field)
+  ).length;
+  if (
+    gateMatches.length > 1 ||
+    gatePresentations.length !== gateMatches.length ||
+    explicitGatePresentations.length !== gateMatches.length ||
+    structuredGateFields !== structuredGateMatches.length
+  ) {
+    return null;
+  }
   const declarationEnd = Math.max(
     ...[...workflowMatches, ...riskMatches, ...gateMatches].map(
       (match) => match.index + match[0].length,
@@ -3049,7 +3279,7 @@ function isAssertiveLeanRoutePrefix(value) {
     .replace(/[*_`]/gu, "")
     .trim()
     .replace(/\s+/gu, " ");
-  return /^(?:leanpowers:route|(?:(?:routing|route) selected|selected|using|activated|activating|entrypoint)\s*:?\s*leanpowers:route|I(?:'m| am)?\s+(?:use|using|select|selected|activate|activated|invoke|invoking)\s+leanpowers:route)$/iu
+  return /^(?:leanpowers:route|(?:(?:routing|route) selected|selected|using|following|invoking|activated|activating|entrypoint)\s*:?\s*leanpowers:route|I(?:'m|’m| am)?\s+(?:use|using|follow|following|select|selected|activate|activated|invoke|invoking)\s+leanpowers:route)$/iu
     .test(normalized);
 }
 
@@ -3143,27 +3373,13 @@ function highestPresentedLeanRouteRisk(indexedEvents) {
 
 function affirmativePresentedLeanRouteRisks(message) {
   const risks = [];
-  for (const rawLine of String(message ?? "").split(/\r?\n/u)) {
-    const line = normalizeLeanRouteLedgerPresentation(rawLine);
-    for (const match of line.matchAll(
-      /\brisk(?:\s+(?:profile|level))?\s*(?::|=|\bis\b)\s*`?(lean|standard|strict)\b`?/giu,
-    )) {
-      const prefix = line.slice(0, match.index);
-      const clauseStart = Math.max(
-        prefix.lastIndexOf("."),
-        prefix.lastIndexOf(";"),
-        prefix.lastIndexOf("!"),
-        prefix.lastIndexOf("?"),
-      ) + 1;
-      const localPrefix = prefix.slice(clauseStart);
-      if (
-        /\b(?:if|maybe|perhaps|possibly|tentatively|provisionally|assuming)\b[^,;:.!?]{0,48}$/iu.test(localPrefix) ||
-        /\b(?:not|never|without)\s*$/iu.test(localPrefix)
-      ) {
-        continue;
-      }
-      risks.push(match[1].toLocaleLowerCase("en-US"));
-    }
+  const route = parseLeanRouteLedger(message);
+  if (route !== null) risks.push(route.risk);
+  for (const rawLine of visibleAssertionLines(message)) {
+    const marker = rawLine.trim().match(
+      /^leanpowers:risk \| risk=(lean|standard|strict)$/u,
+    );
+    if (marker !== null) risks.push(marker[1]);
   }
   return risks;
 }
