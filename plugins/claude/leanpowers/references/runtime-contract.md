@@ -4,7 +4,7 @@ Use this compact contract only when a workflow was entered directly or the routi
 
 ## Risk and gates
 
-Use the highest signal. `lean` is clear, local, reversible work with established validation and no public boundary. `standard` covers normal multi-file, public-boundary, dependency, or bounded-uncertainty work; unknown defaults to standard. `strict` covers security, authorization, payment, privacy, migration, concurrency, production, irreversible work, or a large refactor. Strict is sticky until an independent review and current verification both pass.
+Use the highest signal. `lean` is clear, local, reversible work with established validation and no public boundary. `standard` covers normal multi-file, public-boundary, dependency, or bounded-uncertainty work; unknown defaults to standard. `strict` covers security (including authentication, credentials/secrets, cryptography, or signature verification), authorization, payment, privacy, migration, concurrency, production, irreversible work, or a large refactor. Strict is sticky until an independent review and current verification both pass.
 
 Carry this ledger:
 

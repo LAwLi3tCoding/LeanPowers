@@ -7,7 +7,7 @@ description: Use when starting engineering work and no specific LeanPowers workf
 
 Select exactly one lowest-safe owner. Do not do its work here or preload a chain.
 
-Classify risk first by its highest signal. `lean` is clear, local, reversible work with established validation and no public boundary. Security, authorization, payment, privacy, migration, concurrency, production, irreversible change, or large refactor is `strict`. Everything else is `standard`; preference cannot lower safety.
+Classify risk first by its highest signal. `lean` is clear, local, reversible work with established validation and no public boundary. Security—including authentication, credentials/secrets, cryptography, or signature verification—authorization, payment, privacy, migration, concurrency, production, irreversible change, or large refactor is `strict`. Everything else is `standard`; preference cannot lower safety.
 
 Carry this sticky ledger:
 
@@ -17,7 +17,7 @@ risk: lean | standard | strict
 required_gates: [current_evidence] | [independent_review, current_evidence]
 ```
 
-Never drop current evidence, unknown-failure root cause, regression evidence, declared scope, independent strict review, required authorization, contradiction re-evaluation, or validation gaps.
+Preserve current evidence, unknown-failure root cause, regression evidence, scope, independent strict review, authorization, contradiction re-evaluation, and validation gaps.
 
 ## Selection
 

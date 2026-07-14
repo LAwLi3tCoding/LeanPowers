@@ -333,7 +333,6 @@ export function evaluateRunOutcome(run) {
   if (run.agent_exit_code !== 0) reasons.push("agent exited non-zero");
   if (run.agent_timed_out) reasons.push("agent timed out");
   if (!run.agent_completed) reasons.push("agent did not complete a turn");
-  if (!run.activation_reported) reasons.push("workflow activation was not reported");
   if (!run.head_unchanged) reasons.push("agent moved the benchmark Git HEAD");
   if (run.verifier.visible.timed_out) reasons.push("visible regression suite timed out");
   if (run.verifier.hidden.timed_out) reasons.push("hidden verifier timed out");
@@ -344,6 +343,19 @@ export function evaluateRunOutcome(run) {
     status: reasons.length === 0 ? "PASS" : "FAIL",
     reasons,
   };
+}
+
+export function evaluateWorkflowConformance(run) {
+  const reasons = [];
+  if (!run.activation_reported) reasons.push("top-level workflow declaration was not reported");
+  if (run.workflow === "leanpowers-0.2.0") {
+    if (!run.declared_risk) {
+      reasons.push("risk declaration was not reported");
+    } else if (run.declared_risk !== run.risk_level) {
+      reasons.push(`declared ${run.declared_risk} risk instead of ${run.risk_level}`);
+    }
+  }
+  return { status: reasons.length === 0 ? "PASS" : "FAIL", reasons };
 }
 
 export function resolveDevelopmentOutputDirectory(outputDirectory) {
@@ -507,6 +519,7 @@ export function renderDevelopmentReport(result) {
       String(run.repetition),
       run.workflow,
       run.outcome.status,
+      run.workflow_conformance.status,
       run.activation_reported ? "yes" : "no",
       displayMetric(run.telemetry.tokens?.total),
       displayMetric(run.telemetry.tokens?.uncached_plus_output),
@@ -529,6 +542,7 @@ export function renderDevelopmentReport(result) {
       displayMetric(metrics.median_tool_calls),
       displayMetric(metrics.median_workflow_read_calls),
       String(metrics.activation_failures),
+      String(metrics.conformance_failures),
       String(metrics.scope_violations),
     ].join(" | ");
   });
@@ -550,24 +564,25 @@ export function renderDevelopmentReport(result) {
     "",
     "## Aggregate",
     "",
-    "Workflow | Passed runs | Median model tokens | Median fresh tokens | Median wall seconds | Median tool calls | Median workflow reads | Activation failures | Scope violations",
-    "--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:",
+    "Workflow | Task PASS | Median model tokens | Median fresh tokens | Median wall seconds | Median tool calls | Median workflow reads | Declaration failures | Conformance failures | Scope violations",
+    "--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:",
     ...summaryRows,
     "",
     "## Paired reductions",
     "",
     "Population | Matched pairs | Median model-token reduction | Median fresh-token reduction | Median wall reduction | Median tool-call reduction | Median workflow-read reduction",
     "--- | ---: | ---: | ---: | ---: | ---: | ---:",
+    pairedRow("Task PASS + workflow conformant (primary)", paired.conformant_pass_pairs),
+    pairedRow("Primary: lean", paired.by_risk.lean.conformant_pass_pairs),
+    pairedRow("Primary: standard", paired.by_risk.standard.conformant_pass_pairs),
+    pairedRow("Primary: strict", paired.by_risk.strict.conformant_pass_pairs),
     pairedRow("Both workflows PASS", paired.both_pass_pairs),
-    pairedRow("Both PASS: lean", paired.by_risk.lean.both_pass_pairs),
-    pairedRow("Both PASS: standard", paired.by_risk.standard.both_pass_pairs),
-    pairedRow("Both PASS: strict", paired.by_risk.strict.both_pass_pairs),
     pairedRow("All matched runs", paired.all_pairs),
     "",
     "## Paired runs",
     "",
-    "Case | Risk | Rep | Workflow | Outcome | Activated | Model tokens | Fresh tokens | Wall seconds | Tool calls | Workflow reads | Product files | Workflow artifacts | Scope violations",
-    "--- | --- | ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:",
+    "Case | Risk | Rep | Workflow | Task | Conformance | Declared | Model tokens | Fresh tokens | Wall seconds | Tool calls | Workflow reads | Product files | Workflow artifacts | Scope violations",
+    "--- | --- | ---: | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:",
     ...rows,
     "",
     "## Failed-run reasons",
@@ -576,10 +591,10 @@ export function renderDevelopmentReport(result) {
     "",
     "## Interpretation boundary",
     "",
-    "- PASS requires reported workflow activation, successful agent completion, no timeout, both visible and hidden test success, and no changed-path scope violation.",
+    "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
-    "- Paired reductions are computed within each identical case and repetition before taking the median. Each metric shows its own valid sample count; incomplete telemetry is excluded from that metric only. The both-PASS population is primary, so failing faster never counts as an improvement.",
+    "- Paired reductions are computed within each identical case and repetition before taking the median. Each metric shows its own valid sample count; incomplete telemetry is excluded from that metric only. The task-PASS-and-conformant population is primary, so failing faster or skipping workflow gates never counts as an improvement.",
     "- Codex CLI does not expose a deterministic seed, so paired repetitions reduce noise but do not eliminate it.",
     "- The three cases cover a small feature, an unknown-cause cache defect, and a security-compatible API extension. They do not establish universal non-inferiority.",
     "- Raw transcripts remain local and are written only after every run finishes. Disposable workspaces are destroyed after each run and are not publication artifacts.",
@@ -647,7 +662,12 @@ async function runSingleCase({
     });
     const wallSeconds = (Date.now() - startedAt) / 1000;
     const telemetry = parseCodexResult(agent.stdout);
-    const activationReported = telemetry.first_progress_message.includes(entrypoint.slice(1));
+    const declaredRisk = extractDeclaredRisk(telemetry.first_progress_message);
+    const activationReported = telemetry.first_progress_message.includes(entrypoint.slice(1)) || (
+      workflow === "leanpowers-0.2.0" &&
+      declaredRisk !== null &&
+      /\brequired_gates\b/iu.test(telemetry.first_progress_message)
+    );
 
     const gitState = await inspectBenchmarkGitState({
       baselineHead,
@@ -670,6 +690,7 @@ async function runSingleCase({
       case_id: benchmarkCase.id,
       scenario_class: benchmarkCase.scenario_class,
       risk_level: benchmarkCase.risk_level,
+      declared_risk: declaredRisk,
       repetition,
       agent_exit_code: agent.exitCode,
       agent_timed_out: agent.timedOut,
@@ -688,6 +709,7 @@ async function runSingleCase({
       verifier,
     };
     result.outcome = evaluateRunOutcome(result);
+    result.workflow_conformance = evaluateWorkflowConformance(result);
     return {
       result,
       artifacts: {
@@ -750,6 +772,9 @@ function aggregateRuns(runs) {
       median_turns: median(selected.map((run) => run.telemetry.turns)),
       scope_violations: selected.reduce((sum, run) => sum + run.changes.violations.length, 0),
       activation_failures: selected.filter((run) => !run.activation_reported).length,
+      conformance_failures: selected.filter(
+        (run) => run.workflow_conformance?.status === "FAIL",
+      ).length,
       workflow_artifacts: selected.reduce((sum, run) => sum + run.changes.workflow.length, 0),
     }];
   }));
@@ -773,6 +798,11 @@ function aggregatePairedRuns(runs) {
   const bothPass = pairs.filter((group) =>
     [...WORKFLOWS].every((workflow) => group[workflow].outcome.status === "PASS")
   );
+  const conformantPass = bothPass.filter((group) =>
+    [...WORKFLOWS].every(
+      (workflow) => group[workflow].workflow_conformance?.status === "PASS",
+    )
+  );
   const byRisk = Object.fromEntries(["lean", "standard", "strict"].map((risk) => {
     const selected = pairs.filter((pair) => pair["leanpowers-0.2.0"].risk_level === risk);
     return [risk, {
@@ -780,11 +810,18 @@ function aggregatePairedRuns(runs) {
       both_pass_pairs: summarizePairs(selected.filter((pair) =>
         [...WORKFLOWS].every((workflow) => pair[workflow].outcome.status === "PASS")
       )),
+      conformant_pass_pairs: summarizePairs(selected.filter((pair) =>
+        [...WORKFLOWS].every((workflow) =>
+          pair[workflow].outcome.status === "PASS" &&
+          pair[workflow].workflow_conformance?.status === "PASS"
+        )
+      )),
     }];
   }));
   return {
     all_pairs: summarizePairs(pairs),
     both_pass_pairs: summarizePairs(bothPass),
+    conformant_pass_pairs: summarizePairs(conformantPass),
     by_risk: byRisk,
   };
 }
@@ -1225,6 +1262,14 @@ function isSafeRelativePath(value) {
 
 function finiteNumber(value) {
   return Number.isFinite(value) ? value : null;
+}
+
+function extractDeclaredRisk(message) {
+  const text = String(message ?? "");
+  const afterRisk = text.match(/\brisk(?:\s+(?:profile|level))?\s*[:=]?\s*`?(lean|standard|strict)`?/iu);
+  if (afterRisk) return afterRisk[1].toLowerCase();
+  const beforeRisk = text.match(/`?(lean|standard|strict)`?\s+risk\b/iu);
+  return beforeRisk ? beforeRisk[1].toLowerCase() : null;
 }
 
 function median(values) {

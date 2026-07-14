@@ -12,6 +12,7 @@ import {
   buildCodexArgs,
   evaluateChangedPaths,
   evaluateRunOutcome,
+  evaluateWorkflowConformance,
   inspectBenchmarkGitState,
   loadDevelopmentSuite,
   makePilotResult,
@@ -251,7 +252,7 @@ test("changed-path evaluation separates product changes, workflow artifacts, and
   );
 });
 
-test("a run passes only with activation, agent completion, tests, and scope intact", () => {
+test("a task passes only with agent completion, tests, and scope intact", () => {
   const passing = {
     agent_exit_code: 0,
     agent_timed_out: false,
@@ -270,7 +271,6 @@ test("a run passes only with activation, agent completion, tests, and scope inta
     { agent_exit_code: 1 },
     { agent_timed_out: true },
     { agent_completed: false },
-    { activation_reported: false },
     { head_unchanged: false },
     { verifier: { visible: { exit_code: 0, timed_out: true }, hidden: { exit_code: 0, timed_out: false } } },
     { verifier: { visible: { exit_code: 0, timed_out: false }, hidden: { exit_code: 0, timed_out: true } } },
@@ -284,6 +284,40 @@ test("a run passes only with activation, agent completion, tests, and scope inta
     };
     assert.equal(evaluateRunOutcome(run).status, "FAIL", JSON.stringify(mutation));
   }
+  assert.equal(
+    evaluateRunOutcome({ ...structuredClone(passing), activation_reported: false }).status,
+    "PASS",
+  );
+});
+
+test("workflow declaration and risk classification are separate conformance evidence", () => {
+  assert.deepEqual(
+    evaluateWorkflowConformance({
+      workflow: "leanpowers-0.2.0",
+      activation_reported: true,
+      declared_risk: "strict",
+      risk_level: "strict",
+    }),
+    { status: "PASS", reasons: [] },
+  );
+  assert.equal(
+    evaluateWorkflowConformance({
+      workflow: "leanpowers-0.2.0",
+      activation_reported: false,
+      declared_risk: "standard",
+      risk_level: "strict",
+    }).status,
+    "FAIL",
+  );
+  assert.equal(
+    evaluateWorkflowConformance({
+      workflow: "leanpowers-0.2.0",
+      activation_reported: true,
+      declared_risk: null,
+      risk_level: "standard",
+    }).status,
+    "FAIL",
+  );
 });
 
 test("raw benchmark output cannot be written into tracked repository paths", () => {
@@ -340,6 +374,7 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
     activation_reported: true,
     changes: { violations: [], workflow: [] },
     outcome: { status, reasons: [] },
+    workflow_conformance: { status: "PASS", reasons: [] },
     telemetry: {
       tokens: { total, uncached_plus_output: fresh },
       turns: 1,
@@ -373,6 +408,7 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
   assert.equal(result.paired.all_pairs.median_token_reduction_pct, 65);
   assert.equal(result.paired.by_risk.lean.both_pass_pairs.count, 1);
   assert.equal(result.paired.by_risk.standard.both_pass_pairs.count, 0);
+  assert.equal(result.paired.conformant_pass_pairs.count, 1);
 });
 
 test("completion and pairing reject duplicate runs that mask a missing counterpart", async () => {

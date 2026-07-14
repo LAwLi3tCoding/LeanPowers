@@ -1,7 +1,10 @@
 const STRICT_SIGNALS = [
   "authorization",
+  "authentication",
   "concurrency",
   "credentialGated",
+  "credentials",
+  "cryptography",
   "dataRisk",
   "destructive",
   "irreversible",
@@ -12,6 +15,8 @@ const STRICT_SIGNALS = [
   "production",
   "reviewHighRisk",
   "security",
+  "secrets",
+  "signatureVerification",
 ];
 
 const STANDARD_SIGNALS = [

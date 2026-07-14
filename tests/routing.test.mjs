@@ -24,6 +24,18 @@ test("user rigor can upgrade but never downgrade a strict signal", () => {
   assert.equal(classifyRisk({ preferredMode: "lean", security: true }), "strict");
 });
 
+test("security-boundary signals are always strict", () => {
+  for (const signal of [
+    "authentication",
+    "credentials",
+    "cryptography",
+    "secrets",
+    "signatureVerification",
+  ]) {
+    assert.equal(classifyRisk({ [signal]: true, local: true, reversible: true }), "strict");
+  }
+});
+
 test("initial workflow selection covers every workflow owner", () => {
   assert.equal(selectInitialWorkflow({ learningRequest: true }), "adapt");
   assert.equal(selectInitialWorkflow({ reviewRequested: true }), "review");
