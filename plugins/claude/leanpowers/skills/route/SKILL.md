@@ -22,13 +22,13 @@ Strict `GATES` is `[independent_review, current_evidence]`; otherwise `[current_
 
 One-call stage targets are not quality ceilings. Expand only for missing, contradictory, or failed evidence; restart affected gates.
 
-1. Use one green-path inspection tool call; one shell command locates/prints implementation/tests and all validation metadata.
+1. Green path: one shell command locates and prints full implementation, tests, and validation metadata.
 2. Before editing, output a clause→test ledger for every literal `must`/`only`/`exact`/`preserve`/`reject`; each rejection mutates one property of an asserted-passing case. Use one repository-relative multi-file patch for code/tests; never repatch on the green path.
 3. Run one applicable validation command. Failure enters `debug`; never claim completion. Green lean/standard may finish; strict **MUST NOT answer**; continue below.
 
 **Mandatory strict gate — final answer forbidden until exact pass**
 
-4. Freeze diff. Codex: if either V1/native tool is hidden, call exactly `tool_search(query="wait_agent targets spawn_agent fork_context", limit=2)`. Spawn only if its result exposes both; otherwise return incomplete before any spawn. Call `multi_agent_v1.spawn_agent` once with only `message`, `fork_context:false`; save ID, then call `multi_agent_v1.wait_agent` once with `targets:[ID]`. No other review-tool action. Claude calls one blocking Agent. Never use `items`, retry, fallback, second/placeholder/`noop`, or “as above”. Copy entire original task byte-for-byte—including case/punctuation—under `Original task:`. Spawn message MUST equal the filled template, starting at its invocation line; omit only the runtime label.
+4. Freeze diff. Codex: if either V1/native tool is hidden, call exactly `tool_search(query="wait_agent targets spawn_agent fork_context", limit=2)`. Spawn only if its result exposes both; otherwise return incomplete before any spawn. Call `multi_agent_v1.spawn_agent` once with only `message`, `fork_context:false`; save ID, then call `multi_agent_v1.wait_agent` once with `targets:[ID]`. No other review-tool action. Claude calls one Agent. Never probe or use `items`, retry, fallback, second/placeholder/`noop`, or “as above”. Copy entire original task byte-for-byte—including case/punctuation—under `Original task:`. Spawn message MUST equal the filled template, starting at its invocation line; omit only the runtime label.
 
 Codex message:
 
@@ -39,7 +39,7 @@ Original task:
 Reviewer context:
 Sole reviewer; read diff/code; do not edit/delegate.
 Ledger: {one-line clause→boundary evidence; no task restatement}
-Paths: {one-line changed paths}
+Paths: {repository-relative changed paths}
 Test: {exact validation command}; exit 0
 Return Review YAML raw—no JSON/fence/heading/prose. Pass: exactly these three lines:
 
@@ -56,7 +56,7 @@ Original task:
 Reviewer context:
 Sole reviewer; read diff/code; do not edit/delegate.
 Ledger: {one-line clause→boundary evidence; no task restatement}
-Paths: {one-line changed paths}
+Paths: {repository-relative changed paths}
 Test: {exact validation command}; exit 0
 Return Review YAML raw—no JSON/fence/heading/prose. Pass: exactly these three lines:
 

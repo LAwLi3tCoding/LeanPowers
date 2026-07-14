@@ -111,7 +111,7 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /one-call stage targets/i);
   assert.match(route, /not quality ceilings/i);
   assert.match(route, /Expand only for missing, contradictory, or failed evidence/i);
-  assert.match(route, /one green-path inspection tool call/i);
+  assert.match(route, /Green path: one shell command/i);
   assert.match(route, /each rejection mutates one property of an asserted-passing case/i);
   assert.match(route, /one shell command/i);
   assert.match(route, /one repository-relative multi-file patch(?: call)? for (?:implementation and tests|code\/tests)/i);
@@ -128,8 +128,9 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /fork_context:false/i);
   assert.match(route, /original task (?:verbatim|byte-for-byte)/i);
   assert.match(route, /spawn_agent` once/i);
-  assert.match(route, /with (?:`message` only|only `message`)[\s\S]{0,220}Never use `items`/i);
+  assert.match(route, /with (?:`message` only|only `message`)[\s\S]{0,220}Never probe or use `items`/i);
   assert.match(route, /second\/placeholder\/`noop`/i);
+  assert.match(route, /Never probe/i);
   assert.match(route, /as above/i);
   assert.match(route, /\$leanpowers:review/i);
   assert.match(route, /\/leanpowers:review/i);
@@ -145,7 +146,7 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /wait_agent` once with `targets:\[ID\]`/i);
   assert.match(route, /Test: \{exact validation command\}; exit 0/i);
   assert.match(route, /one-line clause→boundary evidence; no task restatement/i);
-  assert.match(route, /one-line changed paths/i);
+  assert.match(route, /repository-relative changed paths/i);
   assert.match(route, /exact validation command.*exit 0/i);
   assert.match(route, /Findings require repair\/retest, then restart step 4 with a fresh reviewer and current Test result/i);
   assert.match(route, /Blocked\/unavailable returns incomplete/i);
