@@ -74,7 +74,7 @@ const capsuleReproductionOutput = execFileSync(
   ["repro/localized-template-cache.mjs"],
   { cwd: cacheFixtureRoot, encoding: "utf8" },
 ).trim();
-const capsuleReviewContract = "Implement the benchmark fixture change.";
+const capsuleReviewContract = "Implement the benchmark fixture change. Preserve current behavior.";
 
 assert.deepEqual(
   JSON.parse(capsuleReproductionOutput),
@@ -132,6 +132,8 @@ function passingCapsuleStage(workflow = "build") {
     required_read_paths: ["src/index.mjs", "test/index.test.mjs"],
     validation_metadata_read_observed: true,
     reproduce_observed: workflow === "debug" ? true : null,
+    pre_patch_clause_test_ledger_observed: true,
+    post_patch_clause_test_ledger_observed: false,
     patch_batches: 1,
     patch_file_events: 2,
     patch_paths: ["src/index.mjs", "test/index.test.mjs"],
@@ -180,6 +182,7 @@ function capsuleTraceEvents({
   nonReviewTail = false,
   patchBatches = 1,
   patchPaths = ["src/index.mjs", "test/index.test.mjs"],
+  prePatchLedger = "Clause→test ledger:\n- preserve behavior → existing regression",
   postValidationReview = false,
   readCommand = "tail -n +1 -- src/index.mjs test/index.test.mjs package.json",
   readOutput = "source and test contents",
@@ -293,6 +296,9 @@ function capsuleTraceEvents({
       exit_code: 0,
       status: "completed",
     }));
+  }
+  if (prePatchLedger !== null) {
+    events.push(completed({ type: "agent_message", text: prePatchLedger }));
   }
   const changes = patchPaths.map((changedPath) => ({
     path: `/tmp/run/workspace/${changedPath}`,
@@ -783,6 +789,120 @@ test("Codex trace observes the complete debug capsule stage protocol", () => {
   );
 });
 
+test("capsule clause-to-test ledger must appear before PATCH, not only in final", () => {
+  const stage = parseCodexResult(
+    capsuleTraceEvents({
+      prePatchLedger: null,
+      finalMessage: "Clause → test ledger:\n- preserve behavior → tests pass",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+
+  assert.equal(stage.pre_patch_clause_test_ledger_observed, false);
+  assert.equal(stage.protocol_observed, false);
+
+  const lateEvents = capsuleTraceEvents({ prePatchLedger: null });
+  const patchStart = lateEvents.findIndex((event) =>
+    event.type === "item.started" && event.item?.type === "file_change"
+  );
+  lateEvents.splice(patchStart + 1, 0, {
+    type: "item.completed",
+    item: {
+      type: "agent_message",
+      text: "Here is the Clause→boundary ledger after PATCH started.",
+    },
+  });
+  const lateStage = parseCodexResult(
+    lateEvents.map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(lateStage.pre_patch_clause_test_ledger_observed, false);
+
+  const promiseStage = parseCodexResult(
+    capsuleTraceEvents({ prePatchLedger: "Clause→test ledger will follow." })
+      .map(JSON.stringify)
+      .join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(promiseStage.pre_patch_clause_test_ledger_observed, false);
+
+  const duplicateStage = parseCodexResult(
+    capsuleTraceEvents({
+      finalMessage: "Clause→test ledger:\n- preserve behavior → tests pass",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(duplicateStage.post_patch_clause_test_ledger_observed, true);
+  assert.equal(duplicateStage.protocol_observed, false);
+
+  const narrativeStage = parseCodexResult(
+    capsuleTraceEvents({
+      finalMessage: "Pre-PATCH clause→test ledger was emitted earlier; tests pass.",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(narrativeStage.post_patch_clause_test_ledger_observed, false);
+  assert.equal(narrativeStage.protocol_observed, true);
+
+  const unrelatedStage = parseCodexResult(
+    capsuleTraceEvents({
+      prePatchLedger: "Clause→test ledger:\n- unrelated greeting → unrelated check",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(unrelatedStage.pre_patch_clause_test_ledger_observed, false);
+  assert.equal(unrelatedStage.protocol_observed, false);
+
+  const twoClauseOptions = {
+    ...capsuleTraceOptions("debug"),
+    expectedReviewContract: "Preserve current behavior. Reject malformed input.",
+  };
+  const missingClauseStage = parseCodexResult(
+    capsuleTraceEvents().map(JSON.stringify).join("\n"),
+    twoClauseOptions,
+  ).workflow_trace.capsule_stage;
+  assert.equal(missingClauseStage.pre_patch_clause_test_ledger_observed, false);
+  const reusedMappingStage = parseCodexResult(
+    capsuleTraceEvents({
+      prePatchLedger: "Clause→test ledger:\n- preserve behavior and reject input → one generic test",
+    }).map(JSON.stringify).join("\n"),
+    twoClauseOptions,
+  ).workflow_trace.capsule_stage;
+  assert.equal(reusedMappingStage.pre_patch_clause_test_ledger_observed, false);
+  const completeClauseStage = parseCodexResult(
+    capsuleTraceEvents({
+      prePatchLedger: [
+        "Clause→test ledger:",
+        "- preserve current behavior → existing regression",
+        "- reject malformed input → rejection test",
+      ].join("\n"),
+    }).map(JSON.stringify).join("\n"),
+    twoClauseOptions,
+  ).workflow_trace.capsule_stage;
+  assert.equal(completeClauseStage.pre_patch_clause_test_ledger_observed, true);
+
+  const sameSentenceOptions = {
+    ...capsuleTraceOptions("debug"),
+    expectedReviewContract: "Accept only the exact format; reject drift and preserve compatibility.",
+  };
+  const collapsedSentenceStage = parseCodexResult(
+    capsuleTraceEvents({
+      prePatchLedger: "Clause→test ledger:\n- only exact reject preserve → one format test",
+    }).map(JSON.stringify).join("\n"),
+    sameSentenceOptions,
+  ).workflow_trace.capsule_stage;
+  assert.equal(collapsedSentenceStage.pre_patch_clause_test_ledger_observed, false);
+
+  const asciiStage = parseCodexResult(
+    capsuleTraceEvents({
+      prePatchLedger: "Clause->boundary ledger before edit:\n1) preserve backward compatibility -> integration contract",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(asciiStage.pre_patch_clause_test_ledger_observed, true);
+  assert.equal(asciiStage.protocol_observed, true);
+});
+
 test("capsule stages allow one evidence-backed retry without hiding its cost", () => {
   const malformedQuotedRead = [
     "/bin/zsh -lc \"printf '",
@@ -1135,6 +1255,7 @@ test("debug capsule stage protocol rejects one-property trace regressions", () =
     [{ discoverCommand: "rg --files; rg -n -- 'cache|locale' ." }, "discover_observed"],
     [{ discoverCommand: "rg --files .; rg -n -- 'cache|locale'" }, "discover_observed"],
     [{ discoverCommand: "rg --files .; rg -n -- 'cache|locale' /tmp/workspace ." }, "discover_observed"],
+    [{ discoverCommand: String.raw`rg --files .; rg -n -- 'cache\|locale' .` }, "discover_observed"],
     [{ discoverCommand: "rg --files .; rg -n -- \"cache|locale\" ." }, "discover_observed"],
     [{ discoverCommand: "rg --files .; rg -n -- {cache,..} ." }, "discover_observed"],
     [{ discoverCommand: "rg --files .; rg -n -f ../patterns ." }, "discover_observed"],
@@ -2391,6 +2512,8 @@ test("capsule stage telemetry independently gates workflow conformance", () => {
     [{ validation_metadata_read_observed: false }, "READ omitted discovered validation metadata"],
     [{ patch_targets_read_observed: false }, "READ omitted discovered files that were later changed"],
     [{ grounded_candidates_read_observed: false }, "READ omitted grounded implementation, caller, or test candidates"],
+    [{ pre_patch_clause_test_ledger_observed: false }, "pre-PATCH clause-to-test ledger was not observed"],
+    [{ post_patch_clause_test_ledger_observed: true }, "clause-to-test ledger was repeated after PATCH"],
     [{ patch_batches: 2 }, "one contiguous multi-file PATCH batch was not observed"],
     [{ implementation_patch_observed: false }, "one contiguous multi-file PATCH batch was not observed"],
     [{ test_patch_observed: false }, "one contiguous multi-file PATCH batch was not observed"],

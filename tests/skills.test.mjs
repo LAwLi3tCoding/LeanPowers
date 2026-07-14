@@ -38,7 +38,7 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
   assert.match(body, /credentials\/secrets/i);
   assert.match(body, /risk: RISK/i);
   assert.match(body, /`OWNER`[\s\S]{0,220}never a risk/i);
-  assert.match(body, /`RISK`: `lean`, `standard`, or `strict`/i);
+  assert.match(body, /`RISK`: `lean`\/`standard`\/`strict`/i);
   assert.match(body, /`lean`(?::| means) clear, local/i);
   assert.match(body, /`strict`(?::| means) security/i);
   assert.match(body, /otherwise(?: use)? `standard`/i);
@@ -105,7 +105,7 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(verify, /independent_review: pass \| missing \| not_required/i);
   assert.match(build, /affected integration[\s\S]{0,120}full-suite/i);
   assert.match(build, /validation gap blocks `complete`/i);
-  assert.match(route, /material request\/scope ambiguity to `shape`/i);
+  assert.match(route, /material request\/scope ambiguity→`shape`/i);
   assert.match(route, /Within build\/debug ownership, reproduce\/trace\/diagnose\/root-cause\/why\/first-wrong-transition overrides `build`/i);
   assert.match(route, /overrides `build`:[\s\S]{0,60}MUST declare `debug`, risk ≥`standard`/i);
   assert.match(route, /even with supplied repro\/cause/i);
@@ -118,7 +118,7 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /explicit-feedback→`adapt`/i);
   assert.match(route, /requested diagnosis\/cause discovery→`debug`/i);
   assert.match(route, /explicit cause\/repair or change→`build`/i);
-  assert.match(route, /other requests load only selected Skill/i);
+  assert.match(route, /others load only selected Skill/i);
   assert.match(route, /BEFORE prose\/tool, output exactly these four resolved plain lines once/i);
   assert.match(route, /Never repeat them:[\s\S]{0,120}final MUST omit lines beginning `entrypoint:`, `workflow:`, `risk:`, or `required_gates:`/i);
   assert.match(route, /Final MUST omit the four opening ledger lines/i);
@@ -129,10 +129,12 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /`build` DISCOVER\(1\)→READ\(1\)→PATCH\(1\)→VALIDATE\(1\)/i);
   assert.match(route, /`debug` adds REPRODUCE\/TRACE\(1\) before PATCH/i);
   assert.match(route, /Expand failed\/missing\/contradictory stages only/i);
-  assert.match(route, /DISCOVER: Codex MUST run exactly one root command shaped `rg --files \.; rg -n -- 'TERMS' \.`/i);
-  assert.match(route, /replacing only TERMS; no pipes\/globs\/`cd`\/redirects\/extra paths/i);
+  assert.match(route, /DISCOVER: Preset repository cwd applies throughout/i);
+  assert.match(route, /Codex runs exactly `rg --files \.; rg -n -- 'TERMS' \.`/i);
+  assert.match(route, /TERMS is plain `a\|b`, never backslashed/i);
+  assert.match(route, /No prefix\/`cd`\/pipes\/globs\/redirections\/extra paths/i);
   assert.match(route, /Claude uses adjacent native `Glob`\+`Grep`/i);
-  assert.match(route, /Identify implementation, callers, tests, repro, and validation manifest/i);
+  assert.match(route, /Identify implementation, callers, tests, repro, validation manifest/i);
   assert.match(route, /READ immediately follows DISCOVER\. Codex MUST run one `tail -n \+1 --` command/i);
   assert.match(route, /selected candidates and validation manifest as shell-safe operands/i);
   assert.match(route, /no printf\/echo\/chaining\/re-read/i);
@@ -141,11 +143,13 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /DEBUG then, pre-edit:[\s\S]{0,100}executes the real failing path/i);
   assert.match(route, /showing failure and first wrong transition/i);
   assert.match(route, /inspection\/inference is not reproduction/i);
-  assert.match(route, /each rejection mutates one property of an asserted-passing case/i);
+  assert.match(route, /each rejection mutates one (?:property of an )?asserted-passing case(?: property)?/i);
   assert.match(route, /PATCH: Codex ONE repository-relative `apply_patch` containing all code\/tests/i);
   assert.match(route, /Claude adjacent native `Edit`\/`Write` calls without prose\/inspection/i);
   assert.match(route, /Include failure-path tests; never repatch green evidence/i);
-  assert.match(route, /output a clause→test ledger/i);
+  assert.match(route, /Pre-PATCH emit header `Clause→test ledger:`/i);
+  assert.match(route, /one distinct `<clause retaining marker>→<test>` line per[\s\S]{0,80}occurrence/i);
+  assert.match(route, /never repeat after PATCH/i);
   assert.match(route, /VALIDATE uses ONE canonical test\/build command covering regression and affected checks/i);
   assert.match(route, /never chain reproduction\/diagnostics/i);
   assert.match(route, /On green lean\/standard, STOP tooling, skip step 5, and answer/i);

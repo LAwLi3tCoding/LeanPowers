@@ -702,6 +702,11 @@ function traceCapsuleStage(
   );
   const patchBatches = groupContiguousFileChanges(events, taskChanges);
   const taskFirstChangeIndex = taskChanges[0]?.index ?? -1;
+  const taskFirstPatchIndex = indexed.find(({ event, index }) =>
+    index < firstReviewSpawnIndex &&
+    ["item.started", "item.completed"].includes(event?.type) &&
+    event?.item?.type === "file_change"
+  )?.index ?? -1;
   const taskLastChangeIndex = taskChanges.at(-1)?.index ?? -1;
   const workflowReads = indexed.filter(
     ({ event, index }) =>
@@ -741,6 +746,25 @@ function traceCapsuleStage(
     readRequiredPatchPaths,
     changePolicy,
   );
+  const lastPreChangeCommandIndex = preChangeCommands.at(-1)?.index ?? -1;
+  const prePatchClauseTestLedgerObserved =
+    lastPreChangeCommandIndex >= 0 &&
+    taskFirstPatchIndex > lastPreChangeCommandIndex &&
+    indexed.some(({ event, index }) =>
+      index > lastPreChangeCommandIndex &&
+      index < taskFirstPatchIndex &&
+      event?.type === "item.completed" &&
+      event?.item?.type === "agent_message" &&
+      hasClauseTestLedgerPacket(event.item.text, expectedReviewContract)
+    );
+  const postPatchClauseTestLedgerObserved =
+    taskFirstPatchIndex >= 0 &&
+    indexed.some(({ event, index }) =>
+      index > taskFirstPatchIndex &&
+      event?.type === "item.completed" &&
+      event?.item?.type === "agent_message" &&
+      hasClauseTestLedgerHeader(event.item.text)
+    );
   const discoverObserved = preChangeStage.discover_observed;
   const readObserved = preChangeStage.read_observed;
   const reproduceObserved = preChangeStage.reproduce_observed;
@@ -773,6 +797,8 @@ function traceCapsuleStage(
     !ledgerKeysAfterInitialObserved &&
     workflowReads.length === 0 &&
     preChangeStage.protocol_observed &&
+    prePatchClauseTestLedgerObserved &&
+    !postPatchClauseTestLedgerObserved &&
     multiFilePatchObserved &&
     validationObserved &&
     (declaredRisk === "strict" || ordinaryStopObserved);
@@ -802,6 +828,8 @@ function traceCapsuleStage(
     validation_metadata_read_observed:
       preChangeStage.validation_metadata_read_observed,
     reproduce_observed: reproduceObserved,
+    pre_patch_clause_test_ledger_observed: prePatchClauseTestLedgerObserved,
+    post_patch_clause_test_ledger_observed: postPatchClauseTestLedgerObserved,
     patch_batches: patchBatches.length,
     patch_file_events: taskChanges.length,
     patch_paths: patchPaths,
@@ -814,6 +842,58 @@ function traceCapsuleStage(
     ordinary_stop_observed: ordinaryStopObserved,
     protocol_observed: protocolObserved,
   };
+}
+
+function isClauseTestLedgerHeaderLine(value) {
+  return /^\s*(?:#{1,6}\s*)?(?:\*\*)?clause\s*(?:→|->)\s*(?:test|boundary)\s+ledger(?:\s+before\s+(?:edit(?:s|ing)?|patch(?:ing)?))?\s*:?\s*(?:\*\*)?\s*$/iu
+    .test(String(value ?? ""));
+}
+
+function hasClauseTestLedgerHeader(value) {
+  return String(value ?? "")
+    .split(/\r?\n/u)
+    .some(isClauseTestLedgerHeaderLine);
+}
+
+function hasClauseTestLedgerPacket(value, task) {
+  const lines = String(value ?? "").split(/\r?\n/u);
+  const headerIndex = lines.findIndex(isClauseTestLedgerHeaderLine);
+  if (headerIndex < 0) return false;
+  const mappings = lines.slice(headerIndex + 1).flatMap((line) => {
+    const entry = line
+      .replace(/^\s*(?:[-*+]\s+|\d+[.)]\s*)/u, "")
+      .trim();
+    const mapping = entry.match(/^(.+?)\s*(?:→|->)\s*(.+)$/u);
+    return mapping === null || mapping[1].trim() === "" || mapping[2].trim() === ""
+      ? []
+      : [{ clause: mapping[1].trim(), test: mapping[2].trim() }];
+  });
+  if (mappings.length === 0) return false;
+  return hasDistinctLiteralMarkerMappings(literalTaskMarkers(task), mappings);
+}
+
+function literalTaskMarkers(value) {
+  return [...String(value ?? "").matchAll(/\b(must|only|exact|preserve|reject)\b/giu)]
+    .map((match) => match[1].toLocaleLowerCase("en-US"));
+}
+
+function hasDistinctLiteralMarkerMappings(markers, mappings, markerIndex = 0, used = new Set()) {
+  if (markerIndex >= markers.length) return true;
+  const marker = markers[markerIndex];
+  for (const [mappingIndex, mapping] of mappings.entries()) {
+    if (
+      used.has(mappingIndex) ||
+      !new RegExp(`\\b${marker}\\b`, "iu").test(mapping.clause)
+    ) {
+      continue;
+    }
+    used.add(mappingIndex);
+    if (hasDistinctLiteralMarkerMappings(markers, mappings, markerIndex + 1, used)) {
+      return true;
+    }
+    used.delete(mappingIndex);
+  }
+  return false;
 }
 
 function countToolCallsAfter(indexed, afterIndex) {
@@ -1014,8 +1094,11 @@ function isContentAwareDiscover(item) {
   const commandMatch = String(command ?? "").match(
     /^rg[ \t]+--files[ \t]+\.[ \t]*;[ \t]*rg[ \t]+-n[ \t]+--[ \t]+'([^'\r\n]+)'[ \t]+\.$/u,
   );
+  const terms = commandMatch?.[1] ?? null;
   const canonicalCommand =
-    commandMatch !== null && ![".", ".*", "^", "$"].includes(commandMatch[1]);
+    terms !== null &&
+    !terms.includes("\\") &&
+    ![".", ".*", "^", "$"].includes(terms);
   const hasContentOutput = /(?:^|\r?\n)[^:\r\n]+:\d+:[^\r\n]+/u
     .test(String(item?.aggregated_output ?? ""));
   return canonicalCommand && hasContentOutput;
@@ -1586,6 +1669,12 @@ export function evaluateWorkflowConformance(run) {
         if (run.expected_workflow === "debug" && !capsule.reproduce_observed) {
           reasons.push("pre-edit executable REPRODUCE was not observed");
         }
+        if (!capsule.pre_patch_clause_test_ledger_observed) {
+          reasons.push("pre-PATCH clause-to-test ledger was not observed");
+        }
+        if (capsule.post_patch_clause_test_ledger_observed) {
+          reasons.push("clause-to-test ledger was repeated after PATCH");
+        }
         if (
           capsule.patch_batches !== 1 ||
           !capsule.implementation_patch_observed ||
@@ -1895,7 +1984,7 @@ export function renderDevelopmentReport(result) {
     "## Interpretation boundary",
     "",
     "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    "- LeanPowers conformance requires one exact four-line route ledger before any task tool and forbids every later ledger-key line. Build/debug capsule traces must show no Skill/reference reload, the exact root-relative `rg --files .; rg -n -- 'TERMS' .` discovery shape with a nontrivial literal pattern and option terminator, batched reads, fixture-owned structured pre-edit reproduction for debug, one contiguous multi-file patch batch, and one supported successful validation command. Codex JSONL emits one file-change item per changed file and no patch-call identifier, so contiguous file-change items are an explicit call-cardinality proxy; immediately adjacent independent patch calls with no intervening JSONL event are indistinguishable and may be coalesced. The proxy does not prove exact patch-call cardinality. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Each strict review cycle additionally requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
+    "- LeanPowers conformance requires one exact four-line route ledger before any task tool and forbids every later ledger-key line. Build/debug capsule traces must show no Skill/reference reload, the exact root-relative `rg --files .; rg -n -- 'TERMS' .` discovery shape with a nontrivial literal pattern and option terminator, batched reads, fixture-owned structured pre-edit reproduction for debug, a pre-PATCH clause-to-test packet with one distinct mapping per literal marker, one contiguous multi-file patch batch, and one supported successful validation command. Clause-ledger telemetry proves timing, structure, and literal-marker cardinality, not semantic correctness. Codex JSONL emits one file-change item per changed file and no patch-call identifier, so contiguous file-change items are an explicit call-cardinality proxy; immediately adjacent independent patch calls with no intervening JSONL event are indistinguishable and may be coalesced. The proxy does not prove exact patch-call cardinality. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Each strict review cycle additionally requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
     "- Codex JSONL does not expose raw spawn arguments such as `fork_context`; observable spawn/wait behavior is checked dynamically, while exact argument shape is covered by static workflow tests and remains a runtime telemetry gap.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
