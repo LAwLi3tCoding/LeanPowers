@@ -4,12 +4,16 @@ import path from "node:path";
 import test from "node:test";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const EXPECTED_IDENTITY = [
-  "LAwLi3tCoding",
-  "203456625+LAwLi3tCoding@users.noreply.github.com",
-  "LAwLi3tCoding",
-  "203456625+LAwLi3tCoding@users.noreply.github.com",
-].join("|");
+const EXPECTED_NAME = "LAwLi3tCoding";
+const HISTORICAL_NOREPLY_EMAIL = "203456625+LAwLi3tCoding@users.noreply.github.com";
+const APPROVED_PERSONAL_EMAIL_DOMAINS = new Set([
+  "hotmail.co.uk",
+  "hotmail.com",
+  "live.com",
+  "msn.com",
+  "outlook.cn",
+  "outlook.com",
+]);
 const DEPRECATED_IDENTITY = ["LAwLi3t", "CN"].join("-");
 const MACHINE_HOME = /(?:\/Users\/(?!alice(?=[/"'\s),.;]|$)|example(?=[/"'\s),.;]|$))[^/\s]+|\/home\/[^/\s]+|\/root\/(?!private(?=[/"'\s),.;]|$))[^/\s]+|[A-Za-z]:\\Users\\[^\\\s]+)/u;
 const EMAIL = /([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/gu;
@@ -49,6 +53,25 @@ function privacyFindings(content) {
   return findings;
 }
 
+function approvedCommitIdentity(identity) {
+  const [authorName, authorEmail, committerName, committerEmail, ...extra] =
+    identity.split("|");
+  if (
+    extra.length > 0
+    || authorName !== EXPECTED_NAME
+    || committerName !== EXPECTED_NAME
+    || authorEmail !== committerEmail
+  ) {
+    return false;
+  }
+  if (authorEmail === HISTORICAL_NOREPLY_EMAIL) {
+    return true;
+  }
+  const separator = authorEmail.lastIndexOf("@");
+  return separator > 0
+    && APPROVED_PERSONAL_EMAIL_DOMAINS.has(authorEmail.slice(separator + 1).toLowerCase());
+}
+
 function gitLines(args) {
   return execFileSync("git", args, {
     cwd: ROOT,
@@ -70,6 +93,7 @@ function matchingHistoryLines(commit) {
 
 test("privacy detector rejects private values but permits public and synthetic fixtures", () => {
   const privateHome = ["", "Users", "private-user", "project"].join("/");
+  const publicSyntheticHome = ["", "Users", "example", "repository"].join("/");
   const privateEmail = ["author", "private-company.test"].join("@");
 
   assert.deepEqual(privacyFindings(privateHome), ["machine-specific home path"]);
@@ -79,17 +103,39 @@ test("privacy detector rejects private values but permits public and synthetic f
     [],
   );
   assert.deepEqual(privacyFindings("git@github.com:owner/repository.git"), []);
-  assert.deepEqual(privacyFindings("/Users/example/repository"), []);
+  assert.deepEqual(privacyFindings(publicSyntheticHome), []);
 });
 
-test("all reachable commits use the public noreply identity", () => {
+test("commit identity policy accepts historical noreply and personal Outlook metadata", () => {
+  const personalEmail = ["developer", "outlook.com"].join("@");
+  assert.equal(
+    approvedCommitIdentity(
+      [EXPECTED_NAME, HISTORICAL_NOREPLY_EMAIL, EXPECTED_NAME, HISTORICAL_NOREPLY_EMAIL]
+        .join("|"),
+    ),
+    true,
+  );
+  assert.equal(
+    approvedCommitIdentity([EXPECTED_NAME, personalEmail, EXPECTED_NAME, personalEmail].join("|")),
+    true,
+  );
+  assert.equal(
+    approvedCommitIdentity(["other", personalEmail, "other", personalEmail].join("|")),
+    false,
+  );
+});
+
+test("all reachable commits use an approved GitHub identity", () => {
   const identities = gitLines([
     "log",
     "HEAD",
     "--format=%an|%ae|%cn|%ce",
   ]);
   assert.ok(identities.length > 0);
-  assert.deepEqual([...new Set(identities)], [EXPECTED_IDENTITY]);
+  assert.ok(
+    identities.every(approvedCommitIdentity),
+    "reachable commit identity is outside the approved GitHub policy",
+  );
 });
 
 test("all reachable commit messages, paths, and text blobs pass the privacy guard", () => {

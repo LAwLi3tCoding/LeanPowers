@@ -2,23 +2,42 @@
 
 The benchmark tests the product promise: materially lower workflow overhead without a meaningful engineering-quality regression versus Superpowers 6.1.1.
 
+This is a non-inferiority and efficiency study, not a competition narrative. Superpowers is the upstream inspiration and active baseline because LeanPowers derives many of its engineering principles from it. A passing result would mean that LeanPowers stayed within predeclared quality bounds under the tested conditions while using fewer resources. It would not establish that LeanPowers is universally better, or diminish the value of Superpowers' more comprehensive workflow.
+
 ## Current status
 
 The repository contains the scenario catalog, result schema, deterministic comparator, and scorer fixtures. **A paired live benchmark has not yet been executed.** Files under `evals/fixtures/` explicitly use `"provenance": "simulated"`; they are test data for scorer behavior, not observations from real agent runs, and must not be cited as product results.
 
 Therefore, no current release may claim measured non-inferiority, token reduction, wall-time reduction, or agent-call reduction from these fixtures.
 
+## Public methodological foundations
+
+`Agent Workflow Benchmark` is this project's implementation name. Its evaluation design is grounded in public methods rather than treated as a self-validating private standard:
+
+- [Stanford HELM](https://crfm.stanford.edu/2022/11/17/helm.html) supplies the broad-coverage, multi-metric, standardized-comparison principles. The catalog must state both what it covers and what it omits.
+- The [SWE-bench evaluation protocol](https://www.swebench.com/SWE-bench/api/harness/) supplies the executable distinction between fixing the target behavior (`FAIL_TO_PASS`) and preserving existing behavior (`PASS_TO_PASS`). LeanPowers adopts the protocol idea, not an assumption that any public dataset is permanently authoritative.
+- [METR Task-Completion Time Horizons](https://metr.org/time-horizons/) supplies the reliability view across tasks calibrated by human expert completion time. This is useful for detecting whether a lighter workflow loses reliability as task length increases.
+- The UK AI Security Institute's [Inspect AI](https://inspect.aisi.org.uk/) and the [Harbor task protocol](https://www.harborframework.com/docs/tasks) provide public implementation patterns for sandboxed agents, repeated trials, isolated verifiers, full trajectories, limits, and structured scoring.
+- OpenAI's [playbook for trustworthy third-party evaluations](https://openai.com/index/trustworthy-third-party-evaluations-foundations/) supplies the claim-first validity audit: report harness effects and check reward hacking, refusals, contamination, broken problems, and evaluation awareness.
+- The statistical framing adapts established non-inferiority design principles: choose the margin before observing results, report effect size and uncertainty, and distinguish non-inferiority from superiority. The [FDA guidance](https://www.fda.gov/regulatory-information/search-fda-guidance-documents/non-inferiority-clinical-trials) and [CONSORT extension](https://www.equator-network.org/reporting-guidelines/consort-non-inferiority/) are methodological references, not endorsements of this software benchmark.
+
+As of the 2026-07-14 methodology snapshot, we are not aware of a widely adopted public standard specifically for comparing coding-workflow plugins. This protocol therefore combines established evaluation principles, executable correctness checks, reproducible agent harnesses, and paired statistical analysis. Public task sets may supply cases, but repository-specific workflow tasks remain necessary for delivery safety, dirty worktrees, false completion claims, authorization, and project-local feedback learning.
+
+Public benchmark data also needs continuous validity review. OpenAI reported in February 2026 that SWE-bench Verified had become unsuitable for frontier capability claims because of flawed tests and contamination, then reported in July 2026 that roughly 30% of audited SWE-bench Pro tasks were broken and withdrew its earlier recommendation. See the [SWE-bench Verified audit](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/) and [SWE-bench Pro audit](https://openai.com/index/separating-signal-from-noise-coding-evaluations/). These findings reinforce the protocol's requirement for task-level audits, independent verification, and explicit broken-problem reporting; they do not invalidate executable paired testing as a method.
+
 ## Experimental design
 
-Run each scenario twice: once with Superpowers 6.1.1 and once with the candidate LeanPowers release. Hold these fields identical:
+For every pre-registered `scenario × seed/repetition` pairing unit, run once with Superpowers 6.1.1 and once with the candidate LeanPowers release. Use the same seed within each baseline/candidate pair and at least two paired repetitions per scenario; the final repetition count must be fixed by the pre-registered analysis plan. Hold these fields identical within each pair:
 
 - model and reasoning configuration;
 - repository snapshot and dirty-worktree state;
 - prompt set and acceptance criteria;
 - evaluator and evaluator rubric;
-- unique random seeds, with at least two seeds;
+- paired random seed;
 - tool permissions and runtime version;
 - blind evaluation status.
+
+Pre-register the baseline and candidate commits, non-inferiority margin, efficiency thresholds, scenario inventory, exclusions, repetitions, randomization method, scorer version, and analysis plan before inspecting results. Randomize or counterbalance workflow run order within each task. Report task-level paired outcomes and uncertainty, not only aggregate means.
 
 The evaluator must not know which workflow produced an artifact. Record raw transcripts and command output outside the result summary so audits can reproduce each score.
 
@@ -136,6 +155,8 @@ All gates must pass:
 | Retrieved lessons per task | at most `3` |
 
 Hard failures dominate aggregate scores. A critical escape, unauthorized high-risk action, known false completion, or equivalent hard failure blocks release. A regressing scenario category must be rerun through strict mode and meet its baseline before release.
+
+The `-3` percentage-point task-success gate is the predeclared non-inferiority margin for this project. The current deterministic comparator treats it as a mechanical point-estimate screen. A formal published non-inferiority claim must additionally report a paired uncertainty interval that remains on the acceptable side of the margin; until that analysis is encoded in the result schema, it is an explicit external reporting requirement and validation gap. Efficiency metrics are separate superiority targets and must not compensate for a quality or safety gate failure.
 
 The comparator executes all four learning gates from each run's validated `learning_evidence`. Candidate related-task accuracy must be strictly greater than baseline, while contamination and safety bypass must both be zero and maximum retrieval must be at most three. A valid comparable live pair that fails any learning gate is `BLOCK`; simulated evidence remains `DIAGNOSTIC_ONLY` regardless of its values.
 

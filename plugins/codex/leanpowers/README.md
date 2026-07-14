@@ -4,11 +4,13 @@
 
 *Essential workflows. Less ceremony.*
 
-[简体中文](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/README.zh-CN.md) · [Superpowers comparison](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/comparison-superpowers.md) · [Benchmark protocol](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/benchmark.md) · [Migration guide](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/migration.md)
+[简体中文](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/README.zh-CN.md) · [Superpowers comparison](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/comparison-superpowers.md) · [Benchmark protocol](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/benchmark.md) · [Acknowledgments](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/ACKNOWLEDGMENTS.md) · [Migration guide](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/migration.md)
 
 LeanPowers keeps the safeguards that matter—bounded requirements, regression evidence, root-cause debugging, independent review, current verification, and safe delivery—while selecting the smallest workflow justified by risk. It is a workflow microkernel, not a large always-on prompt or orchestration service.
 
 > **Release status:** `0.2.0` is a technical preview. It adds opt-in project learning from explicit feedback. The deterministic scorer and simulated fixtures are implemented, but a paired live LeanPowers-versus-Superpowers benchmark has not yet been run. Efficiency and non-inferiority thresholds below are gates for the stable `1.0.0` release, not measured product claims.
+
+> **Lineage and thanks:** LeanPowers is an independent project inspired by [Superpowers](https://github.com/obra/superpowers). Its evidence-first engineering discipline, TDD, systematic debugging, review, verification, and safe-delivery ideas provided the foundation for this work. LeanPowers explores a different optimization point—more selective ceremony with risk-triggered rigor. It is not presented as a defeat, replacement verdict, or criticism of Superpowers. See [Acknowledgments](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/ACKNOWLEDGMENTS.md).
 
 ## Why LeanPowers
 
@@ -166,7 +168,7 @@ Agent instructions are not a security boundary. Review commands and diffs before
 
 LeanPowers compares against all 14 Superpowers 6.1.1 Skills. It consolidates the 13 engineering-workflow concerns into six engineering workflows and keeps `writing-skills` as an external specialist concern. The six engineering `SKILL.md` files contain exactly 2,561 words, an 86.2% reduction from all 18,516 words in the 14-file Superpowers comparison set. The `route` and `adapt` control Skills add 219 and 329 words, so all eight LeanPowers Skill files total 3,109 words—still 83.2% less. Counts use the same `wc -w` method; comparing against all 14 baseline files deliberately includes the external authoring Skill. Structural reduction is verified; equal real-world quality and targeted efficiency gains are not yet established by a live paired run.
 
-The retained safeguards and intentional differences are documented in [docs/comparison-superpowers.md](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/comparison-superpowers.md). If you are migrating, read [docs/migration.md](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/migration.md)—do not enable both systems as automatic workflow routers in the same session.
+This is a lineage-and-tradeoff comparison, not a winner ranking. Superpowers remains the upstream inspiration and a comprehensive workflow reference; LeanPowers tests whether the outcome-critical safeguards can be retained with a smaller, risk-adaptive control surface. The retained safeguards, different optimization choices, evidence limits, and balanced conclusion are documented in [docs/comparison-superpowers.md](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/comparison-superpowers.md). If you are migrating, read [docs/migration.md](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/migration.md)—do not enable both systems as automatic workflow routers in the same session.
 
 ## Benchmark
 

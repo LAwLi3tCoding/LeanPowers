@@ -1,6 +1,14 @@
 # LeanPowers 0.2.0 and Superpowers 6.1.1
 
-This comparison answers a narrow question: how does LeanPowers reduce workflow overhead while retaining the engineering safeguards that affect outcomes?
+Chinese version: [comparison-superpowers.zh-CN.md](comparison-superpowers.zh-CN.md)
+
+## Lineage, acknowledgment, and scope
+
+LeanPowers is an independent project inspired by [Superpowers](https://github.com/obra/superpowers). Superpowers established the practical foundation this project builds on: evidence-first engineering, test-driven development, systematic debugging, explicit review, verification before completion, safe branch delivery, and disciplined use of subagents and worktrees. LeanPowers exists because that work demonstrated the value of making engineering discipline executable for coding agents.
+
+We thank Jesse Vincent and the Superpowers contributors for the original project, its open documentation, and the engineering ideas that made this experiment possible. See the repository-wide [Acknowledgments](../ACKNOWLEDGMENTS.md).
+
+This comparison is not a winner ranking and does not argue that Superpowers is wrong, obsolete, or unnecessarily rigorous. It answers a narrower design question: how does LeanPowers explore lower workflow overhead while retaining the safeguards most directly connected to engineering outcomes?
 
 It does **not** claim that LeanPowers has already matched Superpowers on live tasks. The paired live benchmark has not yet been run. Structural facts are verified from source; quality and efficiency values remain release targets until live evidence exists.
 
@@ -36,9 +44,9 @@ wc -w adapters/claude/session-start
 # 111 words
 ```
 
-The six-workflow engineering surface is 86.2% smaller than the 18,516-word, 14-file Superpowers comparison set. Including the 219-word `route` and 329-word `adapt` control Skills, the complete 3,109-word LeanPowers Skill surface is 83.2% smaller. The baseline total deliberately includes `writing-skills`, even though LeanPowers keeps that concern external. These figures measure source instruction words, not actual model tokens, latency, or task quality.
+The six-workflow engineering `SKILL.md` text is 86.2% smaller than the 18,516-word, 14-file Superpowers comparison set. Including the 219-word `route` and 329-word `adapt` control Skills, the eight LeanPowers `SKILL.md` files total 3,109 words, 83.2% less than the baseline set. The baseline total deliberately includes `writing-skills`, even though LeanPowers keeps that concern external. These figures measure primary `SKILL.md` words, not referenced policies, supporting files, actual model tokens, latency, or task quality.
 
-## Side-by-side design
+## Side-by-side design choices
 
 | Dimension | Superpowers 6.1.1 | LeanPowers 0.2.0 | What remains protected |
 | --- | --- | --- | --- |
@@ -49,7 +57,7 @@ The six-workflow engineering surface is 86.2% smaller than the 18,516-word, 14-f
 | Planning | Detailed 2–5 minute steps, often including code | 1–5 outcome-based delivery slices | Interfaces and proof are still explicit |
 | Implementation | Separate TDD and execution skills | Regression/TDD invariant inside `build` | Early evidence and RED-GREEN where appropriate |
 | Unknown failures | `systematic-debugging` | Compact falsifiable state machine in `debug` | Reproduction, root cause, regression proof |
-| Subagents | Parallel/SDD workflows; SDD dispatches implementer plus two review stages per task | One agent by default; bounded direct children only for independent boundaries | High-risk review remains independent |
+| Subagents | Parallel/SDD workflows; SDD dispatches an implementer and combined task review per task, followed by whole-branch review | One agent by default; bounded direct children only for independent boundaries | High-risk review remains independent |
 | Review | Request/receive review skills and SDD task gates | One findings-first `review` skill | Severity, evidence, scope, compatibility, security |
 | Verification | Fresh command evidence before completion | Current evidence keyed by revision and supported scope | Stale or unavailable evidence cannot pass |
 | Worktrees | Dedicated workflow and common execution precondition | Isolation only when branch, dirtiness, or conflict risk requires it | User changes and branch safety are preserved |
@@ -59,7 +67,7 @@ The six-workflow engineering surface is 86.2% smaller than the 18,516-word, 14-f
 | Skill authoring | `writing-skills` is part of core | Not a core engineering workflow | Product engineering workflow stays smaller; skill authoring remains an external specialist task |
 | Feedback learning | No equivalent in the compared 14 core Skills | Optional `adapt` control Skill, disabled by default | Project-local scope, explicit feedback, precedence, privacy, and three-lesson cap |
 
-## What LeanPowers consolidates
+## Lineage and adaptation map
 
 The first eight rows below account for 13 Superpowers engineering-workflow Skills. The final row records the one compared Skill that LeanPowers does not consolidate into its engineering core.
 
@@ -94,21 +102,23 @@ These are implemented in the shared [quality gates](../references/quality-gates.
 
 When project learning is enabled, lessons remain advisory below current instructions and repository/runtime evidence. They cannot lower any of these invariants, authorize external actions, replace root-cause analysis, self-approve strict-risk work, or substitute historical outcomes for current verification.
 
-## Intentional differences
+## Different optimization choices
 
-LeanPowers intentionally removes or makes conditional:
+Relative to its Superpowers foundation, LeanPowers makes the following practices conditional or moves them outside the engineering core:
 
 - skill invocation before every response and repository inspection;
 - mandatory brainstorming and section-by-section approval for clear local work;
 - implementation plans that reproduce detailed code or micro-steps;
-- an implementer and multiple reviewers for every delivery micro-task;
-- a worktree for every feature;
+- an implementer and combined task review for each planned task, followed by whole-branch review;
+- isolated-workspace setup as a common plan-execution precondition; Superpowers retains user-consent and fallback paths when isolation is declined or unavailable;
 - repeated full verification for an unchanged revision;
 - a fixed completion menu when the user already requested a delivery target;
 - skill-authoring methodology and visual brainstorming as core engineering features;
 - global or cross-project learning; `adapt` is explicitly enabled per project and has no background or network activity.
 
-These differences reduce context, turns, and dispatch count. The claim that they reduce cost without materially reducing outcomes must be tested, not inferred from architecture.
+These choices are intended to reduce context, turns, and dispatch count. Whether they do so in live runs without materially reducing outcomes must be tested, not inferred from architecture.
+
+These choices are not universal recommendations. Superpowers' more explicit and comprehensive process can be valuable for teaching a disciplined method, standardizing team behavior, handling unfamiliar work, or preferring consistent ceremony over dynamic routing. LeanPowers is aimed at environments where the same outcome protections are desired but workflow selection should scale with observed risk.
 
 ## Current evidence and open gap
 
@@ -131,3 +141,19 @@ Not yet verified:
 - Related-task improvement, zero unrelated-task contamination, zero safety bypass, and bounded retrieval in a paired live four-turn learning run.
 
 Until the paired live suite in [benchmark.md](benchmark.md) passes, describe LeanPowers as structurally lighter with retained safeguards—not as empirically equal or faster.
+
+## Balanced conclusion
+
+The source comparison supports three conclusions:
+
+1. **LeanPowers is structurally lighter.** The checked source surface is materially smaller and uses one-owner routing plus shared policies instead of a broadly mandatory sequence.
+2. **The critical safeguards are retained by design.** Scope, regression evidence, root-cause diagnosis, independent high-risk review, current verification, authorization, and remote delivery readback remain explicit invariants.
+3. **Outcome parity is still an open empirical question.** No paired live evidence currently proves that LeanPowers matches Superpowers on task success, reliability, or safety, or that it achieves the targeted efficiency reductions.
+
+The intended relationship is therefore complementary rather than adversarial:
+
+- **Superpowers** is the upstream inspiration and comprehensive reference workflow.
+- **LeanPowers** is a respectful, independently implemented exploration of a smaller, risk-adaptive workflow surface.
+- **The benchmark** asks whether that different optimization point is non-inferior within a predeclared margin while using fewer resources; it does not seek a narrative of defeating Superpowers.
+
+Users should choose based on their preferred process shape and validate on representative work. A future passing benchmark would support the bounded claim that LeanPowers preserved outcomes under the tested conditions—not a general claim that one project is better than the other.
