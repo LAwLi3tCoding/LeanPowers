@@ -112,7 +112,7 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /not a quality ceiling/i);
   assert.match(route, /Expand only for missing, contradictory, or failed evidence/i);
   assert.match(route, /one green-path inspection tool call/i);
-  assert.match(route, /one-property mutations of valid cases/i);
+  assert.match(route, /each rejection mutates one property of an asserted-passing case/i);
   assert.match(route, /one shell command/i);
   assert.match(route, /one multi-file patch(?: call)? for (?:implementation and tests|code\/tests)/i);
   assert.match(route, /never (?:patch the same file twice|repatch) on the green path/i);
@@ -121,8 +121,8 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /strict \*\*MUST NOT answer\*\*/i);
   assert.match(route, /Mandatory strict gate/i);
   assert.match(route, /multi_agent_v1\.spawn_agent[\s\S]{0,220}wait_agent/i);
-  assert.match(route, /`tool_search` once[\s\S]{0,80}`spawn_agent wait_agent`[\s\S]{0,40}limit 2/i);
-  assert.match(route, /if either remains unavailable, return incomplete/i);
+  assert.match(route, /tool_search\(query="wait_agent targets spawn_agent fork_context", limit=2\)/i);
+  assert.match(route, /Spawn only if its result exposes both; otherwise return incomplete before any spawn/i);
   assert.match(route, /save ID, then call `multi_agent_v1\.wait_agent` once with `targets:\[ID\]`/i);
   assert.match(route, /No other review-tool action\./i);
   assert.match(route, /fork_context:false/i);
@@ -141,7 +141,7 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /including case\/punctuation/i);
   assert.match(route, /under `Original task:`/i);
   assert.match(route, /wait_agent` once with `targets:\[ID\]`/i);
-  assert.match(route, /Findings require repair\/retest and a new strict cycle with one fresh reviewer/i);
+  assert.match(route, /Findings require repair\/retest, then new strict cycle with fresh reviewer/i);
   assert.match(route, /Blocked\/unavailable returns incomplete/i);
   assert.match(route, /Never rewait\/retry a reviewer, add reviewers within a cycle, or overrule findings/i);
   assert.match(route, /Review schema on findings or uncertainty/i);
@@ -163,12 +163,12 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
 test("strict route protocol rejects one-property instruction regressions", async () => {
   const route = await readFile(path.join(skillsRoot, "route", "SKILL.md"), "utf8");
   const clauses = [
-    "if either V1/native tool is hidden, call `tool_search` once (`spawn_agent wait_agent`, limit 2) to load both",
-    "if either remains unavailable, return incomplete. Call `multi_agent_v1.spawn_agent` once",
+    "if either V1/native tool is hidden, call exactly `tool_search(query=\"wait_agent targets spawn_agent fork_context\", limit=2)`",
+    "Spawn only if its result exposes both; otherwise return incomplete before any spawn. Call `multi_agent_v1.spawn_agent` once",
     "with only `message`, `fork_context:false`; save ID, then call `multi_agent_v1.wait_agent` once with `targets:[ID]`",
     "No other review-tool action.",
     "Copy entire original task byte-for-byte—including case/punctuation—under `Original task:`.",
-    "Findings require repair/retest and a new strict cycle with one fresh reviewer.",
+    "Findings require repair/retest, then new strict cycle with fresh reviewer.",
   ];
   const preservesStrictProtocol = (candidate) =>
     clauses.every((clause) => candidate.includes(clause));
