@@ -6,9 +6,27 @@ This is a non-inferiority and efficiency study, not a competition narrative. Sup
 
 ## Current status
 
-The repository contains the scenario catalog, result schema, deterministic comparator, and scorer fixtures. **A paired live benchmark has not yet been executed.** Files under `evals/fixtures/` explicitly use `"provenance": "simulated"`; they are test data for scorer behavior, not observations from real agent runs, and must not be cited as product results.
+The repository contains the scenario catalog, result schema, deterministic comparator, and scorer fixtures. A **12-run paired development-effects pilot** has now been executed on three task classes. Both workflows passed 5/6 runs; LeanPowers used 19.8% fewer median model tokens and 9.5% less median wall time. The complete sanitized result is in the [2026-07-14 pilot report](benchmarks/development-effects-pilot-2026-07-14.md).
 
-Therefore, no current release may claim measured non-inferiority, token reduction, wall-time reduction, or agent-call reduction from these fixtures.
+The pilot is real coding evidence, but it is not the full 11-scenario release benchmark: it lacks the required coverage, repetitions for formal uncertainty, deterministic seeds, feedback-learning scenario, and agent-call metric. It also falls short of the predeclared 50% token and 40% wall-time efficiency targets. Current releases may cite the exact bounded pilot observations, but may not claim general non-inferiority or release-gate success.
+
+Files under `evals/fixtures/` explicitly use `"provenance": "simulated"`; they are test data for scorer behavior, not observations from real agent runs, and must not be cited as product results.
+
+### Development-effects pilot
+
+The executable pilot lives in [evals/development-effects/](../evals/development-effects/). It uses disposable repositories, explicit workflow activation, independent hidden tests injected after the Agent exits, immutable Git baselines, per-run temporary homes, and delayed raw-artifact writes so later runs cannot read earlier solutions.
+
+```bash
+node scripts/development-benchmark.mjs run \
+  --suite evals/development-effects/pilot-suite.json \
+  --superpowers-marketplace path/to/official-superpowers-v6.1.1 \
+  --model gpt-5.5 \
+  --out /tmp/leanpowers-development-pilot
+```
+
+The runner verifies that the Superpowers checkout is clean, uses the official `obra/superpowers` origin, and has `HEAD` exactly at `v6.1.1`. It also requires the LeanPowers checkout to be clean so every report records immutable commit SHAs.
+
+The current [Agent Workflow Benchmark target](../evals/awb/leanpowers-target.draft.yaml) has a different role: it checks workflow contracts, routing, and expected behavioral responses. It does not edit disposable repositories or run independent hidden code tests, so it must not be cited as evidence of implementation quality, token efficiency, or development success. The development-effects pilot was added specifically to close that evidence gap.
 
 ## Public methodological foundations
 

@@ -8,7 +8,7 @@
 
 LeanPowers keeps the safeguards that matter—bounded requirements, regression evidence, root-cause debugging, independent review, current verification, and safe delivery—while selecting the smallest workflow justified by risk. It is a workflow microkernel, not a large always-on prompt or orchestration service.
 
-> **Release status:** `0.2.0` is a technical preview. It adds opt-in project learning from explicit feedback. The deterministic scorer and simulated fixtures are implemented, but a paired live LeanPowers-versus-Superpowers benchmark has not yet been run. Efficiency and non-inferiority thresholds below are gates for the stable `1.0.0` release, not measured product claims.
+> **Release status:** `0.2.0` is a technical preview. It adds opt-in project learning from explicit feedback. A 12-run paired development pilot observed 5/6 passing runs for both LeanPowers and Superpowers, with 19.8% lower median model tokens and 9.5% lower median wall time for LeanPowers. This is bounded pilot evidence, not the full release benchmark or a general non-inferiority claim. See the [pilot report](docs/benchmarks/development-effects-pilot-2026-07-14.md).
 
 > **Lineage and thanks:** LeanPowers is an independent project inspired by [Superpowers](https://github.com/obra/superpowers). Its evidence-first engineering discipline, TDD, systematic debugging, review, verification, and safe-delivery ideas provided the foundation for this work. LeanPowers explores a different optimization point—more selective ceremony with risk-triggered rigor. It is not presented as a defeat, replacement verdict, or criticism of Superpowers. See [Acknowledgments](ACKNOWLEDGMENTS.md).
 
@@ -166,7 +166,7 @@ Agent instructions are not a security boundary. Review commands and diffs before
 
 ## Compared with Superpowers 6.1.1
 
-LeanPowers compares against all 14 Superpowers 6.1.1 Skills. It consolidates the 13 engineering-workflow concerns into six engineering workflows and keeps `writing-skills` as an external specialist concern. The six engineering `SKILL.md` files contain exactly 2,561 words, an 86.2% reduction from all 18,516 words in the 14-file Superpowers comparison set. The `route` and `adapt` control Skills add 219 and 329 words, so all eight LeanPowers Skill files total 3,109 words—still 83.2% less. Counts use the same `wc -w` method; comparing against all 14 baseline files deliberately includes the external authoring Skill. Structural reduction is verified; equal real-world quality and targeted efficiency gains are not yet established by a live paired run.
+LeanPowers compares against all 14 Superpowers 6.1.1 Skills. It consolidates the 13 engineering-workflow concerns into six engineering workflows and keeps `writing-skills` as an external specialist concern. The six engineering `SKILL.md` files contain exactly 2,561 words, an 86.2% reduction from all 18,516 words in the 14-file Superpowers comparison set. The `route` and `adapt` control Skills add 219 and 329 words, so all eight LeanPowers Skill files total 3,109 words—still 83.2% less. Counts use the same `wc -w` method; comparing against all 14 baseline files deliberately includes the external authoring Skill. Structural reduction is verified. A small live pilot found equal 5/6 run success and lower median token use for LeanPowers, while broader quality non-inferiority remains unproven.
 
 This is a lineage-and-tradeoff comparison, not a winner ranking. Superpowers remains the upstream inspiration and a comprehensive workflow reference; LeanPowers tests whether the outcome-critical safeguards can be retained with a smaller, risk-adaptive control surface. The retained safeguards, different optimization choices, evidence limits, and balanced conclusion are documented in [docs/comparison-superpowers.md](docs/comparison-superpowers.md). If you are migrating, read [docs/migration.md](docs/migration.md)—do not enable both systems as automatic workflow routers in the same session.
 
@@ -182,6 +182,8 @@ node scripts/benchmark.mjs compare \
 ```
 
 A release-eligible result must use complete, live, blind, identically paired runs. Simulated or incomplete input produces `DIAGNOSTIC_ONLY`; any hard failure blocks release. See [docs/benchmark.md](docs/benchmark.md) for scenarios, metrics, thresholds, and the current evidence gap.
+
+For actual coding evidence, see the [2026-07-14 paired development-effects pilot](docs/benchmarks/development-effects-pilot-2026-07-14.md): 3 task classes × 2 repetitions × 2 workflows. Both workflows passed 5/6 runs; LeanPowers used 19.8% fewer median model tokens and 9.5% less median wall time. The result is diagnostic pilot evidence and does not meet the full release benchmark's coverage or efficiency gates.
 
 ## Development
 

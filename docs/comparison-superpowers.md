@@ -8,15 +8,15 @@ LeanPowers is an independent project inspired by [Superpowers](https://github.co
 
 We thank Jesse Vincent and the Superpowers contributors for the original project, its open documentation, and the engineering ideas that made this experiment possible. See the repository-wide [Acknowledgments](../ACKNOWLEDGMENTS.md).
 
-This comparison is not a winner ranking and does not argue that Superpowers is wrong, obsolete, or unnecessarily rigorous. It answers a narrower design question: how does LeanPowers explore lower workflow overhead while retaining the safeguards most directly connected to engineering outcomes?
+This comparison is about lineage and engineering tradeoffs. It asks a narrower design question: how does LeanPowers explore lower workflow overhead while retaining the safeguards most directly connected to engineering outcomes?
 
-It does **not** claim that LeanPowers has already matched Superpowers on live tasks. The paired live benchmark has not yet been run. Structural facts are verified from source; quality and efficiency values remain release targets until live evidence exists.
+A 12-run paired development pilot has now tested three small task shapes. Both workflows passed 5/6 runs; LeanPowers used 19.8% fewer median model tokens and 9.5% less median wall time. This is useful live evidence, but it is too small and narrow to establish general parity or pass the full release benchmark. See the [pilot report](benchmarks/development-effects-pilot-2026-07-14.md).
 
 The comparison set contains all 14 Superpowers 6.1.1 Skills. LeanPowers consolidates the 13 engineering-workflow concerns into six engineering workflows; `writing-skills` remains an external specialist concern. Two compact control Skills sit outside the engineering chain: `route` improves entry discovery, while `adapt` adds project-local feedback learning.
 
 ## Evidence basis
 
-Snapshot date: 2026-07-13.
+Snapshot date: 2026-07-14.
 
 - Baseline: [Superpowers v6.1.1 skill tree](https://github.com/obra/superpowers/tree/v6.1.1/skills).
 - Mandatory global routing: [`using-superpowers`](https://github.com/obra/superpowers/blob/v6.1.1/skills/using-superpowers/SKILL.md).
@@ -131,16 +131,17 @@ Verified now:
 - The learning helper has no background activity, network access, telemetry, global profile, or cross-project sharing, and requires Node.js 20+ only while learning is enabled.
 - Routing, evidence validation, package parity, and benchmark scoring have deterministic tests.
 - Checked-in scorer fixtures declare simulated provenance; simulated or incomplete inputs cannot produce a release-eligible result.
+- The 2026-07-14 live pilot produced equal 5/6 run success, zero activation failures, zero scope violations, and lower median tokens and wall time for LeanPowers across three task classes.
 
-Not yet verified:
+Still not verified:
 
-- Real task-success non-inferiority against Superpowers 6.1.1.
-- Real token, wall-time, and agent-call reductions.
+- Task-success non-inferiority across the full 11-scenario release catalog with a formal uncertainty interval.
+- The predeclared 50% token, 40% wall-time, and 60% agent-call reduction gates. The pilot observed smaller token and wall-time differences and did not measure agent calls.
 - Seeded-defect escape rates across live agents and repositories.
 - Cross-runtime behavior under identical live model and evaluator conditions.
 - Related-task improvement, zero unrelated-task contamination, zero safety bypass, and bounded retrieval in a paired live four-turn learning run.
 
-Until the paired live suite in [benchmark.md](benchmark.md) passes, describe LeanPowers as structurally lighter with retained safeguards—not as empirically equal or faster.
+Until the full paired suite in [benchmark.md](benchmark.md) passes, describe LeanPowers as structurally lighter with promising bounded pilot results, not as generally equal or faster.
 
 ## Balanced conclusion
 
@@ -148,7 +149,7 @@ The source comparison supports three conclusions:
 
 1. **LeanPowers is structurally lighter.** The checked source surface is materially smaller and uses one-owner routing plus shared policies instead of a broadly mandatory sequence.
 2. **The critical safeguards are retained by design.** Scope, regression evidence, root-cause diagnosis, independent high-risk review, current verification, authorization, and remote delivery readback remain explicit invariants.
-3. **Outcome parity is still an open empirical question.** No paired live evidence currently proves that LeanPowers matches Superpowers on task success, reliability, or safety, or that it achieves the targeted efficiency reductions.
+3. **The pilot is encouraging, but outcome parity remains open.** The tested runs had equal success and LeanPowers used fewer median tokens, while the small task set, shared security-case failure, and observed variance prevent a general equivalence or release claim.
 
 The intended relationship is therefore complementary rather than adversarial:
 
@@ -156,4 +157,4 @@ The intended relationship is therefore complementary rather than adversarial:
 - **LeanPowers** is a respectful, independently implemented exploration of a smaller, risk-adaptive workflow surface.
 - **The benchmark** asks whether that different optimization point is non-inferior within a predeclared margin while using fewer resources; it does not seek a narrative of defeating Superpowers.
 
-Users should choose based on their preferred process shape and validate on representative work. A future passing benchmark would support the bounded claim that LeanPowers preserved outcomes under the tested conditions—not a general claim that one project is better than the other.
+Users should choose based on their preferred process shape and validate on representative work. The current pilot supports only its tested conditions; a future full passing benchmark would support a broader, still bounded claim that LeanPowers preserved outcomes while reducing workflow overhead.
