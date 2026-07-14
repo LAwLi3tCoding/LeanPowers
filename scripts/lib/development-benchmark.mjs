@@ -643,21 +643,43 @@ function traceCapsuleStage(
   if (!["build", "debug"].includes(expectedWorkflow)) return null;
 
   const indexed = events.map((event, index) => ({ event, index }));
-  const routeLedgers = indexed.filter(({ event }) =>
-    event?.type === "item.completed" &&
-    event?.item?.type === "agent_message" &&
-    parseLeanRouteLedger(event.item.text) !== null
-  );
-  const routeLedgerOccurrences = routeLedgers.length;
   const firstToolIndex = indexed.find(({ event }) =>
     ["item.started", "item.completed"].includes(event?.type) &&
     !["agent_message", "reasoning"].includes(event?.item?.type)
   )?.index ?? events.length;
+  const routeLedgers = indexed.flatMap(({ event, index }) => {
+    if (
+      event?.type !== "item.completed" ||
+      event?.item?.type !== "agent_message"
+    ) {
+      return [];
+    }
+    const ledger = parseLeanRouteLedgerCandidate(event.item.text);
+    return ledger === null ? [] : [{ event, index, ledger }];
+  });
+  const routeLedgerOccurrences = routeLedgers.length;
+  const initialRouteLedger = routeLedgers.find(({ index }) => index < firstToolIndex);
   const ledgerBeforeToolsObserved =
-    routeLedgers.length === 1 && routeLedgers[0].index < firstToolIndex;
-  const declaredRisk = routeLedgers.length === 1
-    ? parseLeanRouteLedger(routeLedgers[0].event.item.text)?.risk
-    : null;
+    routeLedgers.length === 1 &&
+    initialRouteLedger !== undefined &&
+    parseLeanRouteLedger(initialRouteLedger.event.item.text) !== null;
+  const declaredRisk = highestPresentedLeanRouteRisk(indexed) ??
+    (initialRouteLedger ?? routeLedgers[0])?.ledger.risk ?? null;
+  const ledgerKeysAfterInitialObserved =
+    initialRouteLedger !== undefined && (
+      hasForbiddenLeanRouteLedgerKey(
+        String(initialRouteLedger.event.item.text ?? "")
+          .split(/\r?\n/u)
+          .slice(4)
+          .join("\n"),
+      ) ||
+      indexed.some(({ event, index }) =>
+        index > initialRouteLedger.index &&
+        event?.type === "item.completed" &&
+        event?.item?.type === "agent_message" &&
+        hasForbiddenLeanRouteLedgerKey(event.item.text)
+      )
+    );
   const firstChangeIndex = indexed.find(
     ({ event }) => isCompletedFileChange(event),
   )?.index ?? -1;
@@ -735,6 +757,7 @@ function traceCapsuleStage(
   const protocolObserved =
     routeLedgerOccurrences === 1 &&
     ledgerBeforeToolsObserved &&
+    !ledgerKeysAfterInitialObserved &&
     workflowReads.length === 0 &&
     preChangeCommands.length === expectedPreChangeCalls &&
     discoverObserved &&
@@ -747,6 +770,8 @@ function traceCapsuleStage(
     workflow: expectedWorkflow,
     route_ledger_occurrences: routeLedgerOccurrences,
     ledger_before_tools_observed: ledgerBeforeToolsObserved,
+    ledger_keys_after_initial_observed: ledgerKeysAfterInitialObserved,
+    highest_presented_risk: declaredRisk,
     workflow_read_calls: workflowReads.length,
     pre_change_command_calls: preChangeCommands.length,
     discover_observed: discoverObserved,
@@ -1195,6 +1220,9 @@ export function evaluateWorkflowConformance(run) {
         if (!capsule.ledger_before_tools_observed) {
           reasons.push("route ledger was not emitted before task tools");
         }
+        if (capsule.ledger_keys_after_initial_observed) {
+          reasons.push("route ledger keys were repeated after the initial declaration");
+        }
         if (capsule.workflow_read_calls !== 0) {
           reasons.push("capsule reloaded a Skill or reference");
         }
@@ -1226,7 +1254,10 @@ export function evaluateWorkflowConformance(run) {
         }
       }
     }
-    const strictRequired = run.risk_level === "strict" || run.declared_risk === "strict";
+    const strictRequired =
+      run.risk_level === "strict" ||
+      run.declared_risk === "strict" ||
+      run.telemetry?.workflow_trace?.capsule_stage?.highest_presented_risk === "strict";
     if (
       strictRequired &&
       !run.telemetry?.workflow_trace?.independent_review_pass_observed
@@ -1510,7 +1541,7 @@ export function renderDevelopmentReport(result) {
     "## Interpretation boundary",
     "",
     "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    "- LeanPowers conformance requires one exact four-line route ledger before any task tool. Build/debug capsule traces must show no Skill/reference reload, the exact root-relative `rg --files .; rg -n -- 'TERMS' .` discovery shape with a nontrivial literal pattern and option terminator, batched reads, fixture-owned structured pre-edit reproduction for debug, one contiguous multi-file patch batch, and one supported successful validation command. Codex JSONL emits one file-change item per changed file and no patch-call identifier, so contiguous file-change items are an explicit call-cardinality proxy; immediately adjacent independent patch calls with no intervening JSONL event are indistinguishable and may be coalesced. The proxy does not prove exact patch-call cardinality. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Each strict review cycle additionally requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
+    "- LeanPowers conformance requires one exact four-line route ledger before any task tool and forbids every later ledger-key line. Build/debug capsule traces must show no Skill/reference reload, the exact root-relative `rg --files .; rg -n -- 'TERMS' .` discovery shape with a nontrivial literal pattern and option terminator, batched reads, fixture-owned structured pre-edit reproduction for debug, one contiguous multi-file patch batch, and one supported successful validation command. Codex JSONL emits one file-change item per changed file and no patch-call identifier, so contiguous file-change items are an explicit call-cardinality proxy; immediately adjacent independent patch calls with no intervening JSONL event are indistinguishable and may be coalesced. The proxy does not prove exact patch-call cardinality. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Each strict review cycle additionally requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
     "- Codex JSONL does not expose raw spawn arguments such as `fork_context`; observable spawn/wait behavior is checked dynamically, while exact argument shape is covered by static workflow tests and remains a runtime telemetry gap.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
@@ -2361,6 +2392,54 @@ export function parseLeanRouteLedger(message) {
       : "[current_evidence]";
   if (requiredGates !== expectedGates) return null;
   return { workflow, risk, required_gates: requiredGates };
+}
+
+function parseLeanRouteLedgerCandidate(message) {
+  const lines = String(message ?? "").split(/\r?\n/u);
+  if (lines.length < 4) return null;
+  return parseLeanRouteLedger(lines.slice(0, 4).map((line) => line.trimEnd()).join("\n"));
+}
+
+function hasForbiddenLeanRouteLedgerKey(message) {
+  return String(message ?? "").split(/\r?\n/u).some((line) =>
+    /^(?:entrypoint|workflow|risk|required_gates)(?:[*_`]+)?:(?:[*_`]+)?(?:[ \t]|$)/u
+      .test(normalizeLeanRouteLedgerPresentation(line))
+  );
+}
+
+function highestPresentedLeanRouteRisk(indexedEvents) {
+  const order = ["lean", "standard", "strict"];
+  let highest = null;
+  for (const { event } of indexedEvents) {
+    if (
+      event?.type !== "item.completed" ||
+      event?.item?.type !== "agent_message"
+    ) {
+      continue;
+    }
+    for (const line of String(event.item.text ?? "").split(/\r?\n/u)) {
+      const risk = normalizeLeanRouteLedgerPresentation(line).match(
+        /^risk(?:[*_`]+)?:[ \t]*(?:[*_`]+)?[ \t]*(lean|standard|strict)(?:[*_`]+)?(?:[ \t]|$)/u,
+      )?.[1] ?? null;
+      if (risk !== null && (highest === null || order.indexOf(risk) > order.indexOf(highest))) {
+        highest = risk;
+      }
+    }
+  }
+  return highest;
+}
+
+function normalizeLeanRouteLedgerPresentation(line) {
+  let normalized = String(line ?? "").trimStart();
+  while (true) {
+    const stripped = normalized.replace(
+      /^(?:>[ \t]*|#{1,6}[ \t]+|[-*+][ \t]+|\d+[.)][ \t]+)/u,
+      "",
+    ).trimStart();
+    if (stripped === normalized) break;
+    normalized = stripped;
+  }
+  return normalized.replace(/^[*_`]+/u, "");
 }
 
 export function reportsWorkflowActivation({ entrypoint, message, workflow }) {

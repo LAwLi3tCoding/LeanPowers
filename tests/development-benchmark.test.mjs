@@ -109,6 +109,8 @@ function passingCapsuleStage(workflow = "build") {
     workflow,
     route_ledger_occurrences: 1,
     ledger_before_tools_observed: true,
+    ledger_keys_after_initial_observed: false,
+    highest_presented_risk: "standard",
     workflow_read_calls: 0,
     pre_change_command_calls: workflow === "debug" ? 3 : 2,
     discover_observed: true,
@@ -143,6 +145,8 @@ function capsuleTraceEvents({
   expectedWorkflow = "debug",
   extraPostCommand = false,
   extraPreCommand = false,
+  finalMessage = "Done",
+  initialExtra = null,
   ledgerAfterDiscover = false,
   nonReviewTail = false,
   patchBatches = 1,
@@ -165,7 +169,10 @@ function capsuleTraceEvents({
   const completed = (item) => ({ type: "item.completed", item });
   const events = [];
   if (!ledgerAfterDiscover) {
-    events.push(completed({ type: "agent_message", text: ledger }));
+    events.push(completed({
+      type: "agent_message",
+      text: initialExtra === null ? ledger : `${ledger}\n${initialExtra}`,
+    }));
   }
   if (workflowRead) {
     events.push(completed({
@@ -271,7 +278,7 @@ function capsuleTraceEvents({
   }
   events.push(completed({
     type: "agent_message",
-    text: duplicateLedger ? ledger : "Done",
+    text: duplicateLedger ? ledger : finalMessage,
   }));
   events.push({
     type: "turn.completed",
@@ -685,8 +692,38 @@ test("Codex trace observes the complete debug capsule stage protocol", () => {
 });
 
 test("debug capsule stage protocol rejects one-property trace regressions", () => {
+  const trailingWhitespaceLedger = [
+    "entrypoint: leanpowers:route  ",
+    "workflow: debug  ",
+    "risk: standard  ",
+    "required_gates: [current_evidence]  ",
+    "",
+    "Done",
+  ].join("\n");
+  const boldLedger = [
+    "**entrypoint:** leanpowers:route",
+    "**workflow:** debug",
+    "**risk:** standard",
+    "**required_gates:** [current_evidence]",
+  ].join("\n");
+  const outsideColonLedger = [
+    "**entrypoint**: leanpowers:route",
+    "_workflow_: debug",
+    "`risk`: standard",
+    "***required_gates***: [current_evidence]",
+  ].join("\n");
   const cases = [
     [{ duplicateLedger: true }, "route_ledger_occurrences"],
+    [{ finalMessage: trailingWhitespaceLedger }, "route_ledger_occurrences"],
+    [{ finalMessage: trailingWhitespaceLedger }, "ledger_keys_after_initial_observed"],
+    [{ finalMessage: boldLedger }, "ledger_keys_after_initial_observed"],
+    [{ finalMessage: outsideColonLedger }, "ledger_keys_after_initial_observed"],
+    [{ finalMessage: "> 1. `risk:` strict" }, "ledger_keys_after_initial_observed"],
+    [{ finalMessage: "> 1. `risk`: strict" }, "ledger_keys_after_initial_observed"],
+    [{ finalMessage: "**risk: strict**" }, "ledger_keys_after_initial_observed"],
+    [{ finalMessage: "**risk**: **strict**" }, "highest_presented_risk"],
+    [{ initialExtra: "**risk**: **strict**" }, "ledger_keys_after_initial_observed"],
+    [{ initialExtra: "**risk**: **strict**" }, "highest_presented_risk"],
     [{ ledgerAfterDiscover: true }, "ledger_before_tools_observed"],
     [{ workflowRead: true }, "workflow_read_calls"],
     [{ discoverCommand: "rg -n -- 'cache|locale' ." }, "discover_observed"],
@@ -1744,6 +1781,30 @@ test("workflow declaration and risk classification are separate conformance evid
       ],
     },
   );
+  const presentedStrictCapsule = passingCapsuleStage("build");
+  presentedStrictCapsule.highest_presented_risk = "strict";
+  assert.deepEqual(
+    evaluateWorkflowConformance({
+      workflow: "leanpowers-0.2.0",
+      activation_reported: true,
+      route_ledger_reported: true,
+      expected_workflow: "build",
+      declared_workflow: "build",
+      declared_risk: "standard",
+      risk_level: "standard",
+      telemetry: { workflow_trace: { capsule_stage: presentedStrictCapsule } },
+    }),
+    {
+      status: "FAIL",
+      reasons: [
+        "current passing independent review was not observed",
+        "passing reviewer did not explicitly invoke leanpowers:review",
+        "strict wait did not target only the designated reviewer",
+        "reviewer workspace mutation check was not observed",
+        "strict review cycles violated the one-reviewer protocol",
+      ],
+    },
+  );
   assert.deepEqual(
     evaluateWorkflowConformance({
       workflow: "leanpowers-0.2.0",
@@ -1911,6 +1972,7 @@ test("capsule stage telemetry independently gates workflow conformance", () => {
     [null, "capsule stage trace was unavailable"],
     [{ route_ledger_occurrences: 2 }, "route ledger was not emitted exactly once"],
     [{ ledger_before_tools_observed: false }, "route ledger was not emitted before task tools"],
+    [{ ledger_keys_after_initial_observed: true }, "route ledger keys were repeated after the initial declaration"],
     [{ workflow_read_calls: 1 }, "capsule reloaded a Skill or reference"],
     [{ pre_change_command_calls: 3 }, "capsule pre-change stage budget was not observed"],
     [{ discover_observed: false }, "content-aware DISCOVER was not observed"],

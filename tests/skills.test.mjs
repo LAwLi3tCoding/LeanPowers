@@ -107,8 +107,8 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(build, /validation gap blocks `complete`/i);
   assert.match(route, /material request\/scope ambiguity to `shape`/i);
   assert.match(route, /known-cause defect declares `build`/i);
-  assert.match(route, /reproduce\/trace\/diagnose\/root-cause\/why\/first-wrong-transition MUST declare `debug` and at least `standard`/i);
-  assert.match(route, /even if a fix seems obvious/i);
+  assert.match(route, /reproduce\/trace\/diagnose\/root-cause\/why\/first-wrong-transition overrides `build`/i);
+  assert.match(route, /overrides `build`:[\s\S]{0,40}MUST declare `debug` and at least `standard`/i);
   assert.match(route, /deterministic single-component defects/i);
   assert.match(route, /read no Skill\/reference/i);
   assert.match(route, /failure-path tests/i);
@@ -117,8 +117,9 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /`debug` unknown-cause defect/i);
   assert.match(route, /`build` known-cause defect\/change/i);
   assert.match(route, /other requests load only selected Skill/i);
-  assert.match(route, /BEFORE any prose or tool, output exactly these four resolved plain lines once/i);
-  assert.match(route, /final MUST omit all ledger keys/i);
+  assert.match(route, /BEFORE any prose\/tool, output exactly these four resolved plain lines once/i);
+  assert.match(route, /Final MUST contain none of `entrypoint:`, `workflow:`, `risk:`, or `required_gates:`/i);
+  assert.match(route, /Final output omits all four ledger keys/i);
   assert.match(route, /Then one blank line and prose/i);
   assert.match(route, /Green-path logical budgets—not quality ceilings/i);
   assert.match(route, /Codex: one call\/stage; Claude: adjacent native adapters per stage/i);
