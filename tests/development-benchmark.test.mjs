@@ -142,6 +142,7 @@ function passingCapsuleStage(workflow = "build") {
     multi_file_patch_observed: true,
     post_change_command_calls: 1,
     validation_observed: true,
+    post_change_reproduction_replayed: false,
     post_validation_tool_calls: 0,
     ordinary_stop_observed: true,
     protocol_observed: true,
@@ -787,6 +788,34 @@ test("Codex trace observes the complete debug capsule stage protocol", () => {
     leadingHyphenLiteral.workflow_trace.capsule_stage,
     passingCapsuleStage("debug"),
   );
+
+  const reproAndTestValidation = parseCodexResult(
+    capsuleTraceEvents({
+      validationCommand: `${capsuleReproductionContract.command} && npm test`,
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  );
+  assert.deepEqual(
+    reproAndTestValidation.workflow_trace.capsule_stage,
+    {
+      ...passingCapsuleStage("debug"),
+      post_change_reproduction_replayed: true,
+    },
+  );
+  const wrappedReproAndTestValidation = parseCodexResult(
+    capsuleTraceEvents({
+      validationCommand:
+        `/bin/zsh -lc '${capsuleReproductionContract.command} && npm test'`,
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  );
+  assert.deepEqual(
+    wrappedReproAndTestValidation.workflow_trace.capsule_stage,
+    {
+      ...passingCapsuleStage("debug"),
+      post_change_reproduction_replayed: true,
+    },
+  );
 });
 
 test("capsule clause-to-test ledger must appear before PATCH, not only in final", () => {
@@ -1294,6 +1323,22 @@ test("debug capsule stage protocol rejects one-property trace regressions", () =
     [{ validationCommand: "npm run test --if-present" }, "validation_observed"],
     [{ validationCommand: "cargo test --no-run" }, "validation_observed"],
     [{ validationCommand: "pytest --collect-only" }, "validation_observed"],
+    [{ validationCommand: "node repro/other.mjs && npm test" }, "validation_observed"],
+    [{
+      validationCommand: `npm test && ${capsuleReproductionContract.command}`,
+    }, "validation_observed"],
+    [{
+      validationCommand: `${capsuleReproductionContract.command} && npm test && npm test`,
+    }, "validation_observed"],
+    [{
+      validationCommand: `${capsuleReproductionContract.command} || npm test`,
+    }, "validation_observed"],
+    [{
+      validationCommand: `${capsuleReproductionContract.command}; npm test`,
+    }, "validation_observed"],
+    [{
+      validationCommand: `${capsuleReproductionContract.command} | npm test`,
+    }, "validation_observed"],
     [{ extraPreCommand: true }, "pre_change_command_calls"],
     [{ extraPostCommand: true }, "post_change_command_calls"],
     [{ postValidationReview: true }, "ordinary_stop_observed"],
@@ -1316,6 +1361,16 @@ test("build capsule stage protocol omits reproduction but keeps all other gates"
   ).workflow_trace.capsule_stage;
 
   assert.deepEqual(stage, passingCapsuleStage("build"));
+
+  const chainedStage = parseCodexResult(
+    capsuleTraceEvents({
+      expectedWorkflow: "build",
+      validationCommand: `${capsuleReproductionContract.command} && npm test`,
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("build"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(chainedStage.validation_observed, false);
+  assert.equal(chainedStage.protocol_observed, false);
 });
 
 test("process stdout callbacks preserve complete line order across chunks", async () => {
@@ -1793,9 +1848,10 @@ test("strict review protocol accepts remediated fresh cycles and rejects one-pro
     ["reviewer-1", false],
     ["reviewer-2", false],
     ["reviewer-extra", false],
-  ])) => parseCodexResult(events.map(JSON.stringify).join("\n"), {
+  ]), options = {}) => parseCodexResult(events.map(JSON.stringify).join("\n"), {
     expectedReviewContract: contract,
     reviewerWorkspaceMutations,
+    ...options,
   }).workflow_trace;
 
   const valid = parse(buildTrace());
@@ -1823,6 +1879,28 @@ test("strict review protocol accepts remediated fresh cycles and rejects one-pro
     initialCommand: "/bin/zsh -lc 'npm test'",
     command: "/bin/zsh -lc 'npm test'",
   })).strict_review_protocol_observed, true);
+  const compositeValidation = `${capsuleReproductionContract.command} && npm test`;
+  const compositePacket = strictReviewPrompt(contract, {
+    testEvidence: `exit=0; command=${compositeValidation}`,
+  });
+  assert.equal(parse([
+    event({
+      type: "file_change",
+      changes: [{ path: "src/index.mjs", kind: "update" }],
+      status: "completed",
+    }),
+    event({
+      type: "command_execution",
+      command: compositeValidation,
+      exit_code: 0,
+      status: "completed",
+    }),
+    ...spawnEvents("spawn-composite", "reviewer-composite", compositePacket),
+    ...waitEvents("wait-composite", "reviewer-composite", pass),
+  ], new Map([["reviewer-composite", false]]), {
+    expectedWorkflow: "debug",
+    reproductionContract: capsuleReproductionContract,
+  }).strict_review_protocol_observed, true);
   assert.equal(valid.duplicate_strict_collab_call_id_observed, false);
   assert.equal(valid.unexpected_strict_collab_tool_observed, false);
   assert.equal(valid.strict_review_cycle_count, 2);

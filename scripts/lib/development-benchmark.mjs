@@ -288,6 +288,8 @@ export function parseCodexResult(
         return [];
       }
     });
+  const parseCurrentValidationCommand = (command) =>
+    parsePostChangeValidation(command, expectedWorkflow, reproductionContract)?.command ?? null;
   const usageEvent = [...events].reverse().find((event) => event?.type === "turn.completed");
   const usage = usageEvent?.usage;
   const hasUsage = Boolean(usage) && [
@@ -438,6 +440,7 @@ export function parseCodexResult(
             item.prompt,
             expectedReviewContract,
             observedChangedPaths,
+            parseCurrentValidationCommand,
           ),
           index,
           review_skill_invoked:
@@ -558,7 +561,7 @@ export function parseCodexResult(
         ) {
           return false;
         }
-        const command = canonicalValidationCommand(event.item.command);
+        const command = parseCurrentValidationCommand(event.item.command);
         return command !== null && command === review.test_command;
       });
       if (!currentValidationObserved) return false;
@@ -643,6 +646,8 @@ function traceCapsuleStage(
   if (!["build", "debug"].includes(expectedWorkflow)) return null;
 
   const indexed = events.map((event, index) => ({ event, index }));
+  const parseCapsuleValidationCommand = (command) =>
+    parsePostChangeValidation(command, expectedWorkflow, reproductionContract)?.command ?? null;
   const firstToolIndex = indexed.find(({ event }) =>
     ["item.started", "item.completed"].includes(event?.type) &&
     !["agent_message", "reasoning"].includes(event?.item?.type)
@@ -693,6 +698,8 @@ function traceCapsuleStage(
           parseCompleteCodexReviewPacket(
             event.item.prompt,
             expectedReviewContract,
+            new Set(),
+            parseCapsuleValidationCommand,
           ) !== null &&
           ["item.started", "item.completed"].includes(event.type),
       )?.index ?? events.length
@@ -781,10 +788,16 @@ function traceCapsuleStage(
     patchBatches.length === 1 &&
     implementationPatchObserved &&
     testPatchObserved;
-  const validationObserved =
+  const validation =
     postChangeCommands.length === 1 &&
-    postChangeCommands[0].event.item.exit_code === 0 &&
-    canonicalValidationCommand(postChangeCommands[0].event.item.command) !== null;
+    postChangeCommands[0].event.item.exit_code === 0
+      ? parsePostChangeValidation(
+          postChangeCommands[0].event.item.command,
+          expectedWorkflow,
+          reproductionContract,
+        )
+      : null;
+  const validationObserved = validation !== null;
   const postValidationToolCalls = validationObserved
     ? countToolCallsAfter(indexed, postChangeCommands[0].index)
     : 0;
@@ -838,6 +851,8 @@ function traceCapsuleStage(
     multi_file_patch_observed: multiFilePatchObserved,
     post_change_command_calls: postChangeCommands.length,
     validation_observed: validationObserved,
+    post_change_reproduction_replayed:
+      validation?.reproduction_replayed ?? false,
     post_validation_tool_calls: postValidationToolCalls,
     ordinary_stop_observed: ordinaryStopObserved,
     protocol_observed: protocolObserved,
@@ -1409,6 +1424,7 @@ function parseCompleteCodexReviewPacket(
   prompt,
   expectedReviewContract,
   observedChangedPaths = new Set(),
+  parseValidationCommand = canonicalValidationCommand,
 ) {
   if (
     typeof prompt !== "string" ||
@@ -1436,7 +1452,10 @@ function parseCompleteCodexReviewPacket(
     return null;
   }
   const testEvidence = lines[3].slice("Test: ".length);
-  const validationEvidence = parseValidationEvidence(testEvidence);
+  const validationEvidence = parseValidationEvidence(
+    testEvidence,
+    parseValidationCommand,
+  );
   const ledger = lines[1].slice("Ledger: ".length).trim();
   const declaredPaths = new Set(
     lines[2]
@@ -1485,11 +1504,38 @@ function benchmarkObservedPath(value) {
     : normalized.replace(/^\.\//u, "");
 }
 
-function parseValidationEvidence(evidence) {
+function parseValidationEvidence(evidence, parseValidationCommand = canonicalValidationCommand) {
   const match = String(evidence ?? "").match(/^exit=0; command=(.+)$/u);
   if (!match) return null;
-  const testCommand = canonicalValidationCommand(match[1]);
+  const testCommand = parseValidationCommand(match[1]);
   return testCommand === null ? null : { test_command: testCommand };
+}
+
+function parsePostChangeValidation(command, expectedWorkflow, reproductionContract) {
+  const direct = canonicalValidationCommand(command);
+  if (direct !== null) {
+    return { command: direct, reproduction_replayed: false };
+  }
+  if (expectedWorkflow !== "debug") return null;
+  const reproductionCommand = reproductionContract?.command;
+  if (
+    typeof reproductionCommand !== "string" ||
+    canonicalReproductionCommand(reproductionCommand) !== reproductionCommand
+  ) {
+    return null;
+  }
+  const text = unwrapShellInvocation(command);
+  if (text === null) return null;
+  const prefix = `${reproductionCommand} && `;
+  if (!text.startsWith(prefix)) return null;
+  const testCommand = canonicalValidationCommand(text.slice(prefix.length));
+  if (
+    testCommand === null ||
+    text !== `${reproductionCommand} && ${testCommand}`
+  ) {
+    return null;
+  }
+  return { command: text, reproduction_replayed: true };
 }
 
 function canonicalValidationCommand(command) {
@@ -1985,7 +2031,7 @@ export function renderDevelopmentReport(result) {
     "## Interpretation boundary",
     "",
     "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    "- LeanPowers conformance requires one exact four-line route ledger before any task tool and forbids every later ledger-key line. Build/debug capsule traces must show no Skill/reference reload, the exact root-relative `rg --files .; rg -n -- 'TERMS' .` discovery shape with a nontrivial literal pattern and option terminator, batched reads, fixture-owned structured pre-edit reproduction for debug, a pre-PATCH clause-to-test packet with one distinct mapping per literal marker, one contiguous multi-file patch batch, and one supported successful validation command. Clause-ledger telemetry proves timing, structure, and literal-marker cardinality, not semantic correctness. Codex JSONL emits one file-change item per changed file and no patch-call identifier, so contiguous file-change items are an explicit call-cardinality proxy; immediately adjacent independent patch calls with no intervening JSONL event are indistinguishable and may be coalesced. The proxy does not prove exact patch-call cardinality. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Each strict review cycle additionally requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
+    "- LeanPowers conformance requires one exact four-line route ledger before any task tool and forbids every later ledger-key line. Build/debug capsule traces must show no Skill/reference reload, the exact root-relative `rg --files .; rg -n -- 'TERMS' .` discovery shape with a nontrivial literal pattern and option terminator, batched reads, fixture-owned structured pre-edit reproduction for debug, a pre-PATCH clause-to-test packet with one distinct mapping per literal marker, one contiguous multi-file patch batch, and one supported successful validation call. Debug validation may prefix the exact reproduction command to the canonical test/build command with one `&&`; no other chain is accepted. Replay telemetry proves only that this exact command ran inside the successful call, not that its diagnostic meaning changed; task effect remains verifier-owned. Clause-ledger telemetry proves timing, structure, and literal-marker cardinality, not semantic correctness. Codex JSONL emits one file-change item per changed file and no patch-call identifier, so contiguous file-change items are an explicit call-cardinality proxy; immediately adjacent independent patch calls with no intervening JSONL event are indistinguishable and may be coalesced. The proxy does not prove exact patch-call cardinality. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Each strict review cycle additionally requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
     "- Codex JSONL does not expose raw spawn arguments such as `fork_context`; observable spawn/wait behavior is checked dynamically, while exact argument shape is covered by static workflow tests and remains a runtime telemetry gap.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",

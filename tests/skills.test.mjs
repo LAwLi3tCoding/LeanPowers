@@ -119,8 +119,9 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /requested diagnosis\/cause discovery→`debug`/i);
   assert.match(route, /explicit cause\/repair or change→`build`/i);
   assert.match(route, /others load only selected Skill/i);
-  assert.match(route, /BEFORE prose\/tool, output exactly these four resolved plain lines once/i);
-  assert.match(route, /Never repeat them:[\s\S]{0,120}final MUST omit lines beginning `entrypoint:`, `workflow:`, `risk:`, or `required_gates:`/i);
+  assert.match(route, /# Route\s+FIRST OUTPUT—before prose\/tool/i);
+  assert.match(route, /exactly these four resolved lines, no Markdown/i);
+  assert.match(route, /Emit once; final MUST omit lines beginning `entrypoint:`, `workflow:`, `risk:`, or `required_gates:`/i);
   assert.match(route, /Final MUST omit the four opening ledger lines/i);
   assert.match(route, /Then blank line, prose/i);
   assert.match(route, /Green-path budgets/i);
@@ -131,7 +132,7 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /Expand failed\/missing\/contradictory stages only/i);
   assert.match(route, /DISCOVER: Preset repository cwd applies throughout/i);
   assert.match(route, /Codex runs exactly `rg --files \.; rg -n -- 'TERMS' \.`/i);
-  assert.match(route, /TERMS is plain `a\|b`, never backslashed/i);
+  assert.match(route, /TERMS is `a\|b`, never backslashed/i);
   assert.match(route, /No prefix\/`cd`\/pipes\/globs\/redirections\/extra paths/i);
   assert.match(route, /Claude uses adjacent native `Glob`\+`Grep`/i);
   assert.match(route, /Identify implementation, callers, tests, repro, validation manifest/i);
@@ -152,8 +153,8 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /Pre-PATCH emit header `Clause→test ledger:`/i);
   assert.match(route, /one distinct `<clause retaining marker>→<test>` line per[\s\S]{0,80}occurrence/i);
   assert.match(route, /never repeat after PATCH/i);
-  assert.match(route, /VALIDATE runs the discovered canonical test\/build command alone, covering regression\/affected checks/i);
-  assert.match(route, /exclude reproduction\/diagnostics\/chaining/i);
+  assert.match(route, /VALIDATE\(1\): discovered canonical test\/build covering regression\/affected checks/i);
+  assert.match(route, /DEBUG may prefix exact REPRODUCE `&&`; forbid other chaining/i);
   assert.match(route, /On green lean\/standard, STOP tooling, skip step 5, and answer/i);
   assert.match(route, /Only strict continues below/i);
   assert.match(route, /Mandatory strict gate/i);
