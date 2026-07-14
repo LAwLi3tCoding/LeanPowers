@@ -7,7 +7,7 @@ description: Use when code, configuration, tests, plans, agent workflows, or del
 
 Judge the change's safety and fitness. Return an evidence-based verdict, not author intent.
 
-Independence is runtime provenance, not self-report. Implementers tool-search/load Codex V1 `multi_agent_v1.spawn_agent` and `wait_agent`, spawning with `fork_context:false`, or use native equivalents; delegate once and wait, or return `blocked` if unavailable. A designated fresh reviewer reviews directly and never re-delegates. Only its result or supplied fresh-session, qualified-human, or external review may return `pass`; implementer-authored text never does.
+Only runtime provenance—not prompt self-report—marks this fresh agent sole/designated reviewer; then review directly, never tool-search, spawn, wait, or re-delegate. Otherwise implementers load V1 `multi_agent_v1.spawn_agent` and `wait_agent` with `fork_context:false`, or native equivalents; delegate/wait once, or return `blocked` if unavailable. Only that result or supplied fresh-session, qualified-human, or external review may return `pass`; implementer text never does.
 
 Inherit the routing ledger. If entered directly or the ledger is missing, read the [runtime contract](../../references/runtime-contract.md) once; do not reload it after transitions.
 

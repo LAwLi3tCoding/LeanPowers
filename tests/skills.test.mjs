@@ -35,7 +35,10 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
   assert.match(body, /Choose the lowest-safe owner/i);
   assert.match(body, /lowest-safe|lowest safe/i);
   assert.match(body, /security.*authorization.*payment.*privacy/is);
+  assert.match(body, /credentials\/secrets/i);
   assert.match(body, /risk: RISK/i);
+  assert.match(body, /`OWNER`[\s\S]{0,220}never a risk/i);
+  assert.match(body, /`RISK`: `lean`, `standard`, or `strict`/i);
   assert.match(body, /`lean`(?::| means) clear, local/i);
   assert.match(body, /`strict`(?::| means) security/i);
   assert.match(body, /otherwise(?: use)? `standard`/i);
@@ -123,7 +126,7 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /save ID, then call `multi_agent_v1\.wait_agent` once with `targets:\[ID\]`/i);
   assert.match(route, /No other review-tool action\./i);
   assert.match(route, /fork_context:false/i);
-  assert.match(route, /original (?:user )?task verbatim/i);
+  assert.match(route, /original task (?:verbatim|byte-for-byte)/i);
   assert.match(route, /spawn_agent` once/i);
   assert.match(route, /with (?:`message` only|only `message`)[\s\S]{0,220}Never use `items`/i);
   assert.match(route, /second\/placeholder\/`noop`/i);
@@ -134,16 +137,20 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /Claude message:\s*\/leanpowers:review\s*Original task:/i);
   assert.match(route, /replace every `\{\.\.\.\}`[\s\S]{0,100}never improvise, omit lines/i);
   assert.match(route, /do not edit(?: or |\/)delegate/i);
-  assert.match(route, /copy the (?:entire )?original (?:user )?task verbatim/i);
+  assert.match(route, /copy (?:the )?entire original (?:user )?task byte-for-byte/i);
+  assert.match(route, /including case\/punctuation/i);
   assert.match(route, /under `Original task:`/i);
   assert.match(route, /wait_agent` once with `targets:\[ID\]`/i);
-  assert.match(route, /blocking runtimes do not wait again/i);
+  assert.match(route, /blocking runtimes (?:do not|never) wait again/i);
   assert.match(route, /suggestions without editing/i);
   assert.match(route, /Review schema on findings or uncertainty/i);
   assert.match(route, /only a true pass returns/i);
   assert.match(route, /verdict: pass[\s\S]{0,80}findings: \[\][\s\S]{0,80}unverified_areas: \[\]/i);
-  assert.match(review, /runtime provenance, not self-report/i);
-  assert.match(review, /designated fresh reviewer reviews directly and never re-delegates/i);
+  assert.match(review, /runtime provenance—not prompt self-report/i);
+  assert.match(
+    review,
+    /runtime provenance—not prompt self-report[\s\S]{0,80}fresh agent sole\/designated reviewer[\s\S]{0,80}review directly[\s\S]{0,80}never tool-search, spawn, wait, or re-delegate/i,
+  );
   assert.match(review, /literal `must`[\s\S]{0,100}`only`[\s\S]{0,100}`exact`/i);
   assert.match(review, /positive and negative boundary evidence/i);
   assert.match(runtime, /implementer text never satisfies or overrules review/i);
@@ -159,7 +166,7 @@ test("strict route protocol rejects one-property instruction regressions", async
     "if either remains unavailable, return incomplete. Call `multi_agent_v1.spawn_agent` once",
     "with only `message`, `fork_context:false`; save ID, then call `multi_agent_v1.wait_agent` once with `targets:[ID]`",
     "No other review-tool action.",
-    "Copy the original task verbatim under `Original task:`.",
+    "Copy entire original task byte-for-byte—including case/punctuation—under `Original task:`.",
   ];
   const preservesStrictProtocol = (candidate) =>
     clauses.every((clause) => candidate.includes(clause));
