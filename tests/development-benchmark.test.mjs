@@ -139,6 +139,14 @@ test("LeanPowers activation requires its exact first-progress entrypoint marker"
   );
   assert.equal(
     reportsWorkflowActivation({
+      entrypoint: "$superpowers:using-superpowers",
+      message: "I’m invoking `superpowers:using-superpowers` now, then proceeding.",
+      workflow: "superpowers-6.1.1",
+    }),
+    true,
+  );
+  assert.equal(
+    reportsWorkflowActivation({
       entrypoint: "$leanpowers:route",
       message: "entrypoint: leanpowers:route\nworkflow: build\nrisk: strict",
       workflow: "leanpowers-0.2.0",

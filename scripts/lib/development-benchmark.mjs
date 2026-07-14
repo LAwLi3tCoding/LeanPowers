@@ -2053,7 +2053,7 @@ export function reportsWorkflowActivation({ entrypoint, message, workflow }) {
     "iu",
   );
   const affirmative = new RegExp(
-    `\\b(?:activat(?:e|ed|ing)|us(?:e|ed|ing)|follow(?:ed|ing)?|start(?:ed|ing)?(?:\\s+with)?)\\b[^\\n.]{0,64}(?:${target})`,
+    `\\b(?:activat(?:e|ed|ing)|invok(?:e|ed|ing)|us(?:e|ed|ing)|follow(?:ed|ing)?|start(?:ed|ing)?(?:\\s+with)?)\\b[^\\n.]{0,64}(?:${target})`,
     "iu",
   );
   return structured.test(text) || affirmative.test(text);
