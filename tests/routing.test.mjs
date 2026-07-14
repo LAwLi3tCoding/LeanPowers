@@ -23,6 +23,17 @@ test("user rigor can upgrade but never downgrade a strict signal", () => {
   assert.equal(classifyRisk({ preferredMode: "strict", local: true }), "strict");
   assert.equal(classifyRisk({ preferredMode: "lean", security: true }), "strict");
   assert.equal(classifyRisk({ causeKnown: false, preferredMode: "lean" }), "standard");
+  assert.equal(
+    classifyRisk({
+      clear: true,
+      diagnosisRequested: true,
+      establishedValidation: true,
+      local: true,
+      preferredMode: "lean",
+      reversible: true,
+    }),
+    "standard",
+  );
 });
 
 test("security-boundary signals are always strict", () => {
@@ -62,6 +73,10 @@ test("initial workflow selection covers every workflow owner", () => {
     selectInitialWorkflow({ causeKnown: true, deliveryOnly: false, needsShaping: false }),
     "build",
   );
+  assert.equal(
+    selectInitialWorkflow({ causeKnown: true, diagnosisRequested: true }),
+    "debug",
+  );
   assert.equal(selectInitialWorkflow({ engineeringWork: false }), null);
 });
 
@@ -100,6 +115,30 @@ test("routing resolves entry contracts and competing intents one workflow at a t
   assert.equal(
     selectInitialWorkflow({ deliveryOnly: true, verificationCurrent: false }),
     "verify",
+  );
+  assert.equal(
+    selectInitialWorkflow({ reviewRequested: true, diagnosisRequested: true }),
+    "review",
+  );
+  assert.equal(
+    selectInitialWorkflow({ verificationRequested: true, diagnosisRequested: true }),
+    "verify",
+  );
+  assert.equal(
+    selectInitialWorkflow({ needsShaping: true, diagnosisRequested: true }),
+    "shape",
+  );
+  assert.equal(
+    selectInitialWorkflow({ learningRequest: true, diagnosisRequested: true }),
+    "adapt",
+  );
+  assert.equal(
+    selectInitialWorkflow({
+      deliveryOnly: true,
+      diagnosisRequested: true,
+      verificationCurrent: true,
+    }),
+    "ship",
   );
 });
 

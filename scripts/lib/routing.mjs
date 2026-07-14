@@ -25,6 +25,7 @@ const STANDARD_SIGNALS = [
   "dataModelChange",
   "defect",
   "dependencyChange",
+  "diagnosisRequested",
   "externalSystem",
   "multiFile",
   "publicBoundaryChange",
@@ -65,6 +66,7 @@ export function selectInitialWorkflow({
   explicitWorkflow = null,
   learningRequest = false,
   causeKnown = true,
+  diagnosisRequested = false,
   deliveryOnly = false,
   deliveryRequested = false,
   needsShaping = false,
@@ -99,11 +101,11 @@ export function selectInitialWorkflow({
   if (needsShaping) {
     return "shape";
   }
-  if (causeKnown === false) {
-    return "debug";
-  }
   if (verificationRequested) {
     return "verify";
+  }
+  if (diagnosisRequested || causeKnown === false) {
+    return "debug";
   }
   return "build";
 }
