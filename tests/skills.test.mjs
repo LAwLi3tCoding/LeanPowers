@@ -98,15 +98,17 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(verify, /independent_review: pass \| missing \| not_required/i);
   assert.match(build, /affected integration[\s\S]{0,120}full-suite/i);
   assert.match(build, /validation gap blocks `complete`/i);
-  assert.match(route, /distinct native Agent\/subagent[\s\S]{0,160}wait/i);
-  assert.match(route, /spawn\/wait tools are invisible[\s\S]{0,100}tool discovery/i);
+  assert.match(route, /distinct Agent\/subagent[\s\S]{0,160}wait/i);
+  assert.match(route, /multi_agent_v1\.spawn_agent[\s\S]{0,100}wait_agent/i);
   assert.match(route, /implementer-authored review text never/i);
   assert.match(route, /without inherited transcript/i);
+  assert.match(route, /installed LeanPowers `review`/i);
+  assert.doesNotMatch(route, /\$leanpowers:review|\/leanpowers:review/i);
   assert.match(review, /runtime provenance, not self-report/i);
   assert.match(review, /literal `must`[\s\S]{0,100}`only`[\s\S]{0,100}`exact`/i);
   assert.match(review, /positive and negative boundary evidence/i);
   assert.match(runtime, /implementer-authored review text never/i);
-  assert.match(runtime, /discovers\/loads deferred spawn\/wait tools/i);
+  assert.match(runtime, /multi_agent_v1\.spawn_agent[\s\S]{0,100}wait_agent/i);
 });
 
 test("skill frontmatter is portable and descriptions are discovery-focused", async () => {

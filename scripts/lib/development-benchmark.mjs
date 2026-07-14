@@ -707,11 +707,11 @@ async function runSingleCase({
     const wallSeconds = (Date.now() - startedAt) / 1000;
     const telemetry = parseCodexResult(agent.stdout);
     const declaredRisk = extractDeclaredRisk(telemetry.first_progress_message);
-    const activationReported = telemetry.first_progress_message.includes(entrypoint.slice(1)) || (
-      workflow === "leanpowers-0.2.0" &&
-      declaredRisk !== null &&
-      /\brequired_gates\b/iu.test(telemetry.first_progress_message)
-    );
+    const activationReported = reportsWorkflowActivation({
+      entrypoint,
+      message: telemetry.first_progress_message,
+      workflow,
+    });
 
     const gitState = await inspectBenchmarkGitState({
       baselineHead,
@@ -1308,12 +1308,45 @@ function finiteNumber(value) {
   return Number.isFinite(value) ? value : null;
 }
 
-function extractDeclaredRisk(message) {
+export function extractDeclaredRisk(message) {
   const text = String(message ?? "");
   const afterRisk = text.match(/\brisk(?:\s+(?:profile|level))?\s*[:=]?\s*`?(lean|standard|strict)`?/iu);
   if (afterRisk) return afterRisk[1].toLowerCase();
   const beforeRisk = text.match(/`?(lean|standard|strict)`?\s+risk\b/iu);
-  return beforeRisk ? beforeRisk[1].toLowerCase() : null;
+  if (beforeRisk) return beforeRisk[1].toLowerCase();
+  const ownerOrMode = text.match(/\b(lean|standard|strict)\s+(?:owner|mode)\b/iu);
+  return ownerOrMode ? ownerOrMode[1].toLowerCase() : null;
+}
+
+export function reportsWorkflowActivation({ entrypoint, message, workflow }) {
+  const text = String(message ?? "");
+  const aliases = [entrypoint.slice(1)];
+  if (workflow === "leanpowers-0.2.0") aliases.push("route");
+  const target = aliases
+    .map((alias) => `\`?${escapeRegex(alias)}\`?(?:\\s+workflow)?`)
+    .join("|");
+  const negatedBefore = new RegExp(
+    `\\b(?:not|without|skip(?:ping)?|declin(?:e|ing)|unavailable|unable(?:\\s+to)?|cannot|can't|won't|do not)\\b[^\\n.]{0,48}(?:${target})`,
+    "iu",
+  );
+  const unavailableAfter = new RegExp(
+    `(?:${target})[^\\n.]{0,32}(?:\\bunavailable\\b|\\bdisabled\\b|\\bnot available\\b|\\bisn't available\\b|\\bcannot be used\\b)`,
+    "iu",
+  );
+  if (negatedBefore.test(text) || unavailableAfter.test(text)) return false;
+  const structured = new RegExp(
+    `(?:^|\\n)\\s*(?:workflow|skill)\\s*[:=]\\s*(?:${target})(?:\\s|$)`,
+    "iu",
+  );
+  const affirmative = new RegExp(
+    `\\b(?:activat(?:e|ed|ing)|us(?:e|ed|ing)|follow(?:ed|ing)?|start(?:ed|ing)?(?:\\s+with)?)\\b[^\\n.]{0,64}(?:${target})`,
+    "iu",
+  );
+  return structured.test(text) || affirmative.test(text);
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function median(values) {

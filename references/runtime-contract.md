@@ -36,4 +36,4 @@ Reuse evidence only while all relevant code, generated output, dependencies, con
 - `review -> build/debug` on findings; independent strict pass goes to `verify`.
 - `verify -> ship` only when delivery was requested and every material claim passes.
 
-Default to one agent; delegate only independent, verifiable work without write conflicts, to at most three children whose diff/evidence the leader inspects. Strict discovers/loads deferred spawn/wait tools, delegates without inherited transcript the contract, final diff/code, and evidence, then waits for a passing result. Implementer-authored review text never satisfies the gate; otherwise return incomplete and never ship.
+Default to one agent; delegate only independent, verifiable work without write conflicts, to at most three children whose diff/evidence the leader inspects. Strict tool-search/loads Codex V1 `multi_agent_v1.spawn_agent` and `wait_agent`, or native equivalents; delegates without inherited transcript the contract, final diff/code, and evidence; then waits for a passing result. Implementer-authored review text never satisfies the gate; otherwise return incomplete and never ship.

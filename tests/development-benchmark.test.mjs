@@ -13,12 +13,14 @@ import {
   evaluateChangedPaths,
   evaluateRunOutcome,
   evaluateWorkflowConformance,
+  extractDeclaredRisk,
   inspectBenchmarkGitState,
   loadDevelopmentSuite,
   makePilotResult,
   parseClaudeResult,
   parseCodexResult,
   resolveDevelopmentOutputDirectory,
+  reportsWorkflowActivation,
   runVerifier,
 } from "../scripts/lib/development-benchmark.mjs";
 
@@ -81,6 +83,47 @@ test("the Codex runner is writable, non-interactive, ephemeral, and model-paired
   assert.ok(args.includes("features.multi_agent=true"));
   assert.ok(!args.join(" ").includes("superpowers-6.1.1"));
   assert.ok(!args.join(" ").includes("leanpowers-0.2.0"));
+});
+
+test("LeanPowers activation accepts semantic route and risk declarations", () => {
+  const message = "Activating the `route` workflow with standard? strict owner selection.";
+  const declaredRisk = extractDeclaredRisk(message);
+
+  assert.equal(declaredRisk, "strict");
+  assert.equal(
+    reportsWorkflowActivation({
+      entrypoint: "$leanpowers:route",
+      message,
+      workflow: "leanpowers-0.2.0",
+    }),
+    true,
+  );
+  assert.equal(
+    reportsWorkflowActivation({
+      entrypoint: "$superpowers:using-superpowers",
+      message: "Using `superpowers:using-superpowers` to establish the workflow.",
+      workflow: "superpowers-6.1.1",
+    }),
+    true,
+  );
+  for (const unavailable of [
+    "I am not using the route workflow.",
+    "The route workflow is unavailable in this session.",
+    "The route skill isn't available despite risk: strict and required_gates.",
+    "The route workflow cannot be used despite risk: strict and required_gates.",
+    "Unable to use the route workflow; risk: strict; required_gates are known.",
+    "I cannot use `leanpowers:route` here.",
+  ]) {
+    assert.equal(
+      reportsWorkflowActivation({
+        entrypoint: "$leanpowers:route",
+        message: unavailable,
+        workflow: "leanpowers-0.2.0",
+      }),
+      false,
+      unavailable,
+    );
+  }
 });
 
 test("agent and verifier environments expose only a fixed non-sensitive allowlist", () => {

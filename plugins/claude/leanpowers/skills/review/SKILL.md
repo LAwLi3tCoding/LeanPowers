@@ -5,9 +5,9 @@ description: Use when code, configuration, tests, plans, agent workflows, or del
 
 # Review
 
-Judge whether the change is safe and fit. Return an evidence-based verdict, not author intent.
+Judge the change's safety and fitness. Return an evidence-based verdict, not author intent.
 
-Independence is runtime provenance, not self-report. If you implemented the change, discover/load deferred spawn/wait tools, invoke a distinct native Agent/subagent with contract, final diff/code, and evidence, then wait; otherwise return `blocked`. Only its completed result or supplied fresh-session, qualified-human, or external review may return `pass`; implementer-authored text never does.
+Independence is runtime provenance, not self-report. If you implemented the change, tool-search/load Codex V1 `multi_agent_v1.spawn_agent` and `wait_agent`, or native equivalents; invoke one distinct reviewer with contract, final diff/code, and evidence; wait; otherwise return `blocked`. Only its result or supplied fresh-session, qualified-human, or external review may return `pass`; implementer-authored text never does.
 
 Inherit the routing ledger. If entered directly or the ledger is missing, read the [runtime contract](../../references/runtime-contract.md) once; do not reload it after transitions.
 
