@@ -137,7 +137,7 @@ function capsuleTraceOptions(expectedWorkflow) {
 }
 
 function capsuleTraceEvents({
-  discoverCommand = "/bin/zsh -lc \"(rg --files; rg -n 'cache|locale' .)\"",
+  discoverCommand = "/bin/zsh -lc \"rg --files .; rg -n -- 'cache|locale' .\"",
   discoverOutput = "src/index.mjs:1:cache\ntest/index.test.mjs:1:test",
   duplicateLedger = false,
   expectedWorkflow = "debug",
@@ -661,6 +661,27 @@ test("Codex trace observes the complete debug capsule stage protocol", () => {
   );
 
   assert.deepEqual(parsed.workflow_trace.capsule_stage, passingCapsuleStage("debug"));
+
+  const literalShellSyntax = parseCodexResult(
+    capsuleTraceEvents({
+      discoverCommand: "rg --files .; rg -n -- 'cache$(literal)' .",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  );
+  assert.deepEqual(
+    literalShellSyntax.workflow_trace.capsule_stage,
+    passingCapsuleStage("debug"),
+  );
+  const leadingHyphenLiteral = parseCodexResult(
+    capsuleTraceEvents({
+      discoverCommand: "rg --files .; rg -n -- '--no-ignore' .",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  );
+  assert.deepEqual(
+    leadingHyphenLiteral.workflow_trace.capsule_stage,
+    passingCapsuleStage("debug"),
+  );
 });
 
 test("debug capsule stage protocol rejects one-property trace regressions", () => {
@@ -668,13 +689,33 @@ test("debug capsule stage protocol rejects one-property trace regressions", () =
     [{ duplicateLedger: true }, "route_ledger_occurrences"],
     [{ ledgerAfterDiscover: true }, "ledger_before_tools_observed"],
     [{ workflowRead: true }, "workflow_read_calls"],
-    [{ discoverCommand: "rg -n 'cache|locale' src test" }, "discover_observed"],
-    [{ discoverCommand: "rg --files; rg -n 'cache|locale' src test" }, "discover_observed"],
-    [{ discoverCommand: "rg --files; rg -n 'cache|locale'" }, "discover_observed"],
-    [{ discoverCommand: "rg --files; rg -n '.' src test" }, "discover_observed"],
-    [{ discoverCommand: "rg --files; rg --sort path '.' src test" }, "discover_observed"],
+    [{ discoverCommand: "rg -n -- 'cache|locale' ." }, "discover_observed"],
+    [{ discoverCommand: "rg --files; rg -n -- 'cache|locale' ." }, "discover_observed"],
+    [{ discoverCommand: "rg --files .; rg -n -- 'cache|locale'" }, "discover_observed"],
+    [{ discoverCommand: "rg --files .; rg -n -- 'cache|locale' /tmp/workspace ." }, "discover_observed"],
+    [{ discoverCommand: "rg --files .; rg -n -- \"cache|locale\" ." }, "discover_observed"],
+    [{ discoverCommand: "rg --files .; rg -n -- {cache,..} ." }, "discover_observed"],
+    [{ discoverCommand: "rg --files .; rg -n -f ../patterns ." }, "discover_observed"],
+    [{ discoverCommand: "rg --files .; rg -n '--no-ignore' ." }, "discover_observed"],
+    [{ discoverCommand: "rg --files .; rg -n '--pre=/bin/cat' ." }, "discover_observed"],
+    [{ discoverCommand: "rg --files .; rg -n -- '.' ." }, "discover_observed"],
+    [{ discoverCommand: "rg --files .; rg -n -- '.*' ." }, "discover_observed"],
+    [{ discoverCommand: "rg --files .; rg -n -- '.' src test" }, "discover_observed"],
+    [{ discoverCommand: "rg --files .; rg --sort path -n -- '.' ." }, "discover_observed"],
+    [{ discoverCommand: "cd . && rg --files .; rg -n -- 'cache|locale' ." }, "discover_observed"],
+    [{ discoverCommand: "cd /tmp/workspace && rg --files .; rg -n -- 'cache|locale' ." }, "discover_observed"],
+    [{ discoverCommand: "cd$IFS/tmp/workspace && rg --files .; rg -n -- 'cache|locale' ." }, "discover_observed"],
+    [{ discoverCommand: "pushd /tmp/workspace; rg --files .; rg -n -- 'cache|locale' ." }, "discover_observed"],
+    [{ discoverCommand: "command -- cd /tmp/workspace; rg --files .; rg -n -- 'cache|locale' ." }, "discover_observed"],
+    [{ discoverCommand: "eval 'cd /tmp/workspace'; rg --files .; rg -n -- 'cache|locale' ." }, "discover_observed"],
+    [{ discoverCommand: "runner=cd; $runner /tmp/workspace; rg --files .; rg -n -- 'cache|locale' ." }, "discover_observed"],
+    [{ discoverCommand: "rg --files .; rg -n -- \"$(cd /tmp/workspace && printf cache)\" ." }, "discover_observed"],
+    [{ discoverCommand: "rg --files .; rg -n -- \"can't $(cd /tmp/workspace && printf cache)\" ." }, "discover_observed"],
+    [{ discoverCommand: "rg --files .; rg -n -- \"`cd /tmp/workspace; printf cache`\" ." }, "discover_observed"],
+    [{ discoverCommand: "rg --files .; rg -n -- cache <(printf cache) ." }, "discover_observed"],
+    [{ discoverCommand: "rg --files .; rg -n -- cache =(printf cache) ." }, "discover_observed"],
     [{
-      discoverCommand: "rg --files | rg -n 'src|test'",
+      discoverCommand: "rg --files . | rg -n -- 'src|test' .",
       discoverOutput: "1:src/index.mjs\n2:test/index.test.mjs",
     }, "discover_observed"],
     [{ readCommand: "cat src/index.mjs" }, "read_observed"],

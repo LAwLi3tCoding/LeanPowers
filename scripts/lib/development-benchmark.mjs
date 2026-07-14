@@ -796,167 +796,14 @@ function isWorkflowReadCommand(command) {
 function isContentAwareDiscover(item) {
   if (item?.exit_code !== 0) return false;
   const command = unwrapShellInvocation(item?.command);
-  if (command === null) return false;
-  const hasPathListing =
-    /\brg\s+--files\b|\bfind\s+|(?:^|[;&|\s])ls(?:\s|$)/iu.test(command);
-  const searchSegments = splitShellControlSegments(command)
-    .filter((segment) => /\b(?:rg|grep)\b/iu.test(segment));
-  const hasContentSearch = searchSegments.some(
-    (segment) =>
-      !/\brg\s+--files\b/iu.test(segment) &&
-      contentSearchCoversRoot(segment),
+  const commandMatch = String(command ?? "").match(
+    /^rg[ \t]+--files[ \t]+\.[ \t]*;[ \t]*rg[ \t]+-n[ \t]+--[ \t]+'([^'\r\n]+)'[ \t]+\.$/u,
   );
+  const canonicalCommand =
+    commandMatch !== null && ![".", ".*", "^", "$"].includes(commandMatch[1]);
   const hasContentOutput = /(?:^|\r?\n)[^:\r\n]+:\d+:[^\r\n]+/u
     .test(String(item?.aggregated_output ?? ""));
-  return hasPathListing && hasContentSearch && hasContentOutput;
-}
-
-function contentSearchCoversRoot(command) {
-  const tokens = tokenizeShellWords(command);
-  const executableIndex = tokens.findIndex((token) =>
-    /^(?:.*\/)?(?:grep|rg)$/iu.test(token)
-  );
-  if (executableIndex < 0) return false;
-
-  const optionsWithValues = new Set([
-    "--after-context",
-    "--before-context",
-    "--context",
-    "--encoding",
-    "--file",
-    "--glob",
-    "--iglob",
-    "--max-columns",
-    "--max-count",
-    "--regexp",
-    "--sort",
-    "--type",
-    "--type-add",
-    "-A",
-    "-B",
-    "-C",
-    "-e",
-    "-f",
-    "-g",
-    "-m",
-    "-t",
-  ]);
-  const valuelessOptions = new Set([
-    "--case-sensitive",
-    "--fixed-strings",
-    "--follow",
-    "--hidden",
-    "--ignore-case",
-    "--line-number",
-    "--no-heading",
-    "--no-ignore",
-    "--smart-case",
-    "--word-regexp",
-  ]);
-  let endOfOptions = false;
-  let patternObserved = false;
-  for (let index = executableIndex + 1; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    if (!endOfOptions && token === "--") {
-      endOfOptions = true;
-      continue;
-    }
-    if (!endOfOptions && token.startsWith("-")) {
-      if (/^(?:--file=.+|--regexp=.+|-e.+|-f.+)$/u.test(token)) patternObserved = true;
-      if (optionsWithValues.has(token)) {
-        if (["--regexp", "--file", "-e", "-f"].includes(token)) {
-          patternObserved = true;
-        }
-        index += 1;
-      } else if (
-        /^(?:--after-context|--before-context|--context|--encoding|--file|--glob|--iglob|--max-columns|--max-count|--sort|--type|--type-add)=.+$/u.test(token) ||
-        /^-[ABCefgmt].+$/u.test(token) ||
-        valuelessOptions.has(token) ||
-        /^-[FHISilnRrsw]+$/u.test(token)
-      ) {
-        continue;
-      } else {
-        return false;
-      }
-      continue;
-    }
-    if (!patternObserved) {
-      patternObserved = true;
-      continue;
-    }
-    if (token === ".") return index === tokens.length - 1;
-  }
-  return false;
-}
-
-function tokenizeShellWords(command) {
-  const tokens = [];
-  let current = "";
-  let escaped = false;
-  let quote = null;
-  const finish = () => {
-    if (current.length > 0) tokens.push(current);
-    current = "";
-  };
-  for (const character of command) {
-    if (escaped) {
-      current += character;
-      escaped = false;
-      continue;
-    }
-    if (character === "\\") {
-      escaped = true;
-      continue;
-    }
-    if (quote !== null) {
-      if (character === quote) quote = null;
-      else current += character;
-      continue;
-    }
-    if (character === "\"" || character === "'") {
-      quote = character;
-      continue;
-    }
-    if (/\s/u.test(character) || character === "(" || character === ")") {
-      finish();
-      continue;
-    }
-    current += character;
-  }
-  finish();
-  return tokens;
-}
-
-function splitShellControlSegments(command) {
-  const segments = [];
-  let escaped = false;
-  let quote = null;
-  let start = 0;
-  for (let index = 0; index < command.length; index += 1) {
-    const character = command[index];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (character === "\\") {
-      escaped = true;
-      continue;
-    }
-    if (quote !== null) {
-      if (character === quote) quote = null;
-      continue;
-    }
-    if (character === "\"" || character === "'") {
-      quote = character;
-      continue;
-    }
-    if (/[;&|\r\n]/u.test(character)) {
-      segments.push(command.slice(start, index));
-      start = index + 1;
-    }
-  }
-  segments.push(command.slice(start));
-  return segments;
+  return canonicalCommand && hasContentOutput;
 }
 
 function isBatchRead(item) {
@@ -1663,7 +1510,7 @@ export function renderDevelopmentReport(result) {
     "## Interpretation boundary",
     "",
     "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    "- LeanPowers conformance requires one exact four-line route ledger before any task tool. Build/debug capsule traces must show no Skill/reference reload, final-root content-aware discovery using a supported rg/grep command shape, batched reads, fixture-owned structured pre-edit reproduction for debug, one contiguous multi-file patch batch, and one supported successful validation command. Codex JSONL emits one file-change item per changed file and no patch-call identifier, so contiguous file-change items are an explicit call-cardinality proxy; immediately adjacent independent patch calls with no intervening JSONL event are indistinguishable and may be coalesced. The proxy does not prove exact patch-call cardinality. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Each strict review cycle additionally requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
+    "- LeanPowers conformance requires one exact four-line route ledger before any task tool. Build/debug capsule traces must show no Skill/reference reload, the exact root-relative `rg --files .; rg -n -- 'TERMS' .` discovery shape with a nontrivial literal pattern and option terminator, batched reads, fixture-owned structured pre-edit reproduction for debug, one contiguous multi-file patch batch, and one supported successful validation command. Codex JSONL emits one file-change item per changed file and no patch-call identifier, so contiguous file-change items are an explicit call-cardinality proxy; immediately adjacent independent patch calls with no intervening JSONL event are indistinguishable and may be coalesced. The proxy does not prove exact patch-call cardinality. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Each strict review cycle additionally requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
     "- Codex JSONL does not expose raw spawn arguments such as `fork_context`; observable spawn/wait behavior is checked dynamically, while exact argument shape is covered by static workflow tests and remains a runtime telemetry gap.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
