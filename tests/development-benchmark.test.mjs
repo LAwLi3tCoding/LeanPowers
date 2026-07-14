@@ -19,6 +19,7 @@ import {
   makePilotResult,
   parseClaudeResult,
   parseCodexResult,
+  parseLeanRouteLedger,
   resolveDevelopmentOutputDirectory,
   reportsWorkflowActivation,
   runVerifier,
@@ -40,11 +41,15 @@ test("development pilot declares three executable risk-calibrated scenario class
     "leanpowers-0.2.0": "$leanpowers:route",
   });
   assert.deepEqual(
-    suite.cases.map(({ scenario_class, risk_level }) => [scenario_class, risk_level]),
+    suite.cases.map(({ scenario_class, risk_level, expected_workflow }) => [
+      scenario_class,
+      risk_level,
+      expected_workflow,
+    ]),
     [
-      ["small-explicit-feature", "lean"],
-      ["unknown-cause-defect", "standard"],
-      ["security-authorization-or-data-risk", "strict"],
+      ["small-explicit-feature", "lean", "build"],
+      ["unknown-cause-defect", "standard", "debug"],
+      ["security-authorization-or-data-risk", "strict", "build"],
     ],
   );
   assert.ok(suite.cases.every(({ task }) => task.trim().length > 80));
@@ -151,6 +156,44 @@ test("LeanPowers activation requires its exact first-progress entrypoint marker"
   }
 });
 
+test("LeanPowers route ledger is exactly four resolved plain lines", () => {
+  assert.deepEqual(
+    parseLeanRouteLedger([
+      "entrypoint: leanpowers:route",
+      "workflow: build",
+      "risk: strict",
+      "required_gates: [independent_review, current_evidence]",
+    ].join("\n")),
+    {
+      workflow: "build",
+      risk: "strict",
+      required_gates: "[independent_review, current_evidence]",
+    },
+  );
+  assert.deepEqual(
+    parseLeanRouteLedger([
+      "entrypoint: leanpowers:route",
+      "workflow: verify",
+      "risk: standard",
+      "required_gates: [current_evidence]",
+    ].join("\n")),
+    {
+      workflow: "verify",
+      risk: "standard",
+      required_gates: "[current_evidence]",
+    },
+  );
+  for (const invalid of [
+    "entrypoint: leanpowers:route\nworkflow: OWNER\nrisk: strict\nrequired_gates: [independent_review, current_evidence]",
+    "entrypoint: leanpowers:route\nworkflow: build\nrisk: strict",
+    "- entrypoint: leanpowers:route\nworkflow: build\nrisk: strict\nrequired_gates: [independent_review, current_evidence]",
+    "entrypoint: leanpowers:route\nworkflow: build\nrisk: strict\nrequired_gates: [current_evidence]",
+    "entrypoint: leanpowers:route\nworkflow: build\nrisk: lean\nrequired_gates: [independent_review, current_evidence]",
+  ]) {
+    assert.equal(parseLeanRouteLedger(invalid), null, invalid);
+  }
+});
+
 test("agent and verifier environments expose only a fixed non-sensitive allowlist", () => {
   const env = benchmarkEnvironment("/tmp/isolated-home", {
     BENCHMARK_MARKER: "fixture",
@@ -243,6 +286,10 @@ test("Codex JSONL usage and completion are independently parsed", () => {
       skills_observed: [],
       independent_review_pass_observed: false,
       independent_review_contract_verbatim_observed: false,
+      independent_review_skill_invoked: false,
+      independent_review_sole_wait_target_observed: false,
+      post_change_spawn_calls: 0,
+      post_change_wait_calls: 0,
     },
   });
   assert.equal(parseCodexResult('{"type":"turn.failed"}').tokens, null);
@@ -305,6 +352,10 @@ test("Codex trace records tool types and exact workflow file reads", () => {
     skills_observed: ["build"],
     independent_review_pass_observed: false,
     independent_review_contract_verbatim_observed: false,
+    independent_review_skill_invoked: false,
+    independent_review_sole_wait_target_observed: false,
+    post_change_spawn_calls: 0,
+    post_change_wait_calls: 0,
   });
 });
 
@@ -312,19 +363,43 @@ test("Codex trace proves independent review only after reviewer spawn and comple
   const contract = "Prefix sha256=; hexadecimal characters in either case.";
   const parsed = parseCodexResult([
     JSON.stringify({
-      type: "item.completed",
+      type: "item.started",
       item: {
+        id: "spawn-reviewer",
         type: "collab_tool_call",
         tool: "spawn_agent",
-        prompt: `Review the strict-risk diff and tests. Original task: ${contract}`,
+        receiver_thread_ids: [],
+        prompt: `$leanpowers:review\nReview the strict-risk diff and tests. Original task: ${contract}`,
+        status: "in_progress",
+      },
+    }),
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        id: "spawn-reviewer",
+        type: "collab_tool_call",
+        tool: "spawn_agent",
+        prompt: `$leanpowers:review\nReview the strict-risk diff and tests. Original task: ${contract}`,
         receiver_thread_ids: ["reviewer"],
         agents_states: { reviewer: { status: "running" } },
         status: "completed",
       },
     }),
     JSON.stringify({
+      type: "item.started",
+      item: {
+        id: "wait-reviewer",
+        type: "collab_tool_call",
+        tool: "wait",
+        receiver_thread_ids: ["reviewer"],
+        agents_states: {},
+        status: "in_progress",
+      },
+    }),
+    JSON.stringify({
       type: "item.completed",
       item: {
+        id: "wait-reviewer",
         type: "collab_tool_call",
         tool: "wait",
         agents_states: {
@@ -347,6 +422,13 @@ test("Codex trace proves independent review only after reviewer spawn and comple
     parsed.workflow_trace.independent_review_contract_verbatim_observed,
     true,
   );
+  assert.equal(parsed.workflow_trace.independent_review_skill_invoked, true);
+  assert.equal(
+    parsed.workflow_trace.independent_review_sole_wait_target_observed,
+    true,
+  );
+  assert.equal(parsed.workflow_trace.post_change_spawn_calls, 1);
+  assert.equal(parsed.workflow_trace.post_change_wait_calls, 1);
   assert.equal(
     parseCodexResult([
       JSON.stringify({
@@ -375,6 +457,88 @@ test("Codex trace proves independent review only after reviewer spawn and comple
       }),
     ].join("\n"), { expectedReviewContract: contract })
       .workflow_trace.independent_review_contract_verbatim_observed,
+    false,
+  );
+
+  const extraFailedSpawn = parseCodexResult([
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "collab_tool_call",
+        tool: "spawn_agent",
+        prompt: `$leanpowers:review\nOriginal task: ${contract}`,
+        receiver_thread_ids: ["reviewer"],
+        status: "completed",
+      },
+    }),
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "collab_tool_call",
+        tool: "spawn_agent",
+        prompt: "fallback reviewer",
+        status: "failed",
+      },
+    }),
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "collab_tool_call",
+        tool: "wait",
+        agents_states: {
+          reviewer: {
+            status: "completed",
+            message: "verdict: pass\nfindings: []\nunverified_areas: []",
+          },
+        },
+        status: "completed",
+      },
+    }),
+  ].join("\n"), { expectedReviewContract: contract });
+  assert.equal(extraFailedSpawn.workflow_trace.independent_review_pass_observed, true);
+  assert.equal(extraFailedSpawn.workflow_trace.post_change_spawn_calls, 2);
+
+  const unrelatedWaitTarget = parseCodexResult([
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "collab_tool_call",
+        tool: "spawn_agent",
+        prompt: `$leanpowers:review\nOriginal task: ${contract}`,
+        receiver_thread_ids: ["reviewer"],
+        status: "completed",
+      },
+    }),
+    JSON.stringify({
+      type: "item.started",
+      item: {
+        id: "wait-with-observer",
+        type: "collab_tool_call",
+        tool: "wait",
+        receiver_thread_ids: ["reviewer", "observer"],
+        agents_states: {},
+        status: "in_progress",
+      },
+    }),
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        id: "wait-with-observer",
+        type: "collab_tool_call",
+        tool: "wait",
+        agents_states: {
+          reviewer: {
+            status: "completed",
+            message: "verdict: pass\nfindings: []\nunverified_areas: []",
+          },
+        },
+        status: "completed",
+      },
+    }),
+  ].join("\n"), { expectedReviewContract: contract });
+  assert.equal(unrelatedWaitTarget.workflow_trace.independent_review_pass_observed, true);
+  assert.equal(
+    unrelatedWaitTarget.workflow_trace.independent_review_sole_wait_target_observed,
     false,
   );
 });
@@ -558,16 +722,45 @@ test("workflow declaration and risk classification are separate conformance evid
     evaluateWorkflowConformance({
       workflow: "leanpowers-0.2.0",
       activation_reported: true,
+      route_ledger_reported: true,
+      expected_workflow: "build",
+      declared_workflow: "build",
       declared_risk: "strict",
       risk_level: "strict",
       telemetry: {
         workflow_trace: {
           independent_review_pass_observed: true,
           independent_review_contract_verbatim_observed: true,
+          independent_review_skill_invoked: true,
+          independent_review_sole_wait_target_observed: true,
+          post_change_spawn_calls: 1,
+          post_change_wait_calls: 1,
         },
       },
     }),
     { status: "PASS", reasons: [] },
+  );
+  assert.deepEqual(
+    evaluateWorkflowConformance({
+      workflow: "leanpowers-0.2.0",
+      activation_reported: true,
+      route_ledger_reported: true,
+      expected_workflow: "debug",
+      declared_workflow: "build",
+      declared_risk: "strict",
+      risk_level: "strict",
+      telemetry: {
+        workflow_trace: {
+          independent_review_pass_observed: true,
+          independent_review_contract_verbatim_observed: true,
+          independent_review_skill_invoked: true,
+          independent_review_sole_wait_target_observed: true,
+          post_change_spawn_calls: 1,
+          post_change_wait_calls: 1,
+        },
+      },
+    }),
+    { status: "FAIL", reasons: ["declared build workflow instead of debug"] },
   );
   assert.equal(
     evaluateWorkflowConformance({
@@ -609,11 +802,61 @@ test("workflow declaration and risk classification are separate conformance evid
         workflow_trace: {
           independent_review_pass_observed: true,
           independent_review_contract_verbatim_observed: false,
+          independent_review_skill_invoked: true,
+          independent_review_sole_wait_target_observed: true,
+          post_change_spawn_calls: 1,
+          post_change_wait_calls: 1,
         },
       },
     }).status,
     "FAIL",
   );
+  for (const [workflowTrace, expectedReason] of [
+    [{
+      independent_review_pass_observed: true,
+      independent_review_contract_verbatim_observed: true,
+      independent_review_skill_invoked: false,
+      independent_review_sole_wait_target_observed: true,
+      post_change_spawn_calls: 1,
+      post_change_wait_calls: 1,
+    }, "passing reviewer did not explicitly invoke leanpowers:review"],
+    [{
+      independent_review_pass_observed: true,
+      independent_review_contract_verbatim_observed: true,
+      independent_review_skill_invoked: true,
+      independent_review_sole_wait_target_observed: true,
+      post_change_spawn_calls: 2,
+      post_change_wait_calls: 1,
+    }, "strict final review did not use exactly one spawn call"],
+    [{
+      independent_review_pass_observed: true,
+      independent_review_contract_verbatim_observed: true,
+      independent_review_skill_invoked: true,
+      independent_review_sole_wait_target_observed: true,
+      post_change_spawn_calls: 1,
+      post_change_wait_calls: 2,
+    }, "strict final review did not use exactly one wait call"],
+    [{
+      independent_review_pass_observed: true,
+      independent_review_contract_verbatim_observed: true,
+      independent_review_skill_invoked: true,
+      independent_review_sole_wait_target_observed: false,
+      post_change_spawn_calls: 1,
+      post_change_wait_calls: 1,
+    }, "strict wait did not target only the designated reviewer"],
+  ]) {
+    const conformance = evaluateWorkflowConformance({
+      workflow: "leanpowers-0.2.0",
+      activation_reported: true,
+      route_ledger_reported: true,
+      expected_workflow: "build",
+      declared_workflow: "build",
+      declared_risk: "strict",
+      risk_level: "strict",
+      telemetry: { workflow_trace: workflowTrace },
+    });
+    assert.deepEqual(conformance, { status: "FAIL", reasons: [expectedReason] });
+  }
 });
 
 test("raw benchmark output cannot be written into tracked repository paths", () => {
@@ -655,6 +898,7 @@ test("partial case runs are complete for their declared selected scope", async (
     id: selectedCases[0].id,
     scenario_class: selectedCases[0].scenario_class,
     risk_level: selectedCases[0].risk_level,
+    expected_workflow: selectedCases[0].expected_workflow,
   }]);
   assert.equal(result.aggregate["leanpowers-0.2.0"].median_uncached_plus_output_tokens, null);
 });

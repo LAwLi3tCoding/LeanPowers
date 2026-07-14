@@ -48,7 +48,7 @@ unverified_areas: [] | [missing evidence]
 
 `pass` requires no material findings or unverified areas. State missing evidence; never speculate.
 
-For a delegated strict review, send the verbatim task, risk ledger, changed paths, concise final-diff evidence, and the exact output schema—not a paraphrase, pasted diff/log, or implementation transcript. Read current diff/code from the shared workspace. If a finding conflicts with the contract, return it to an independent reviewer for a revised verdict; the implementer cannot overrule it.
+For a delegated strict review, send the verbatim task, risk ledger, changed paths, concise final-diff evidence, and the exact output schema—not a paraphrase, pasted diff/log, or implementation transcript. Read current diff/code from the shared workspace. Contract conflicts remain `changes_required`; the designated reviewer never re-delegates, and the implementer cannot overrule.
 
 ## Boundaries
 
@@ -57,4 +57,4 @@ For a delegated strict review, send the verbatim task, risk ledger, changed path
 - Do not broaden into unrelated cleanup.
 - Do not weaken severity because release is urgent.
 
-Send causal defects to `debug`; send clear repairs to `build`; send a passing change to `verify` for completion proof.
+Send causal defects to `debug` and clear repairs to `build`. A passing change may complete with unchanged current evidence; use `verify` for stale, explicit, delivery, or cross-artifact proof.

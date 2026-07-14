@@ -32,17 +32,20 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
   for (const trigger of ["plan", "implement", "fix", "review", "verify", "deliver"]) {
     assert.match(frontmatter.description, new RegExp(trigger, "i"), trigger);
   }
-  assert.match(body, /exactly one/i);
+  assert.match(body, /Choose the lowest-safe owner/i);
   assert.match(body, /lowest-safe|lowest safe/i);
   assert.match(body, /security.*authorization.*payment.*privacy/is);
-  assert.match(body, /risk: lean \| standard \| strict/i);
+  assert.match(body, /risk: RISK/i);
+  assert.match(body, /`lean` means clear, local/i);
+  assert.match(body, /`strict` means security/i);
+  assert.match(body, /otherwise use `standard`/i);
   assert.match(body, /required_gates/i);
   assert.match(body, /entrypoint: leanpowers:route/i);
   for (const workflow of ["shape", "build", "debug", "review", "verify", "ship", "adapt"]) {
     assert.match(body, new RegExp(`\\b${workflow}\\b`, "i"), workflow);
   }
   assert.doesNotMatch(body, /1%|before any response|you do not have a choice/i);
-  assert.ok(wordCount(content) <= 260, `route has ${wordCount(content)} words`);
+  assert.ok(wordCount(content) <= 400, `route has ${wordCount(content)} words`);
 });
 
 test("direct workflow entry loads one compact runtime contract at most once", async () => {
@@ -99,17 +102,29 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(verify, /independent_review: pass \| missing \| not_required/i);
   assert.match(build, /affected integration[\s\S]{0,120}full-suite/i);
   assert.match(build, /validation gap blocks `complete`/i);
-  assert.match(route, /fresh-context Agent\/subagent[\s\S]{0,300}wait/i);
+  assert.match(route, /For a clear build, execute the capsule below/i);
+  assert.match(route, /Otherwise load and execute the selected installed Skill once/i);
+  assert.match(route, /do not use the build capsule/i);
+  assert.match(route, /target one call each on the green path, never a quality ceiling/i);
+  assert.match(route, /Expand only for missing, contradictory, or failed evidence/i);
+  assert.match(route, /one inspection tool round/i);
+  assert.match(route, /Patch implementation and tests together once/i);
+  assert.match(route, /Run one applicable validation command/i);
   assert.match(route, /multi_agent_v1\.spawn_agent[\s\S]{0,100}wait_agent/i);
   assert.match(route, /fork_context:false/i);
   assert.match(route, /verbatim task/i);
-  assert.match(route, /after (?:the )?last change/i);
-  assert.match(route, /scoped edit requires retest\/re-review/i);
-  assert.match(route, /installed LeanPowers `review`/i);
-  assert.match(route, /without re-delegating/i);
-  assert.match(route, /Activate the installed LeanPowers owner/i);
-  assert.match(route, /Route never implements/i);
-  assert.doesNotMatch(route, /\$leanpowers:review|\/leanpowers:review/i);
+  assert.match(route, /call spawn once/i);
+  assert.match(route, /with `message` only[\s\S]{0,120}Never use `items`/i);
+  assert.match(route, /second\/placeholder\/`noop` reviewer/i);
+  assert.match(route, /as above/i);
+  assert.match(route, /\$leanpowers:review/i);
+  assert.match(route, /\/leanpowers:review/i);
+  assert.match(route, /Codex waits once for only that ID/i);
+  assert.match(route, /blocking runtimes do not wait again/i);
+  assert.match(route, /optional suggestions without editing/i);
+  assert.match(route, /Review schema on findings or uncertainty/i);
+  assert.match(route, /only a true pass returns/i);
+  assert.match(route, /verdict: pass[\s\S]{0,80}findings: \[\][\s\S]{0,80}unverified_areas: \[\]/i);
   assert.match(review, /runtime provenance, not self-report/i);
   assert.match(review, /designated fresh reviewer reviews directly and never re-delegates/i);
   assert.match(review, /literal `must`[\s\S]{0,100}`only`[\s\S]{0,100}`exact`/i);

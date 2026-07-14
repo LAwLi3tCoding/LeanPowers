@@ -1,10 +1,10 @@
 # Runtime contract
 
-Use only for direct workflow entry or a missing routing ledger. Read once per task; reuse across transitions.
+Use for direct entry or missing routing ledger. Read once; reuse.
 
 ## Risk and gates
 
-Use highest signal. `lean` is clear, local, reversible, validated, and has no public boundary. `standard` covers normal multi-file, public-boundary, dependency, or bounded-uncertainty work; unknown defaults here. `strict` covers security (including authentication, credentials/secrets, cryptography, or signature verification), authorization, payment, privacy, migration, concurrency, production, irreversible work, or a large refactor. Strict is sticky until independent review and current verification pass.
+Use highest signal. `lean` is clear, local, reversible, validated, and has no public boundary. `standard` covers normal multi-file, public-boundary, dependency, or bounded-uncertainty work; unknown defaults here. `strict` covers security (including authentication, credentials/secrets, cryptography, or signature verification), authorization, payment, privacy, migration, concurrency, production, irreversible work, or a large refactor. Strict is sticky until independent review and current evidence pass.
 
 Carry this ledger:
 
@@ -31,9 +31,9 @@ Reuse evidence only while relevant code, generated output, dependencies, configu
 
 - `shape -> build` when executable.
 - `build/debug -> review` for strict completion.
-- `build/debug -> complete` for lean or standard work with current, applicable evidence.
-- `build/debug -> verify` only for explicit verification, stale/cross-session evidence, requested delivery, or cross-artifact/runtime claims.
-- `review -> build/debug` on findings; independent strict pass goes to `verify`.
+- `build/debug -> complete` for lean or standard work with current evidence.
+- `build/debug -> verify` only for explicit verification, stale/cross-session evidence, delivery, or cross-artifact/runtime claims.
+- `review -> build/debug` on findings; independent strict pass with unchanged current evidence may complete, otherwise use `verify`.
 - `verify -> ship` only when delivery was requested and every material claim passes.
 
-Default to one agent; delegate only independent, verifiable work without write conflicts, to at most three children whose evidence the leader inspects. Strict stabilizes final diff and applicable tests, then tool-search/loads Codex V1 `multi_agent_v1.spawn_agent` and `wait_agent`, spawning with `fork_context:false`, or uses native equivalents. Send a fresh reviewer the verbatim task, changed paths, concise evidence, and exact verdict schema—not paraphrase or transcript—then wait. Only its pass after the last change satisfies the gate; any scoped edit requires retest/re-review. Implementer text never satisfies or overrules review; otherwise return incomplete and never ship.
+Default one agent. Strict stabilizes final diff and tests, then uses exactly one fresh reviewer. On Codex V1, tool-search/load `multi_agent_v1.spawn_agent` and `multi_agent_v1.wait_agent`; spawn with `fork_context:false` and a message beginning `$leanpowers:review`, then wait once for that ID. Other runtimes invoke one native review; blocking calls do not wait again. Send the verbatim task, paths, concise evidence, and verdict schema—not paraphrase or transcript. Only its pass after last change satisfies the gate; any scoped edit requires retest/re-review. Implementer text never satisfies or overrules review. Unchanged current evidence remains valid; otherwise return incomplete and never ship.

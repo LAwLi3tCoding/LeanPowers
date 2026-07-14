@@ -123,10 +123,11 @@ test("risk becomes a sticky gate ledger across workflow transitions", () => {
     selectNextWorkflow({
       current: "review",
       risk: "strict",
+      evidenceCurrent: true,
       independentReview: true,
       reviewVerdict: "pass",
     }),
-    "verify",
+    null,
   );
   assert.equal(
     selectNextWorkflow({ current: "review", risk: "strict", independentReview: false }),
@@ -152,7 +153,7 @@ test("risk becomes a sticky gate ledger across workflow transitions", () => {
   );
 });
 
-test("verification is reserved for stale, explicit, delivery, and strict post-review evidence", () => {
+test("verification is reserved for stale, explicit, delivery, and cross-artifact evidence", () => {
   for (const input of [
     { current: "build", risk: "standard", evidenceCurrent: false },
     { current: "build", risk: "standard", verificationRequested: true },
@@ -161,4 +162,14 @@ test("verification is reserved for stale, explicit, delivery, and strict post-re
   ]) {
     assert.equal(selectNextWorkflow(input), "verify");
   }
+  assert.equal(
+    selectNextWorkflow({
+      current: "review",
+      risk: "strict",
+      evidenceCurrent: false,
+      independentReview: true,
+      reviewVerdict: "pass",
+    }),
+    "verify",
+  );
 });

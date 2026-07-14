@@ -20,6 +20,7 @@
       "id": "duration-kit",
       "scenario_class": "small-explicit-feature",
       "risk_level": "lean",
+      "expected_workflow": "build",
       "workspace": "cases/duration-kit/workspace",
       "verifier_files": [
         "cases/duration-kit/verifier/duration.hidden.mjs"
@@ -34,6 +35,7 @@
       "id": "localized-template-cache",
       "scenario_class": "unknown-cause-defect",
       "risk_level": "standard",
+      "expected_workflow": "debug",
       "workspace": "cases/localized-template-cache/workspace",
       "verifier_files": [
         "cases/localized-template-cache/verifier/cache.hidden.mjs"
@@ -48,6 +50,7 @@
       "id": "webhook-secret-rotation",
       "scenario_class": "security-authorization-or-data-risk",
       "risk_level": "strict",
+      "expected_workflow": "build",
       "workspace": "cases/webhook-secret-rotation/workspace",
       "verifier_files": [
         "cases/webhook-secret-rotation/verifier/signature.hidden.mjs"

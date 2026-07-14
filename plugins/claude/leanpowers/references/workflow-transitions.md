@@ -16,8 +16,9 @@ A transition activates the named next Skill; do not merely mention it while cont
 | `debug` | Lean/standard repair has current reproduction, regression, and affected integration evidence | complete; no extra workflow |
 | `debug` | Evidence is stale/cross-session, verification or delivery was requested, or claim crosses artifact/runtime boundaries | `verify` |
 | `review` | Findings require change | `build` or `debug` |
-| `review` | Verdict passes | `verify` |
-| `review` | Required independent perspective is unavailable | `verify` with `incomplete` verdict; never `ship` |
+| `review` | Verdict passes and applicable evidence remains current | complete; no extra workflow |
+| `review` | Verdict passes but evidence is stale, explicit verification/delivery was requested, or the claim crosses artifact/runtime boundaries | `verify` |
+| `review` | Required independent perspective is unavailable | `incomplete`; never `ship` |
 | `verify` | Evidence fails | `build` or `debug` |
 | `verify` | Delivery was requested and evidence passes | `ship` |
 | `ship` | Required verification is missing or stale | `verify` before any delivery mutation |

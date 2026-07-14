@@ -5,31 +5,30 @@ description: Use when starting engineering work without a selected LeanPowers wo
 
 # Route
 
-Select exactly one lowest-safe owner; never implement.
+Choose the lowest-safe owner. For a clear build, execute the capsule below. Otherwise load and execute the selected installed Skill once; do not use the build capsule.
 
-Use highest risk. `lean` is clear, local, reversible work with validation and no public boundary. Security—including authentication, credentials/secrets, cryptography, or signature verification—authorization, payment, privacy, migration, concurrency, production, irreversible change, or large refactor is `strict`. Otherwise `standard`; preference cannot lower safety.
+`lean` means clear, local, reversible, validated work without a public boundary. `strict` means security (including authentication, credentials/secrets, cryptography, or signature verification), authorization, payment, privacy, migration, concurrency, production, irreversible work, or large refactor; otherwise use `standard`. Preference cannot lower risk.
 
-First progress: `entrypoint: leanpowers:route`, then this sticky ledger:
+Honor an explicit owner. Otherwise choose `adapt` for feedback, `verify` for evidence, `ship` for delivery, `review` for assessment, `debug` for unknown failure, `shape` for ambiguity, or `build` for executable change.
 
-```yaml
-workflow: selected owner
-risk: lean | standard | strict
-required_gates: [current_evidence] | [independent_review, current_evidence]
-```
+Before tools, output exactly four resolved lines, replacing placeholders; no fence, label, bullet, prefix, suffix, or prose:
 
-Preserve evidence, regression, scope, independent review, authorization, contradictions, and validation gaps.
+entrypoint: leanpowers:route
+workflow: OWNER
+risk: RISK
+required_gates: GATES
 
-## Selection
+Strict `GATES` is `[independent_review, current_evidence]`; otherwise `[current_evidence]`.
 
-1. Honor explicit workflows whose contracts hold.
-2. `adapt`: explicit feedback or learning maintenance.
-3. `verify`: completion/readiness evidence or passing claims.
-4. `ship`: delivery with current verification.
-5. `review`: independent assessment.
-6. `debug`: unexpected failure with unknown/disputed cause.
-7. `shape`: unclear scope, acceptance, architecture, or authority.
-8. Otherwise `build` an executable change.
+For a clear build, stages 1–3 target one call each on the green path, never a quality ceiling. Expand only for missing, contradictory, or failed evidence, then restart affected downstream gates.
 
-If none applies, answer; ties resolve uncertainty.
+1. Batch-read/search relevant implementation, tests, and validation metadata in one inspection tool round; no extra green-path reads.
+2. Extract every literal `must`/`only`/`exact`/`preserve`/`reject` clause and positive/negative boundary. Patch implementation and tests together once; no green-path cleanup or optional-coverage patch.
+3. Run one applicable validation command. Failure exits to `debug`; never claim completion. Lean/standard may finish when green.
+4. Strict freezes the green diff. On Codex, load hidden V1 `multi_agent_v1.spawn_agent` and `multi_agent_v1.wait_agent`, then call spawn once with `message` only and `fork_context:false`; save its ID. On Claude, call one blocking Agent. Never use `items`, retry, fallback, a second/placeholder/`noop` reviewer, or “as above”. The message starts `$leanpowers:review` on Codex or `/leanpowers:review` on Claude and says: sole designated reviewer; read shared current diff/code; do not edit or delegate; check the verbatim task, strict ledger, changed paths, test result, exact clauses, and boundaries; use Review schema on findings or uncertainty; only a true pass returns:
 
-Activate the installed LeanPowers owner with the ledger; Route never implements. Lean/standard may finish there. Strict: after final diff passes tests, tool-search/load deferred Codex V1 `multi_agent_v1.spawn_agent` and `wait_agent`, spawning with `fork_context:false`; others use native equivalents. Delegate a fresh-context Agent/subagent to directly run installed LeanPowers `review` without re-delegating, with the verbatim task, strict ledger, changed paths, concise evidence, and exact schema—never paraphrase or transcript. Wait. Only `verdict: pass` after last change satisfies `independent_review`; findings cannot be self-overruled. Any scoped edit requires retest/re-review. Then verify; otherwise incomplete, never ship.
+verdict: pass
+findings: []
+unverified_areas: []
+
+5. Codex waits once for only that ID; blocking runtimes do not wait again. Exact pass freezes reviewed files: record optional suggestions without editing, reuse current tests, and finish. Any non-pass exits for repair; do not retry or add reviewers in this cycle. Implementers cannot overrule findings.

@@ -130,7 +130,16 @@ export function selectNextWorkflow({
     if (reviewVerdict === "changes_required") {
       return repairOwner === "debug" ? "debug" : "build";
     }
-    return reviewVerdict === "pass" ? "verify" : "incomplete";
+    if (reviewVerdict !== "pass") return "incomplete";
+    if (
+      evidenceCurrent &&
+      !verificationRequested &&
+      !deliveryRequested &&
+      !crossArtifactClaim
+    ) {
+      return null;
+    }
+    return "verify";
   }
   if (current !== "build" && current !== "debug") {
     return null;

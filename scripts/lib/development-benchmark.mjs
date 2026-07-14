@@ -98,6 +98,11 @@ export async function loadDevelopmentSuite(input) {
       if (!["lean", "standard", "strict"].includes(benchmarkCase?.risk_level)) {
         errors.push(`cases[${index}].risk_level must be lean, standard, or strict`);
       }
+      if (!["shape", "build", "debug", "review", "verify", "ship", "adapt"].includes(
+        benchmarkCase?.expected_workflow,
+      )) {
+        errors.push(`cases[${index}].expected_workflow must name one LeanPowers owner`);
+      }
       for (const field of ["workspace", ...(benchmarkCase?.verifier_files ?? [])]) {
         if (!isSafeRelativePath(field)) {
           errors.push(`cases[${index}] contains an unsafe relative path`);
@@ -278,13 +283,47 @@ export function parseCodexResult(raw, { expectedReviewContract = null } = {}) {
       /\/skills\/([^/\s]+)\/SKILL\.md/gu,
     )].map((match) => match[1])
   ))].sort();
-  const finalFileChangeIndex = completedItems.findLastIndex(
-    (event) => event?.item?.type === "file_change",
+  const finalFileChangeIndex = events.findLastIndex(
+    (event) =>
+      event?.type === "item.completed" && event?.item?.type === "file_change",
   );
+  const startedCollabCalls = new Map();
   const reviewAgentSpawns = new Map();
+  const postChangeSpawnAttempts = new Set();
+  const postChangeWaitAttempts = new Set();
   let latestIndependentReview = null;
-  completedItems.forEach((event, index) => {
+  events.forEach((event, index) => {
     const item = event?.item;
+    if (
+      event?.type === "item.started" &&
+      item?.type === "collab_tool_call" &&
+      typeof item.id === "string"
+    ) {
+      startedCollabCalls.set(item.id, item);
+    }
+    const startedCall =
+      typeof item?.id === "string" ? startedCollabCalls.get(item.id) : null;
+    const attemptKey =
+      typeof item?.id === "string" ? item.id : `${item?.tool ?? "unknown"}:${index}`;
+    if (
+      item?.type === "collab_tool_call" &&
+      item.tool === "spawn_agent" &&
+      index > finalFileChangeIndex &&
+      (event?.type === "item.started" ||
+        (event?.type === "item.completed" && !startedCall))
+    ) {
+      postChangeSpawnAttempts.add(attemptKey);
+    }
+    if (
+      item?.type === "collab_tool_call" &&
+      item.tool === "wait" &&
+      index > finalFileChangeIndex &&
+      (event?.type === "item.started" ||
+        (event?.type === "item.completed" && !startedCall))
+    ) {
+      postChangeWaitAttempts.add(attemptKey);
+    }
+    if (event?.type !== "item.completed") return;
     if (
       item?.type === "collab_tool_call" &&
       item.tool === "spawn_agent" &&
@@ -299,24 +338,34 @@ export function parseCodexResult(raw, { expectedReviewContract = null } = {}) {
             expectedReviewContract.length > 0 &&
             String(item.prompt ?? "").includes(expectedReviewContract),
           index,
+          review_skill_invoked:
+            /^\$leanpowers:review\r?\n/u.test(String(item.prompt ?? "")),
+          sole_spawn_target: (item.receiver_thread_ids ?? []).length === 1,
         });
       }
       return;
     }
     if (
       item?.type === "collab_tool_call" &&
-      item.tool === "wait" &&
-      item.status === "completed"
+      item.tool === "wait"
     ) {
+      if (item.status !== "completed") return;
+      const requestedAgentIds =
+        typeof item.id === "string"
+          ? startedCollabCalls.get(item.id)?.receiver_thread_ids
+          : null;
       const completedReviews = [];
       for (const [agentId, state] of Object.entries(item.agents_states ?? {})) {
         const spawn = reviewAgentSpawns.get(agentId);
         if (spawn?.index < index) {
           completedReviews.push({
+            agent_id: agentId,
             contract_verbatim: spawn.contract_verbatim,
             pass:
               state?.status === "completed" &&
               isPassingReviewVerdict(state?.message),
+            review_skill_invoked: spawn.review_skill_invoked,
+            sole_spawn_target: spawn.sole_spawn_target,
           });
         }
       }
@@ -326,6 +375,15 @@ export function parseCodexResult(raw, { expectedReviewContract = null } = {}) {
             (review) => review.contract_verbatim,
           ),
           pass: completedReviews.every((review) => review.pass),
+          review_skill_invoked: completedReviews.every(
+            (review) => review.review_skill_invoked,
+          ),
+          sole_wait_target:
+            Array.isArray(requestedAgentIds) &&
+            requestedAgentIds.length === 1 &&
+            completedReviews.length === 1 &&
+            requestedAgentIds[0] === completedReviews[0].agent_id &&
+            completedReviews[0].sole_spawn_target,
         };
       }
     }
@@ -357,6 +415,14 @@ export function parseCodexResult(raw, { expectedReviewContract = null } = {}) {
       independent_review_contract_verbatim_observed:
         latestIndependentReview?.pass === true &&
         latestIndependentReview.contract_verbatim === true,
+      independent_review_skill_invoked:
+        latestIndependentReview?.pass === true &&
+        latestIndependentReview.review_skill_invoked === true,
+      independent_review_sole_wait_target_observed:
+        latestIndependentReview?.pass === true &&
+        latestIndependentReview.sole_wait_target === true,
+      post_change_spawn_calls: postChangeSpawnAttempts.size,
+      post_change_wait_calls: postChangeWaitAttempts.size,
     },
     tokens: hasUsage
       ? {
@@ -423,6 +489,17 @@ export function evaluateWorkflowConformance(run) {
   const reasons = [];
   if (!run.activation_reported) reasons.push("top-level workflow declaration was not reported");
   if (run.workflow === "leanpowers-0.2.0") {
+    if (!run.route_ledger_reported) {
+      reasons.push("exact four-line LeanPowers route ledger was not reported");
+    }
+    if (
+      run.expected_workflow &&
+      run.declared_workflow !== run.expected_workflow
+    ) {
+      reasons.push(
+        `declared ${run.declared_workflow ?? "no"} workflow instead of ${run.expected_workflow}`,
+      );
+    }
     if (!run.declared_risk) {
       reasons.push("risk declaration was not reported");
     } else if (run.declared_risk !== run.risk_level) {
@@ -438,6 +515,30 @@ export function evaluateWorkflowConformance(run) {
       !run.telemetry?.workflow_trace?.independent_review_contract_verbatim_observed
     ) {
       reasons.push("passing independent review did not receive the verbatim task contract");
+    }
+    if (
+      run.risk_level === "strict" &&
+      !run.telemetry?.workflow_trace?.independent_review_skill_invoked
+    ) {
+      reasons.push("passing reviewer did not explicitly invoke leanpowers:review");
+    }
+    if (
+      run.risk_level === "strict" &&
+      !run.telemetry?.workflow_trace?.independent_review_sole_wait_target_observed
+    ) {
+      reasons.push("strict wait did not target only the designated reviewer");
+    }
+    if (
+      run.risk_level === "strict" &&
+      run.telemetry?.workflow_trace?.post_change_spawn_calls !== 1
+    ) {
+      reasons.push("strict final review did not use exactly one spawn call");
+    }
+    if (
+      run.risk_level === "strict" &&
+      run.telemetry?.workflow_trace?.post_change_wait_calls !== 1
+    ) {
+      reasons.push("strict final review did not use exactly one wait call");
     }
   }
   return { status: reasons.length === 0 ? "PASS" : "FAIL", reasons };
@@ -677,6 +778,7 @@ export function renderDevelopmentReport(result) {
     "## Interpretation boundary",
     "",
     "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
+    "- LeanPowers conformance requires the exact four-line route ledger. Strict runs also require one post-change reviewer spawn, one wait targeting only that reviewer, explicit review Skill invocation, the verbatim task contract, and an exact empty passing verdict after the final edit.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
     "- Paired reductions are computed within each identical case and repetition before taking the median. Each metric shows its own valid sample count; incomplete telemetry is excluded from that metric only. The task-PASS-and-conformant population is primary, so failing faster or skipping workflow gates never counts as an improvement.",
@@ -749,6 +851,7 @@ async function runSingleCase({
     const telemetry = parseCodexResult(agent.stdout, {
       expectedReviewContract: benchmarkCase.task,
     });
+    const routeLedger = parseLeanRouteLedger(telemetry.first_progress_message);
     const declaredRisk = extractDeclaredRisk(telemetry.first_progress_message);
     const activationReported = reportsWorkflowActivation({
       entrypoint,
@@ -777,7 +880,11 @@ async function runSingleCase({
       case_id: benchmarkCase.id,
       scenario_class: benchmarkCase.scenario_class,
       risk_level: benchmarkCase.risk_level,
+      expected_workflow: benchmarkCase.expected_workflow,
       declared_risk: declaredRisk,
+      declared_workflow: routeLedger?.workflow ?? null,
+      route_ledger_reported:
+        workflow === "leanpowers-0.2.0" ? routeLedger !== null : null,
       repetition,
       agent_exit_code: agent.exitCode,
       agent_timed_out: agent.timedOut,
@@ -823,10 +930,11 @@ export function makePilotResult(suite, runtime, runs, repetitions, selectedCases
       : "incomplete",
     runtime,
     repetitions,
-    cases: selectedCases.map(({ id, scenario_class, risk_level }) => ({
+    cases: selectedCases.map(({ id, scenario_class, risk_level, expected_workflow }) => ({
       id,
       scenario_class,
       risk_level,
+      expected_workflow,
     })),
     runs,
     aggregate: aggregateRuns(runs),
@@ -1359,6 +1467,23 @@ export function extractDeclaredRisk(message) {
   if (beforeRisk) return beforeRisk[1].toLowerCase();
   const ownerOrMode = text.match(/\b(lean|standard|strict)\s+(?:owner|mode)\b/iu);
   return ownerOrMode ? ownerOrMode[1].toLowerCase() : null;
+}
+
+export function parseLeanRouteLedger(message) {
+  const lines = String(message ?? "").trim().split(/\r?\n/u);
+  if (lines.length !== 4 || lines[0] !== "entrypoint: leanpowers:route") return null;
+  const workflow = lines[1].match(
+    /^workflow: (shape|build|debug|review|verify|ship|adapt)$/u,
+  )?.[1];
+  const risk = lines[2].match(/^risk: (lean|standard|strict)$/u)?.[1];
+  if (!workflow || !risk) return null;
+  const requiredGates = lines[3].match(/^required_gates: (\[[^\]]*\])$/u)?.[1];
+  const expectedGates =
+    risk === "strict"
+      ? "[independent_review, current_evidence]"
+      : "[current_evidence]";
+  if (requiredGates !== expectedGates) return null;
+  return { workflow, risk, required_gates: requiredGates };
 }
 
 export function reportsWorkflowActivation({ entrypoint, message, workflow }) {
