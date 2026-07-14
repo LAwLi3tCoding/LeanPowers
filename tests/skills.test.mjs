@@ -117,27 +117,25 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /`debug` unknown-cause defect/i);
   assert.match(route, /`build` known-cause defect\/change/i);
   assert.match(route, /other requests load only selected Skill/i);
-  assert.match(route, /BEFORE any prose\/tool, output exactly these four resolved plain lines once/i);
-  assert.match(route, /Final MUST contain none of `entrypoint:`, `workflow:`, `risk:`, or `required_gates:`/i);
-  assert.match(route, /Final output omits all four ledger keys/i);
+  assert.match(route, /BEFORE prose\/tool, output exactly these four resolved plain lines once/i);
+  assert.match(route, /Never repeat them:[\s\S]{0,120}final MUST omit lines beginning `entrypoint:`, `workflow:`, `risk:`, or `required_gates:`/i);
+  assert.match(route, /Final MUST omit the four opening ledger lines/i);
   assert.match(route, /Then one blank line and prose/i);
-  assert.match(route, /Green-path logical budgets—not quality ceilings/i);
-  assert.match(route, /Codex: one call\/stage; Claude: adjacent native adapters per stage/i);
+  assert.match(route, /Green-path budgets/i);
+  assert.match(route, /Codex one call\/stage; Claude adjacent adapters/i);
   assert.match(route, /Destructive\/irreversible\/credential-gated\/production action requires prior explicit authorization/i);
-  assert.match(route, /not quality ceilings/i);
-  assert.match(route, /`build` = DISCOVER\(1\)→READ\(1\)→PATCH\(1\)→VALIDATE\(1\)/i);
-  assert.match(route, /`debug` = DISCOVER\(1\)→READ\(1\)→REPRODUCE\/TRACE\(1\)→PATCH\(1\)→VALIDATE\(1\)/i);
-  assert.match(route, /Expand only on failed\/missing\/contradictory evidence/i);
-  assert.match(route, /wanting context is not evidence/i);
-  assert.match(route, /DISCOVER: Codex ONE content-aware shell call, `rg --files \.; rg -n -- 'TERMS' \.`/i);
-  assert.match(route, /Claude adjacent native `Glob`\+`Grep`/i);
-  assert.match(route, /Search root; Codex prohibits globs\/`cd`\/absolute\/guessed paths/i);
-  assert.match(route, /never filename-only/i);
-  assert.match(route, /Identify implementation, callers, tests, validation manifests/i);
-  assert.match(route, /READ immediately follows DISCOVER\. Codex: ONE compound command prints every candidate and validation metadata/i);
-  assert.match(route, /Claude: adjacent native `Read`, each candidate once, no prose\/inspection/i);
+  assert.match(route, /`build` DISCOVER\(1\)→READ\(1\)→PATCH\(1\)→VALIDATE\(1\)/i);
+  assert.match(route, /`debug` adds REPRODUCE\/TRACE\(1\) before PATCH/i);
+  assert.match(route, /Expand failed\/missing\/contradictory stages only/i);
+  assert.match(route, /DISCOVER: Codex MUST run exactly one root command shaped `rg --files \.; rg -n -- 'TERMS' \.`/i);
+  assert.match(route, /replacing only TERMS; no pipes\/globs\/`cd`\/redirects\/extra paths/i);
+  assert.match(route, /Claude uses adjacent native `Glob`\+`Grep`/i);
+  assert.match(route, /Identify implementation, callers, tests, repro, and validation manifest/i);
+  assert.match(route, /READ immediately follows DISCOVER\. Codex MUST run one `tail -n \+1 --` command/i);
+  assert.match(route, /selected candidates and validation manifest as shell-safe operands/i);
+  assert.match(route, /no printf\/echo\/chaining\/re-read/i);
+  assert.match(route, /Claude uses adjacent native `Read`, each candidate once without prose\/inspection/i);
   assert.match(route, /READ immediately follows DISCOVER/i);
-  assert.match(route, /no later green-path read/i);
   assert.match(route, /DEBUG then, pre-edit:[\s\S]{0,100}executes the real failing path/i);
   assert.match(route, /showing failure and first wrong transition/i);
   assert.match(route, /inspection\/inference is not reproduction/i);
@@ -146,9 +144,10 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /Claude adjacent native `Edit`\/`Write` calls without prose\/inspection/i);
   assert.match(route, /Include failure-path tests; never repatch green evidence/i);
   assert.match(route, /output a clause→test ledger/i);
-  assert.match(route, /VALIDATE is ONE canonical test\/build command covering regression and affected checks/i);
-  assert.match(route, /never chain standalone reproduction or diagnostics/i);
-  assert.match(route, /strict \*\*MUST NOT answer\*\*/i);
+  assert.match(route, /VALIDATE uses ONE canonical test\/build command covering regression and affected checks/i);
+  assert.match(route, /never chain reproduction\/diagnostics/i);
+  assert.match(route, /On green lean\/standard, STOP tooling, skip step 5, and answer/i);
+  assert.match(route, /Only strict continues below/i);
   assert.match(route, /Mandatory strict gate/i);
   assert.match(route, /multi_agent_v1\.spawn_agent[\s\S]{0,220}wait_agent/i);
   assert.match(route, /tool_search\(query="wait_agent targets spawn_agent fork_context", limit=2\)/i);
@@ -249,6 +248,9 @@ test("skill bodies stay within the LeanPowers context budget", async () => {
     const words = wordCount(content);
     if (name === "adapt") {
       assert.ok(words < 400, `adapt has ${words} words`);
+    } else if (name === "route") {
+      assert.equal(words, 598, `route has ${words} words`);
+      engineeringWords += words;
     } else {
       assert.ok(words <= 800, `${name} has ${words} words`);
       engineeringWords += words;

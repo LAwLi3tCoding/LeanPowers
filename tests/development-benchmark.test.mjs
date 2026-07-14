@@ -113,8 +113,24 @@ function passingCapsuleStage(workflow = "build") {
     highest_presented_risk: "standard",
     workflow_read_calls: 0,
     pre_change_command_calls: workflow === "debug" ? 3 : 2,
+    pre_change_stage_protocol_observed: true,
+    stage_retry_calls: 0,
+    stage_attempts: {
+      discover: 1,
+      read: 1,
+      reproduce: workflow === "debug" ? 1 : 0,
+    },
+    unexpected_pre_change_command_calls: 0,
+    out_of_order_stage_calls: 0,
+    extra_read_calls: 0,
+    malformed_read_calls: 0,
     discover_observed: true,
     read_observed: true,
+    patch_targets_read_observed: true,
+    grounded_candidate_paths: ["src/index.mjs", "test/index.test.mjs"],
+    grounded_candidates_read_observed: true,
+    required_read_paths: ["src/index.mjs", "test/index.test.mjs"],
+    validation_metadata_read_observed: true,
     reproduce_observed: workflow === "debug" ? true : null,
     patch_batches: 1,
     patch_file_events: 2,
@@ -124,6 +140,8 @@ function passingCapsuleStage(workflow = "build") {
     multi_file_patch_observed: true,
     post_change_command_calls: 1,
     validation_observed: true,
+    post_validation_tool_calls: 0,
+    ordinary_stop_observed: true,
     protocol_observed: true,
   };
 }
@@ -140,18 +158,31 @@ function capsuleTraceOptions(expectedWorkflow) {
 
 function capsuleTraceEvents({
   discoverCommand = "/bin/zsh -lc \"rg --files .; rg -n -- 'cache|locale' .\"",
-  discoverOutput = "src/index.mjs:1:cache\ntest/index.test.mjs:1:test",
+  discoverOutput = [
+    "src/index.mjs",
+    "test/index.test.mjs",
+    "package.json",
+    "src/index.mjs:1:cache",
+    "test/index.test.mjs:1:test",
+  ].join("\n"),
   duplicateLedger = false,
   expectedWorkflow = "debug",
   extraPostCommand = false,
   extraPreCommand = false,
+  extraReadAfterSuccess = false,
+  extraReadAfterReproduce = false,
+  failedDiscoverAttempts = [],
+  failedReadAttempts = [],
+  failedReproductionAttempts = [],
   finalMessage = "Done",
   initialExtra = null,
   ledgerAfterDiscover = false,
   nonReviewTail = false,
   patchBatches = 1,
   patchPaths = ["src/index.mjs", "test/index.test.mjs"],
-  readCommand = "cat src/index.mjs; cat test/index.test.mjs; cat package.json",
+  postValidationReview = false,
+  readCommand = "tail -n +1 -- src/index.mjs test/index.test.mjs package.json",
+  readOutput = "source and test contents",
   reproduceCommand = capsuleReproductionContract.command,
   reproduceOutput = capsuleReproductionOutput,
   validationExitCode = 0,
@@ -183,6 +214,15 @@ function capsuleTraceEvents({
       status: "completed",
     }));
   }
+  for (const attempt of failedDiscoverAttempts) {
+    events.push(completed({
+      type: "command_execution",
+      command: attempt.command,
+      aggregated_output: attempt.output ?? "",
+      exit_code: attempt.exitCode ?? 1,
+      status: "completed",
+    }));
+  }
   events.push(completed({
     type: "command_execution",
     command: discoverCommand,
@@ -193,13 +233,31 @@ function capsuleTraceEvents({
   if (ledgerAfterDiscover) {
     events.push(completed({ type: "agent_message", text: ledger }));
   }
+  for (const attempt of failedReadAttempts) {
+    events.push(completed({
+      type: "command_execution",
+      command: attempt.command,
+      aggregated_output: attempt.output ?? "",
+      exit_code: attempt.exitCode ?? 1,
+      status: "completed",
+    }));
+  }
   events.push(completed({
     type: "command_execution",
     command: readCommand,
-    aggregated_output: "source and test contents",
+    aggregated_output: readOutput,
     exit_code: 0,
     status: "completed",
   }));
+  if (extraReadAfterSuccess) {
+    events.push(completed({
+      type: "command_execution",
+      command: "tail -n +1 -- package.json src/index.mjs",
+      aggregated_output: "extra read",
+      exit_code: 0,
+      status: "completed",
+    }));
+  }
   if (extraPreCommand) {
     events.push(completed({
       type: "command_execution",
@@ -210,10 +268,28 @@ function capsuleTraceEvents({
     }));
   }
   if (expectedWorkflow === "debug") {
+    for (const attempt of failedReproductionAttempts) {
+      events.push(completed({
+        type: "command_execution",
+        command: attempt.command ?? reproduceCommand,
+        aggregated_output: attempt.output ?? "",
+        exit_code: attempt.exitCode ?? 1,
+        status: "completed",
+      }));
+    }
     events.push(completed({
       type: "command_execution",
       command: reproduceCommand,
       aggregated_output: reproduceOutput,
+      exit_code: 0,
+      status: "completed",
+    }));
+  }
+  if (extraReadAfterReproduce) {
+    events.push(completed({
+      type: "command_execution",
+      command: "tail -n +1 -- package.json src/index.mjs",
+      aggregated_output: "extra read",
       exit_code: 0,
       status: "completed",
     }));
@@ -242,6 +318,22 @@ function capsuleTraceEvents({
     exit_code: validationExitCode,
     status: "completed",
   }));
+  if (postValidationReview) {
+    events.push(completed({
+      id: "ordinary-review-spawn",
+      type: "collab_tool_call",
+      tool: "spawn_agent",
+      receiver_thread_ids: ["ordinary-reviewer"],
+      status: "completed",
+    }));
+    events.push(completed({
+      id: "ordinary-review-wait",
+      type: "collab_tool_call",
+      tool: "wait",
+      receiver_thread_ids: ["ordinary-reviewer"],
+      status: "completed",
+    }));
+  }
   if (nonReviewTail) {
     events.push(completed({
       id: "helper-spawn",
@@ -691,6 +783,319 @@ test("Codex trace observes the complete debug capsule stage protocol", () => {
   );
 });
 
+test("capsule stages allow one evidence-backed retry without hiding its cost", () => {
+  const malformedQuotedRead = [
+    "/bin/zsh -lc \"printf '",
+    "--- src/index.mjs ---",
+    "cat src/index.mjs",
+    "printf '",
+    "--- test/index.test.mjs ---",
+    "cat test/index.test.mjs\"",
+  ].join("\n");
+  const stage = parseCodexResult(
+    capsuleTraceEvents({
+      failedDiscoverAttempts: [{
+        command: "/bin/zsh -lc \"rg --files .; rg -n -- 'cache|locale' .\"",
+        output: "zsh: rg: interrupted",
+        exitCode: 1,
+      }],
+      failedReadAttempts: [{
+        command: malformedQuotedRead,
+        output: "zsh: command not found: --- src/index.mjs ---",
+        exitCode: 0,
+      }],
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+
+  assert.equal(stage.protocol_observed, true);
+  assert.equal(stage.pre_change_stage_protocol_observed, true);
+  assert.equal(stage.pre_change_command_calls, 5);
+  assert.equal(stage.stage_retry_calls, 2);
+  assert.deepEqual(stage.stage_attempts, { discover: 2, read: 2, reproduce: 1 });
+  assert.equal(stage.unexpected_pre_change_command_calls, 0);
+});
+
+test("capsule stages reject malformed fake reads, excess retries, and post-success rereads", () => {
+  const malformedQuotedRead = "/bin/zsh -lc \"printf 'cat src/index.mjs; cat test/index.test.mjs'\"";
+  const mutations = [
+    {
+      readCommand: malformedQuotedRead,
+    },
+    {
+      failedReadAttempts: [
+        { command: "tail -n +1 src/index.mjs", output: "source", exitCode: 1 },
+        { command: "tail -n +1 test/index.test.mjs", output: "test", exitCode: 1 },
+      ],
+    },
+    {
+      extraReadAfterSuccess: true,
+    },
+  ];
+
+  for (const mutation of mutations) {
+    const stage = parseCodexResult(
+      capsuleTraceEvents(mutation).map(JSON.stringify).join("\n"),
+      capsuleTraceOptions("debug"),
+    ).workflow_trace.capsule_stage;
+    assert.equal(stage.protocol_observed, false);
+    assert.equal(stage.pre_change_stage_protocol_observed, false);
+  }
+});
+
+test("capsule retries require concrete evidence and completed stages never reopen", () => {
+  const cleanFakeRead = [
+    "/bin/zsh -lc \"printf '",
+    "tail -n +1 -- src/index.mjs",
+    "tail -n +1 -- test/index.test.mjs",
+    "'\"",
+  ].join("\n");
+  const unsupportedRetry = parseCodexResult(
+    capsuleTraceEvents({
+      failedReadAttempts: [{
+        command: cleanFakeRead,
+        output: "fabricated source and test contents",
+        exitCode: 0,
+      }],
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(unsupportedRetry.read_observed, true);
+  assert.equal(unsupportedRetry.malformed_read_calls, 1);
+  assert.equal(unsupportedRetry.unexpected_pre_change_command_calls, 1);
+  assert.equal(unsupportedRetry.pre_change_stage_protocol_observed, false);
+
+  const emptyReadRetry = parseCodexResult(
+    capsuleTraceEvents({
+      failedReadAttempts: [{
+        command: "tail -n +1 -- src/index.mjs test/index.test.mjs package.json",
+        output: "",
+        exitCode: 0,
+      }],
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(emptyReadRetry.protocol_observed, true);
+  assert.equal(emptyReadRetry.stage_retry_calls, 1);
+  assert.equal(emptyReadRetry.malformed_read_calls, 1);
+
+  const reproductionRetry = parseCodexResult(
+    capsuleTraceEvents({
+      failedReproductionAttempts: [{
+        output: "temporary runtime failure",
+        exitCode: 1,
+      }],
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(reproductionRetry.protocol_observed, true);
+  assert.equal(reproductionRetry.stage_retry_calls, 1);
+  assert.deepEqual(reproductionRetry.stage_attempts, {
+    discover: 1,
+    read: 1,
+    reproduce: 2,
+  });
+
+  const reopenedRead = parseCodexResult(
+    capsuleTraceEvents({ extraReadAfterReproduce: true }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(reopenedRead.protocol_observed, false);
+  assert.equal(reopenedRead.extra_read_calls, 1);
+  assert.equal(reopenedRead.unexpected_pre_change_command_calls, 1);
+});
+
+test("lean and standard capsules stop every tool after successful validation", () => {
+  const stage = parseCodexResult(
+    capsuleTraceEvents({ postValidationReview: true }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+
+  assert.equal(stage.validation_observed, true);
+  assert.equal(stage.post_validation_tool_calls, 2);
+  assert.equal(stage.ordinary_stop_observed, false);
+  assert.equal(stage.protocol_observed, false);
+});
+
+test("distilled live failures preserve ordered-stage truth", () => {
+  const failedDiscoverThenNoncanonicalRetry = parseCodexResult(
+    capsuleTraceEvents({
+      discoverCommand: "rg -n -- 'localized|locale|template|cache' src test repro",
+      failedDiscoverAttempts: [{
+        command: "rg --files . | head -n 300; rg -n -- 'localized|locale|template|cache' src/**/*.js",
+        output: "zsh: no matches found: src/**/*.js",
+        exitCode: 1,
+      }],
+      extraReadAfterReproduce: true,
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(failedDiscoverThenNoncanonicalRetry.discover_observed, false);
+  assert.equal(failedDiscoverThenNoncanonicalRetry.protocol_observed, false);
+  assert.equal(failedDiscoverThenNoncanonicalRetry.stage_attempts.discover, 2);
+  assert.ok(failedDiscoverThenNoncanonicalRetry.out_of_order_stage_calls >= 3);
+
+  const malformedReadWithDiagnostic = [
+    "/bin/zsh -lc \"printf '",
+    "--- src/index.mjs ---",
+    "cat src/index.mjs",
+    "printf '",
+    "--- package.json ---",
+    "cat package.json\"",
+  ].join("\n");
+  const recoveredRead = parseCodexResult(
+    capsuleTraceEvents({
+      failedReadAttempts: [{
+        command: malformedReadWithDiagnostic,
+        output: "printf zsh:5: command not found: --- src/index.mjs ---",
+        exitCode: 0,
+      }],
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(recoveredRead.protocol_observed, true);
+  assert.equal(recoveredRead.malformed_read_calls, 1);
+  assert.equal(recoveredRead.stage_retry_calls, 1);
+
+  const oldChainedRetry = parseCodexResult(
+    capsuleTraceEvents({
+      failedReadAttempts: [{
+        command: malformedReadWithDiagnostic,
+        output: "printf zsh:5: command not found: --- src/index.mjs ---",
+        exitCode: 0,
+      }],
+      readCommand: "echo source; cat src/index.mjs; cat test/index.test.mjs; cat package.json",
+      postValidationReview: true,
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(oldChainedRetry.read_observed, false);
+  assert.equal(oldChainedRetry.post_validation_tool_calls, 2);
+  assert.equal(oldChainedRetry.ordinary_stop_observed, false);
+  assert.equal(oldChainedRetry.protocol_observed, false);
+});
+
+test("capsule READ accepts one boundary-preserving tail batch and requires grounded paths", () => {
+  const portableBatch = parseCodexResult(
+    capsuleTraceEvents({
+      readCommand: "tail -n +1 -- 'src/index.mjs' \"test/index.test.mjs\" package.json",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(portableBatch.protocol_observed, true);
+  assert.equal(portableBatch.validation_metadata_read_observed, true);
+
+  const diagnosticWordsInSource = parseCodexResult(
+    capsuleTraceEvents({
+      discoverOutput: [
+        "src/index.mjs",
+        "test/index.test.mjs",
+        "package.json",
+        "src/index.mjs:1:syntax error",
+        "src/index.mjs:2:printf zsh:5: command not found: ---",
+        "test/index.test.mjs:4:assert.match(error, /command not found/)",
+      ].join("\n"),
+      readOutput: [
+        "syntax error",
+        "printf zsh:5: command not found: ---",
+        "assert.match(error, /command not found/)",
+      ].join("\n"),
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(
+    diagnosticWordsInSource.protocol_observed,
+    true,
+    JSON.stringify(diagnosticWordsInSource),
+  );
+
+  const omittedPatchTargets = parseCodexResult(
+    capsuleTraceEvents({
+      readCommand: "tail -n +1 -- package.json README.md",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(omittedPatchTargets.read_observed, true);
+  assert.equal(omittedPatchTargets.validation_metadata_read_observed, true);
+  assert.equal(omittedPatchTargets.patch_targets_read_observed, false);
+  assert.equal(omittedPatchTargets.protocol_observed, false);
+
+  const omittedCaller = parseCodexResult(
+    capsuleTraceEvents({
+      discoverOutput: [
+        "src/index.mjs",
+        "src/caller.mjs",
+        "test/index.test.mjs",
+        "package.json",
+        "src/index.mjs:1:cache",
+        "src/caller.mjs:3:cache",
+        "test/index.test.mjs:1:test",
+      ].join("\n"),
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.deepEqual(omittedCaller.grounded_candidate_paths, [
+    "src/caller.mjs",
+    "src/index.mjs",
+    "test/index.test.mjs",
+  ]);
+  assert.deepEqual(omittedCaller.required_read_paths, [
+    "src/caller.mjs",
+    "src/index.mjs",
+    "test/index.test.mjs",
+  ]);
+  assert.equal(omittedCaller.patch_targets_read_observed, true);
+  assert.equal(omittedCaller.grounded_candidates_read_observed, false);
+  assert.equal(omittedCaller.protocol_observed, false);
+
+  const undiscoveredPatchTargets = parseCodexResult(
+    capsuleTraceEvents({
+      discoverOutput: [
+        "src/other.mjs",
+        "test/other.test.mjs",
+        "package.json",
+        "src/other.mjs:1:cache",
+        "test/other.test.mjs:1:test",
+      ].join("\n"),
+      readCommand: "tail -n +1 -- src/other.mjs test/other.test.mjs package.json",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.deepEqual(undiscoveredPatchTargets.required_read_paths, [
+    "src/index.mjs",
+    "src/other.mjs",
+    "test/index.test.mjs",
+    "test/other.test.mjs",
+  ]);
+  assert.equal(undiscoveredPatchTargets.patch_targets_read_observed, false);
+  assert.equal(undiscoveredPatchTargets.grounded_candidates_read_observed, true);
+  assert.equal(undiscoveredPatchTargets.protocol_observed, false);
+
+  const omittedManifest = parseCodexResult(
+    capsuleTraceEvents({
+      readCommand: "tail -n +1 -- src/index.mjs test/index.test.mjs",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(omittedManifest.read_observed, true);
+  assert.equal(omittedManifest.validation_metadata_read_observed, false);
+  assert.equal(omittedManifest.protocol_observed, false);
+
+  for (const readCommand of [
+    "tail -n +1 -- =cat src/index.mjs package.json",
+    "tail -n +1 -- ~/secret src/index.mjs package.json",
+    "tail -n +1 -- src/index.mjs package.json # test/index.test.mjs",
+    "/bin/zsh -lc \"tail -n +1 -- src\\index.mjs test\\index.test.mjs package.json\"",
+  ]) {
+    const unsafe = parseCodexResult(
+      capsuleTraceEvents({ readCommand }).map(JSON.stringify).join("\n"),
+      capsuleTraceOptions("debug"),
+    ).workflow_trace.capsule_stage;
+    assert.equal(unsafe.read_observed, false, readCommand);
+    assert.equal(unsafe.protocol_observed, false, readCommand);
+  }
+});
+
 test("debug capsule stage protocol rejects one-property trace regressions", () => {
   const trailingWhitespaceLedger = [
     "entrypoint: leanpowers:route  ",
@@ -770,6 +1175,7 @@ test("debug capsule stage protocol rejects one-property trace regressions", () =
     [{ validationCommand: "pytest --collect-only" }, "validation_observed"],
     [{ extraPreCommand: true }, "pre_change_command_calls"],
     [{ extraPostCommand: true }, "post_change_command_calls"],
+    [{ postValidationReview: true }, "ordinary_stop_observed"],
   ];
 
   for (const [mutation, field] of cases) {
@@ -1974,15 +2380,27 @@ test("capsule stage telemetry independently gates workflow conformance", () => {
     [{ ledger_before_tools_observed: false }, "route ledger was not emitted before task tools"],
     [{ ledger_keys_after_initial_observed: true }, "route ledger keys were repeated after the initial declaration"],
     [{ workflow_read_calls: 1 }, "capsule reloaded a Skill or reference"],
-    [{ pre_change_command_calls: 3 }, "capsule pre-change stage budget was not observed"],
+    [{
+      pre_change_command_calls: 3,
+      stage_retry_calls: 1,
+      stage_attempts: { discover: 2, read: 1, reproduce: 0 },
+    }, null],
+    [{ pre_change_stage_protocol_observed: false }, "ordered pre-change stages with bounded evidence-backed retries were not observed"],
     [{ discover_observed: false }, "content-aware DISCOVER was not observed"],
     [{ read_observed: false }, "batched READ was not observed"],
+    [{ validation_metadata_read_observed: false }, "READ omitted discovered validation metadata"],
+    [{ patch_targets_read_observed: false }, "READ omitted discovered files that were later changed"],
+    [{ grounded_candidates_read_observed: false }, "READ omitted grounded implementation, caller, or test candidates"],
     [{ patch_batches: 2 }, "one contiguous multi-file PATCH batch was not observed"],
     [{ implementation_patch_observed: false }, "one contiguous multi-file PATCH batch was not observed"],
     [{ test_patch_observed: false }, "one contiguous multi-file PATCH batch was not observed"],
     [{ multi_file_patch_observed: false }, "one contiguous multi-file PATCH batch was not observed"],
     [{ post_change_command_calls: 2 }, "one successful post-edit VALIDATE was not observed"],
     [{ validation_observed: false }, "one successful post-edit VALIDATE was not observed"],
+    [{
+      post_validation_tool_calls: 1,
+      ordinary_stop_observed: false,
+    }, "lean or standard capsule continued tooling after successful validation"],
   ];
   for (const [mutation, expectedReason] of mutations) {
     const run = structuredClone(passing);
@@ -1991,7 +2409,9 @@ test("capsule stage telemetry independently gates workflow conformance", () => {
       : { ...passingCapsuleStage("build"), ...mutation };
     assert.deepEqual(
       evaluateWorkflowConformance(run),
-      { status: "FAIL", reasons: [expectedReason] },
+      expectedReason === null
+        ? { status: "PASS", reasons: [] }
+        : { status: "FAIL", reasons: [expectedReason] },
     );
   }
 

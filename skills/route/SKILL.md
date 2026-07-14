@@ -11,7 +11,7 @@ Choose lowest-safe owner. Route material request/scope ambiguity to `shape`. A u
 
 `OWNER`: feedback→explicit/`adapt`, evidence→`verify`, delivery→`ship`, assessment→`review`; otherwise `shape` material request/scope ambiguity, `debug` unknown-cause defect, `build` known-cause defect/change; never a risk. `RISK`: `lean`, `standard`, or `strict`.
 
-BEFORE any prose/tool, output exactly these four resolved plain lines once. Final MUST contain none of `entrypoint:`, `workflow:`, `risk:`, or `required_gates:`; no label/bullet/fence/prefix. Then one blank line and prose:
+BEFORE prose/tool, output exactly these four resolved plain lines once. Never repeat them: final MUST omit lines beginning `entrypoint:`, `workflow:`, `risk:`, or `required_gates:`. Then one blank line and prose:
 
 entrypoint: leanpowers:route
 workflow: OWNER
@@ -21,12 +21,12 @@ required_gates: GATES
 Strict `GATES` is `[independent_review, current_evidence]`; otherwise `[current_evidence]`.
 Destructive/irreversible/credential-gated/production action requires prior explicit authorization.
 
-Green-path logical budgets—not quality ceilings: `build` = DISCOVER(1)→READ(1)→PATCH(1)→VALIDATE(1); `debug` = DISCOVER(1)→READ(1)→REPRODUCE/TRACE(1)→PATCH(1)→VALIDATE(1). Codex: one call/stage; Claude: adjacent native adapters per stage. Expand only on failed/missing/contradictory evidence; wanting context is not evidence. Expand stage; restart invalidated gates.
+Green-path budgets: `build` DISCOVER(1)→READ(1)→PATCH(1)→VALIDATE(1); `debug` adds REPRODUCE/TRACE(1) before PATCH. Codex one call/stage; Claude adjacent adapters. Expand failed/missing/contradictory stages only; restart invalidated gates.
 
-1. DISCOVER: Codex ONE content-aware shell call, `rg --files .; rg -n -- 'TERMS' .`; Claude adjacent native `Glob`+`Grep`. Search root; Codex prohibits globs/`cd`/absolute/guessed paths; never filename-only. Identify implementation, callers, tests, validation manifests.
-2. READ immediately follows DISCOVER. Codex: ONE compound command prints every candidate and validation metadata; Claude: adjacent native `Read`, each candidate once, no prose/inspection. No later green-path read. DEBUG then, pre-edit: ONE focused command executes the real failing path, showing failure and first wrong transition; inspection/inference is not reproduction.
+1. DISCOVER: Codex MUST run exactly one root command shaped `rg --files .; rg -n -- 'TERMS' .`, replacing only TERMS; no pipes/globs/`cd`/redirects/extra paths. Claude uses adjacent native `Glob`+`Grep`. Identify implementation, callers, tests, repro, and validation manifest.
+2. READ immediately follows DISCOVER. Codex MUST run one `tail -n +1 --` command with selected candidates and validation manifest as shell-safe operands; no printf/echo/chaining/re-read. Claude uses adjacent native `Read`, each candidate once without prose/inspection. DEBUG then, pre-edit: ONE focused command executes the real failing path, showing failure and first wrong transition; inspection/inference is not reproduction.
 3. Before editing, output a clause→test ledger for every literal `must`/`only`/`exact`/`preserve`/`reject`; each rejection mutates one property of an asserted-passing case. PATCH: Codex ONE repository-relative `apply_patch` containing all code/tests; Claude adjacent native `Edit`/`Write` calls without prose/inspection. Include failure-path tests; never repatch green evidence.
-4. VALIDATE is ONE canonical test/build command covering regression and affected checks; never chain standalone reproduction or diagnostics. Failure enters `debug`; never claim completion. Green lean/standard may finish; strict **MUST NOT answer**; continue below. Final output omits all four ledger keys.
+4. VALIDATE uses ONE canonical test/build command covering regression and affected checks; never chain reproduction/diagnostics. Failure enters `debug`; never claim completion. On green lean/standard, STOP tooling, skip step 5, and answer. Only strict continues below. Final MUST omit the four opening ledger lines.
 
 **Mandatory strict gate — final answer forbidden until exact pass**
 

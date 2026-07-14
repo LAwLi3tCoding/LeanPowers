@@ -728,15 +728,22 @@ function traceCapsuleStage(
       .map((change) => benchmarkObservedPath(change?.path))
       .filter(Boolean)
   ))].sort();
-  const expectedPreChangeCalls = expectedWorkflow === "debug" ? 3 : 2;
-  const discoverObserved = isContentAwareDiscover(preChangeCommands[0]?.event?.item);
-  const readObserved = isBatchRead(preChangeCommands[1]?.event?.item);
-  const reproduceObserved = expectedWorkflow === "debug"
-    ? isExecutableReproduction(
-        preChangeCommands[2]?.event?.item,
-        reproductionContract,
-      )
-    : null;
+  const readRequiredPatchPaths = [...new Set(taskChanges.flatMap(({ event }) =>
+    (event.item.changes ?? [])
+      .filter((change) => change?.kind !== "add")
+      .map((change) => benchmarkObservedPath(change?.path))
+      .filter(Boolean)
+  ))].sort();
+  const preChangeStage = tracePreChangeStages(
+    preChangeCommands,
+    expectedWorkflow,
+    reproductionContract,
+    readRequiredPatchPaths,
+    changePolicy,
+  );
+  const discoverObserved = preChangeStage.discover_observed;
+  const readObserved = preChangeStage.read_observed;
+  const reproduceObserved = preChangeStage.reproduce_observed;
   const testPatterns = changePolicy?.tests ?? [];
   const productPatterns = changePolicy?.product ?? [];
   const testPatchObserved = patchPaths.some((changedPath) =>
@@ -754,17 +761,21 @@ function traceCapsuleStage(
     postChangeCommands.length === 1 &&
     postChangeCommands[0].event.item.exit_code === 0 &&
     canonicalValidationCommand(postChangeCommands[0].event.item.command) !== null;
+  const postValidationToolCalls = validationObserved
+    ? countToolCallsAfter(indexed, postChangeCommands[0].index)
+    : 0;
+  const ordinaryStopObserved = declaredRisk === "strict"
+    ? null
+    : validationObserved && postValidationToolCalls === 0;
   const protocolObserved =
     routeLedgerOccurrences === 1 &&
     ledgerBeforeToolsObserved &&
     !ledgerKeysAfterInitialObserved &&
     workflowReads.length === 0 &&
-    preChangeCommands.length === expectedPreChangeCalls &&
-    discoverObserved &&
-    readObserved &&
-    (expectedWorkflow !== "debug" || reproduceObserved) &&
+    preChangeStage.protocol_observed &&
     multiFilePatchObserved &&
-    validationObserved;
+    validationObserved &&
+    (declaredRisk === "strict" || ordinaryStopObserved);
 
   return {
     workflow: expectedWorkflow,
@@ -774,8 +785,22 @@ function traceCapsuleStage(
     highest_presented_risk: declaredRisk,
     workflow_read_calls: workflowReads.length,
     pre_change_command_calls: preChangeCommands.length,
+    pre_change_stage_protocol_observed: preChangeStage.protocol_observed,
+    stage_retry_calls: preChangeStage.retry_calls,
+    stage_attempts: preChangeStage.attempts,
+    unexpected_pre_change_command_calls: preChangeStage.unexpected_calls,
+    out_of_order_stage_calls: preChangeStage.out_of_order_stage_calls,
+    extra_read_calls: preChangeStage.extra_read_calls,
+    malformed_read_calls: preChangeStage.malformed_read_calls,
     discover_observed: discoverObserved,
     read_observed: readObserved,
+    patch_targets_read_observed: preChangeStage.patch_targets_read_observed,
+    grounded_candidate_paths: preChangeStage.grounded_candidate_paths,
+    grounded_candidates_read_observed:
+      preChangeStage.grounded_candidates_read_observed,
+    required_read_paths: preChangeStage.required_read_paths,
+    validation_metadata_read_observed:
+      preChangeStage.validation_metadata_read_observed,
     reproduce_observed: reproduceObserved,
     patch_batches: patchBatches.length,
     patch_file_events: taskChanges.length,
@@ -785,8 +810,166 @@ function traceCapsuleStage(
     multi_file_patch_observed: multiFilePatchObserved,
     post_change_command_calls: postChangeCommands.length,
     validation_observed: validationObserved,
+    post_validation_tool_calls: postValidationToolCalls,
+    ordinary_stop_observed: ordinaryStopObserved,
     protocol_observed: protocolObserved,
   };
+}
+
+function countToolCallsAfter(indexed, afterIndex) {
+  const calls = new Set();
+  for (const { event, index } of indexed) {
+    if (
+      index <= afterIndex ||
+      !["item.started", "item.completed"].includes(event?.type) ||
+      ["agent_message", "reasoning"].includes(event?.item?.type) ||
+      !event?.item?.type
+    ) {
+      continue;
+    }
+    calls.add(typeof event.item.id === "string"
+      ? event.item.id
+      : `${event.type}:${index}`);
+  }
+  return calls.size;
+}
+
+function tracePreChangeStages(
+  commands,
+  expectedWorkflow,
+  reproductionContract,
+  patchPaths,
+  changePolicy,
+) {
+  const stages = [
+    {
+      name: "discover",
+      matches: looksLikeDiscoverAttempt,
+      passes: isContentAwareDiscover,
+    },
+    {
+      name: "read",
+      matches: looksLikeReadAttempt,
+      passes: isBatchRead,
+    },
+  ];
+  if (expectedWorkflow === "debug") {
+    stages.push({
+      name: "reproduce",
+      matches: (item) => looksLikeReproductionAttempt(item, reproductionContract),
+      passes: (item) => isExecutableReproduction(item, reproductionContract),
+    });
+  }
+
+  const attempts = { discover: 0, read: 0, reproduce: 0 };
+  const successfulItems = new Map();
+  let currentStage = 0;
+  let extraReadCalls = 0;
+  let malformedReadCalls = 0;
+  let outOfOrderStageCalls = 0;
+  let unexpectedCalls = 0;
+  for (const { event } of commands) {
+    const item = event?.item;
+    const stage = stages[currentStage];
+    if (stage === undefined || !stage.matches(item)) {
+      unexpectedCalls += 1;
+      const matchedStage = stages.find(({ matches }) => matches(item));
+      if (matchedStage !== undefined) {
+        if (matchedStage.name === "read" && successfulItems.has("read")) {
+          extraReadCalls += 1;
+        } else {
+          outOfOrderStageCalls += 1;
+        }
+      }
+      continue;
+    }
+    attempts[stage.name] += 1;
+    if (attempts[stage.name] > 2) {
+      unexpectedCalls += 1;
+      continue;
+    }
+    if (stage.passes(item)) {
+      successfulItems.set(stage.name, item);
+      currentStage += 1;
+    } else {
+      if (stage.name === "read") malformedReadCalls += 1;
+      if (!isStageRetryAuthorized(item)) {
+        unexpectedCalls += 1;
+      }
+    }
+  }
+
+  const discoverObserved = successfulItems.has("discover");
+  const readObserved = successfulItems.has("read");
+  const reproduceObserved = expectedWorkflow === "debug"
+    ? successfulItems.has("reproduce")
+    : null;
+  const validationMetadataReadObserved = discoverObserved && readObserved
+    ? readsDiscoveredValidationMetadata(
+        successfulItems.get("discover"),
+        successfulItems.get("read"),
+      )
+    : false;
+  const readPaths = new Set(batchReadPaths(successfulItems.get("read")));
+  const discoveredPaths = new Set(discoveredRepositoryPaths(
+    successfulItems.get("discover")?.aggregated_output,
+  ));
+  const productPatterns = changePolicy?.product ?? [];
+  const groundedCandidatePaths = contentHitRepositoryPaths(
+    successfulItems.get("discover")?.aggregated_output,
+  ).filter((candidate) => productPatterns.some((pattern) =>
+    matchGlob(candidate, pattern)
+  ));
+  const normalizedPatchPaths = patchPaths.map(normalizeReadPath).filter(Boolean);
+  const requiredReadPaths = [...new Set([
+    ...normalizedPatchPaths,
+    ...groundedCandidatePaths,
+  ])].sort();
+  const patchTargetsReadObserved = normalizedPatchPaths.every((candidate) =>
+    discoveredPaths.has(candidate) && readPaths.has(candidate)
+  );
+  const groundedCandidatesReadObserved = groundedCandidatePaths.every((candidate) =>
+    readPaths.has(candidate)
+  );
+  const retryCalls = Object.values(attempts)
+    .reduce((total, count) => total + Math.max(0, count - 1), 0);
+  const protocolObserved =
+    currentStage === stages.length &&
+    unexpectedCalls === 0 &&
+    validationMetadataReadObserved &&
+    patchTargetsReadObserved &&
+    groundedCandidatesReadObserved;
+
+  return {
+    attempts,
+    discover_observed: discoverObserved,
+    extra_read_calls: extraReadCalls,
+    grounded_candidate_paths: [...new Set(groundedCandidatePaths)].sort(),
+    grounded_candidates_read_observed: groundedCandidatesReadObserved,
+    malformed_read_calls: malformedReadCalls,
+    out_of_order_stage_calls: outOfOrderStageCalls,
+    patch_targets_read_observed: patchTargetsReadObserved,
+    protocol_observed: protocolObserved,
+    read_observed: readObserved,
+    reproduce_observed: reproduceObserved,
+    retry_calls: retryCalls,
+    required_read_paths: [...new Set(requiredReadPaths)].sort(),
+    unexpected_calls: unexpectedCalls,
+    validation_metadata_read_observed: validationMetadataReadObserved,
+  };
+}
+
+function isStageRetryAuthorized(item) {
+  if (item?.status === "failed" || item?.timed_out === true) return true;
+  if (!Number.isInteger(item?.exit_code)) return false;
+  if (item.exit_code !== 0 || String(item?.aggregated_output ?? "").length === 0) {
+    return true;
+  }
+  const output = String(item?.aggregated_output ?? "");
+  const command = unwrapShellInvocation(item?.command) ?? String(item?.command ?? "");
+  return hasFatalShellDiagnostic(output, {
+    allowInlineShellPrefix: /^\s*printf\b/u.test(command),
+  });
 }
 
 function groupContiguousFileChanges(events, taskChanges) {
@@ -819,7 +1002,14 @@ function isWorkflowReadCommand(command) {
 }
 
 function isContentAwareDiscover(item) {
-  if (item?.exit_code !== 0) return false;
+  if (
+    item?.status === "failed" ||
+    item?.timed_out === true ||
+    item?.exit_code !== 0 ||
+    hasFatalShellDiagnostic(item?.aggregated_output)
+  ) {
+    return false;
+  }
   const command = unwrapShellInvocation(item?.command);
   const commandMatch = String(command ?? "").match(
     /^rg[ \t]+--files[ \t]+\.[ \t]*;[ \t]*rg[ \t]+-n[ \t]+--[ \t]+'([^'\r\n]+)'[ \t]+\.$/u,
@@ -832,16 +1022,166 @@ function isContentAwareDiscover(item) {
 }
 
 function isBatchRead(item) {
-  if (item?.exit_code !== 0 || String(item?.aggregated_output ?? "").length === 0) {
+  if (
+    item?.status === "failed" ||
+    item?.timed_out === true ||
+    item?.exit_code !== 0 ||
+    String(item?.aggregated_output ?? "").length === 0 ||
+    hasFatalShellDiagnostic(item?.aggregated_output)
+  ) {
     return false;
   }
-  const command = String(item?.command ?? "");
-  const readOperations = command.match(/\b(?:cat|sed|awk|head|tail)\b/giu) ?? [];
-  const fileReferences = new Set(
-    command.match(/(?:\.\.?\/)?[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*\.(?:c|cc|cpp|go|java|js|json|jsx|mjs|py|rb|rs|ts|tsx|xml|ya?ml|toml)/giu) ?? [],
+  return batchReadPaths(item).length >= 2;
+}
+
+function looksLikeDiscoverAttempt(item) {
+  const command = unwrapShellInvocation(item?.command) ?? String(item?.command ?? "");
+  return /^\s*rg\s+/u.test(command);
+}
+
+function looksLikeReadAttempt(item) {
+  const command = unwrapShellInvocation(item?.command) ?? String(item?.command ?? "");
+  return /(?:^|[;&|\s])(?:cat|sed|awk|head|tail)(?:\s|$)/u.test(command);
+}
+
+function looksLikeReproductionAttempt(item, contract) {
+  return canonicalReproductionCommand(item?.command) === contract?.command;
+}
+
+function batchReadPaths(item) {
+  const command = unwrapShellInvocation(item?.command);
+  if (command === null || /[\\\r\n;&|`<>$#]/u.test(command)) return [];
+  const words = parseSimpleShellWords(command);
+  if (
+    words === null ||
+    words[0] !== "tail" ||
+    words[1] !== "-n" ||
+    words[2] !== "+1" ||
+    words[3] !== "--"
+  ) {
+    return [];
+  }
+  const paths = words.slice(4).map(normalizeReadPath);
+  return paths.length >= 2 && paths.every(Boolean) ? [...new Set(paths)] : [];
+}
+
+function parseSimpleShellWords(command) {
+  const words = [];
+  let current = "";
+  let quote = null;
+  let escaped = false;
+  let hasToken = false;
+  for (const character of String(command ?? "")) {
+    if (escaped) {
+      current += character;
+      escaped = false;
+      hasToken = true;
+      continue;
+    }
+    if (quote === null && character === "\\") {
+      escaped = true;
+      hasToken = true;
+      continue;
+    }
+    if (quote === "double" && character === "\\") {
+      escaped = true;
+      hasToken = true;
+      continue;
+    }
+    if (character === "'" && quote !== "double") {
+      quote = quote === "single" ? null : "single";
+      hasToken = true;
+      continue;
+    }
+    if (character === '"' && quote !== "single") {
+      quote = quote === "double" ? null : "double";
+      hasToken = true;
+      continue;
+    }
+    if (quote === null && /\s/u.test(character)) {
+      if (hasToken) {
+        words.push(current);
+        current = "";
+        hasToken = false;
+      }
+      continue;
+    }
+    current += character;
+    hasToken = true;
+  }
+  if (escaped || quote !== null) return null;
+  if (hasToken) words.push(current);
+  return words;
+}
+
+function normalizeReadPath(value) {
+  const normalized = String(value ?? "").replace(/\\/gu, "/").replace(/^\.\//u, "");
+  if (
+    normalized.length === 0 ||
+    normalized.startsWith("/") ||
+    normalized.startsWith("~") ||
+    normalized.startsWith("=") ||
+    normalized.startsWith("-") ||
+    /^[A-Za-z]:\//u.test(normalized) ||
+    normalized.split("/").includes("..") ||
+    /[*?\[\]{}]/u.test(normalized)
+  ) {
+    return null;
+  }
+  return normalized;
+}
+
+function readsDiscoveredValidationMetadata(discoverItem, readItem) {
+  const manifests = new Set(
+    String(discoverItem?.aggregated_output ?? "")
+      .split(/\r?\n/u)
+      .map((line) => line.replace(/:\d+:.*$/u, ""))
+      .map(normalizeReadPath)
+      .filter((candidate) => candidate !== null && isValidationManifestPath(candidate)),
   );
-  return readOperations.length >= 2 ||
-    (readOperations.length >= 1 && (/\bfor\b/iu.test(command) || fileReferences.size >= 2));
+  if (manifests.size === 0) return false;
+  const readPaths = new Set(batchReadPaths(readItem));
+  return [...manifests].some((manifest) => readPaths.has(manifest));
+}
+
+function discoveredRepositoryPaths(output) {
+  return String(output ?? "")
+    .split(/\r?\n/u)
+    .map((line) => line.replace(/:\d+:.*$/u, ""))
+    .map(normalizeReadPath)
+    .filter(Boolean);
+}
+
+function contentHitRepositoryPaths(output) {
+  return String(output ?? "")
+    .split(/\r?\n/u)
+    .flatMap((line) => {
+      const match = line.match(/^(.+?):\d+:/u);
+      if (!match) return [];
+      const candidate = normalizeReadPath(match[1]);
+      return candidate === null ? [] : [candidate];
+    });
+}
+
+function isValidationManifestPath(candidate) {
+  return /(?:^|\/)(?:Cargo\.toml|Gemfile|Makefile|build\.gradle(?:\.kts)?|composer\.json|deno\.jsonc?|go\.mod|justfile|package\.json|pom\.xml|pyproject\.toml|requirements\.txt|setup\.py|tox\.ini)$/u
+    .test(candidate);
+}
+
+function hasFatalShellDiagnostic(output, { allowInlineShellPrefix = false } = {}) {
+  const inlinePrefix = allowInlineShellPrefix ? "(?:printf )?" : "";
+  const shellDiagnostic = new RegExp(
+    `^${inlinePrefix}(?:.*[/\\\\])?(?:bash|dash|fish|ksh|powershell|pwsh|sh|zsh)(?::[^:\\r\\n]+){0,3}:\\s*(?:command not found|no matches found|not found|parse error|syntax error)`,
+    "iu",
+  );
+  return String(output ?? "").split(/\r?\n/u).some((line) => {
+    const trimmed = line.trim();
+    return shellDiagnostic.test(trimmed) ||
+      /^(?:cat|rg|sed|awk|head|tail):[^\r\n]*:\s*(?:no such file or directory|not found)/iu
+        .test(trimmed) ||
+      /^(?:the term ['"][^'"\r\n]+['"] is not recognized as the name of a cmdlet|['"][^'"\r\n]+['"] is not recognized as an internal or external command)/iu
+        .test(trimmed);
+  });
 }
 
 function isExecutableReproduction(item, contract) {
@@ -1213,7 +1553,6 @@ export function evaluateWorkflowConformance(run) {
       if (!capsule) {
         reasons.push("capsule stage trace was unavailable");
       } else {
-        const expectedPreChangeCalls = run.expected_workflow === "debug" ? 3 : 2;
         if (capsule.route_ledger_occurrences !== 1) {
           reasons.push("route ledger was not emitted exactly once");
         }
@@ -1226,14 +1565,23 @@ export function evaluateWorkflowConformance(run) {
         if (capsule.workflow_read_calls !== 0) {
           reasons.push("capsule reloaded a Skill or reference");
         }
-        if (capsule.pre_change_command_calls !== expectedPreChangeCalls) {
-          reasons.push("capsule pre-change stage budget was not observed");
+        if (!capsule.pre_change_stage_protocol_observed) {
+          reasons.push("ordered pre-change stages with bounded evidence-backed retries were not observed");
         }
         if (!capsule.discover_observed) {
           reasons.push("content-aware DISCOVER was not observed");
         }
         if (!capsule.read_observed) {
           reasons.push("batched READ was not observed");
+        }
+        if (!capsule.validation_metadata_read_observed) {
+          reasons.push("READ omitted discovered validation metadata");
+        }
+        if (!capsule.patch_targets_read_observed) {
+          reasons.push("READ omitted discovered files that were later changed");
+        }
+        if (!capsule.grounded_candidates_read_observed) {
+          reasons.push("READ omitted grounded implementation, caller, or test candidates");
         }
         if (run.expected_workflow === "debug" && !capsule.reproduce_observed) {
           reasons.push("pre-edit executable REPRODUCE was not observed");
@@ -1251,6 +1599,12 @@ export function evaluateWorkflowConformance(run) {
           !capsule.validation_observed
         ) {
           reasons.push("one successful post-edit VALIDATE was not observed");
+        }
+        if (
+          capsule.highest_presented_risk !== "strict" &&
+          !capsule.ordinary_stop_observed
+        ) {
+          reasons.push("lean or standard capsule continued tooling after successful validation");
         }
       }
     }
