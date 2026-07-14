@@ -20,15 +20,18 @@ required_gates: GATES
 
 Strict `GATES` is `[independent_review, current_evidence]`; otherwise `[current_evidence]`.
 
-For a clear build, stages 1–3 target one call each on the green path, never a quality ceiling. Expand only for missing, contradictory, or failed evidence, then restart affected downstream gates.
+For a clear build, stages 1–3 target one call each on the green path. They are not a quality ceiling: expand only for missing, contradictory, or failed evidence, then restart affected gates.
 
-1. Batch-read/search relevant implementation, tests, and validation metadata in one inspection tool round; no extra green-path reads.
-2. Extract every literal `must`/`only`/`exact`/`preserve`/`reject` clause and positive/negative boundary. Patch implementation and tests together once; no green-path cleanup or optional-coverage patch.
-3. Run one applicable validation command. Failure exits to `debug`; never claim completion. Lean/standard may finish when green.
-4. Strict freezes the green diff. On Codex, load hidden V1 `multi_agent_v1.spawn_agent` and `multi_agent_v1.wait_agent`, then call spawn once with `message` only and `fork_context:false`; save its ID. On Claude, call one blocking Agent. Never use `items`, retry, fallback, a second/placeholder/`noop` reviewer, or “as above”. The message starts `$leanpowers:review` on Codex or `/leanpowers:review` on Claude and says: sole designated reviewer; read shared current diff/code; do not edit or delegate; check the verbatim task, strict ledger, changed paths, test result, exact clauses, and boundaries; use Review schema on findings or uncertainty; only a true pass returns:
+1. In one green-path inspection tool call, batch search, implementation, tests, and validation metadata. On Codex use one shell command; never search, then reread, then inspect metadata separately.
+2. Extract every literal `must`/`only`/`exact`/`preserve`/`reject` clause and positive/negative boundary. Form the complete change first, then use one multi-file patch call for implementation and tests; never patch the same file twice on the green path.
+3. Run one applicable validation command. Failure exits to `debug`; never claim completion. If green, lean/standard may finish; strict **MUST NOT answer** and immediately continues below.
+
+**Mandatory strict gate — final answer forbidden until exact pass**
+
+4. Immediately after validation, strict freezes the diff. On Codex call V1 `multi_agent_v1.spawn_agent` once, loading it if hidden, with `message` only and `fork_context:false`; save its ID and load `multi_agent_v1.wait_agent` if hidden. On Claude, call one blocking Agent. Never use `items`, retry, fallback, a second/placeholder/`noop` reviewer, or “as above”. The message starts `$leanpowers:review` on Codex or `/leanpowers:review` on Claude and says: sole designated reviewer; read shared current diff/code; do not edit or delegate; check the verbatim task, strict ledger, changed paths, test result, exact clauses, and boundaries; use Review schema on findings or uncertainty; only a true pass returns:
 
 verdict: pass
 findings: []
 unverified_areas: []
 
-5. Codex waits once for only that ID; blocking runtimes do not wait again. Exact pass freezes reviewed files: record optional suggestions without editing, reuse current tests, and finish. Any non-pass exits for repair; do not retry or add reviewers in this cycle. Implementers cannot overrule findings.
+5. Codex calls wait once for only that ID; blocking runtimes do not wait again. Exact pass freezes reviewed files: record optional suggestions without editing, reuse current tests, and finish. Without exact pass return incomplete or repair; do not retry or add reviewers in this cycle. Implementers cannot overrule findings.
