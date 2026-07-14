@@ -11,7 +11,7 @@ Choose the lowest-safe owner. For a clear build, execute the capsule below. Othe
 
 Honor an explicit owner. Otherwise choose `adapt` for feedback, `verify` for evidence, `ship` for delivery, `review` for assessment, `debug` for unknown failure, `shape` for ambiguity, or `build` for executable change.
 
-Before tools, output exactly four resolved lines, replacing placeholders; no fence, label, bullet, prefix, suffix, or prose:
+First message starts with these four resolved lines; no fence, label, bullet, or prefix. Prose may follow one blank line:
 
 entrypoint: leanpowers:route
 workflow: OWNER
@@ -22,7 +22,7 @@ Strict `GATES` is `[independent_review, current_evidence]`; otherwise `[current_
 
 For a clear build, stages 1–3 target one call each on the green path. They are not a quality ceiling: expand only for missing, contradictory, or failed evidence, then restart affected gates.
 
-1. In one green-path inspection tool call, batch search, implementation, tests, and validation metadata. On Codex use one shell command; never search, reread, and inspect metadata separately.
+1. Use one green-path inspection tool call. On Codex, one shell command locates and prints implementation/test contents and validation metadata without guessing absent paths.
 2. Before editing, output one concise clause→test ledger containing every literal `must`/`only`/`exact`/`preserve`/`reject` clause and positive/negative boundary. Self-check the complete change, then use one multi-file patch call for implementation and tests; never patch the same file twice on the green path.
 3. Run one applicable validation command. Failure exits to `debug`; never claim completion. If green, lean/standard may finish; strict **MUST NOT answer** and immediately continues below.
 

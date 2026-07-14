@@ -446,9 +446,11 @@ function hasExactCodexReviewContract(prompt, expectedReviewContract) {
   ) {
     return false;
   }
-  return prompt.startsWith(
-    `$leanpowers:review\nOriginal task:\n${expectedReviewContract}\n\nReviewer context:\n`,
-  );
+  const contract = `Original task:\n${expectedReviewContract}\n\nReviewer context:\n`;
+  return [
+    `$leanpowers:review\n${contract}`,
+    `$leanpowers:review\n\n${contract}`,
+  ].some((prefix) => prompt.startsWith(prefix));
 }
 
 export function isPassingReviewVerdict(message) {
@@ -503,7 +505,7 @@ export function evaluateWorkflowConformance(run) {
   if (!run.activation_reported) reasons.push("top-level workflow declaration was not reported");
   if (run.workflow === "leanpowers-0.2.0") {
     if (!run.route_ledger_reported) {
-      reasons.push("exact four-line LeanPowers route ledger was not reported");
+      reasons.push("exact four-line LeanPowers route-ledger prefix was not reported");
     }
     if (
       run.expected_workflow &&
@@ -791,7 +793,7 @@ export function renderDevelopmentReport(result) {
     "## Interpretation boundary",
     "",
     "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    "- LeanPowers conformance requires the exact four-line route ledger. Strict runs also require one post-change reviewer spawn, one wait targeting only that reviewer, explicit review Skill invocation, the verbatim task contract, and an exact empty passing verdict after the final edit.",
+    "- LeanPowers conformance requires the exact four-line route-ledger prefix. Strict runs also require one post-change reviewer spawn, one wait targeting only that reviewer, explicit review Skill invocation, the verbatim task contract, and an exact empty passing verdict after the final edit.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
     "- Paired reductions are computed within each identical case and repetition before taking the median. Each metric shows its own valid sample count; incomplete telemetry is excluded from that metric only. The task-PASS-and-conformant population is primary, so failing faster or skipping workflow gates never counts as an improvement.",
@@ -1483,8 +1485,19 @@ export function extractDeclaredRisk(message) {
 }
 
 export function parseLeanRouteLedger(message) {
-  const lines = String(message ?? "").trim().split(/\r?\n/u);
-  if (lines.length !== 4 || lines[0] !== "entrypoint: leanpowers:route") return null;
+  const lines = String(message ?? "").split(/\r?\n/u);
+  const suffix = lines.slice(4);
+  const suffixValid =
+    suffix.length === 0 ||
+    (suffix.length === 1 && suffix[0] === "") ||
+    (suffix.length >= 2 && suffix[0] === "" && suffix[1].trim().length > 0);
+  if (
+    lines.length < 4 ||
+    lines[0] !== "entrypoint: leanpowers:route" ||
+    !suffixValid
+  ) {
+    return null;
+  }
   const workflow = lines[1].match(
     /^workflow: (shape|build|debug|review|verify|ship|adapt)$/u,
   )?.[1];

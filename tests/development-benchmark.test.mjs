@@ -156,13 +156,28 @@ test("LeanPowers activation requires its exact first-progress entrypoint marker"
   }
 });
 
-test("LeanPowers route ledger is exactly four resolved plain lines", () => {
+test("LeanPowers route ledger starts with exactly four resolved plain lines", () => {
   assert.deepEqual(
     parseLeanRouteLedger([
       "entrypoint: leanpowers:route",
       "workflow: build",
       "risk: strict",
       "required_gates: [independent_review, current_evidence]",
+    ].join("\n")),
+    {
+      workflow: "build",
+      risk: "strict",
+      required_gates: "[independent_review, current_evidence]",
+    },
+  );
+  assert.deepEqual(
+    parseLeanRouteLedger([
+      "entrypoint: leanpowers:route",
+      "workflow: build",
+      "risk: strict",
+      "required_gates: [independent_review, current_evidence]",
+      "",
+      "Inspecting the implementation next.",
     ].join("\n")),
     {
       workflow: "build",
@@ -189,6 +204,11 @@ test("LeanPowers route ledger is exactly four resolved plain lines", () => {
     "- entrypoint: leanpowers:route\nworkflow: build\nrisk: strict\nrequired_gates: [independent_review, current_evidence]",
     "entrypoint: leanpowers:route\nworkflow: build\nrisk: strict\nrequired_gates: [current_evidence]",
     "entrypoint: leanpowers:route\nworkflow: build\nrisk: lean\nrequired_gates: [independent_review, current_evidence]",
+    "entrypoint: leanpowers:route\nworkflow: build\nrisk: strict\nrequired_gates: [independent_review, current_evidence]\nprose without a blank line",
+    "entrypoint: leanpowers:route\nworkflow: build\nrisk: strict\nrequired_gates: [independent_review, current_evidence]\n\n\nprose after two blank lines",
+    "\nentrypoint: leanpowers:route\nworkflow: build\nrisk: strict\nrequired_gates: [independent_review, current_evidence]",
+    " entrypoint: leanpowers:route\nworkflow: build\nrisk: strict\nrequired_gates: [independent_review, current_evidence]",
+    "entrypoint: leanpowers:route\nworkflow: build\nrisk: strict\nrequired_gates: [independent_review, current_evidence]\n \nprose after whitespace",
   ]) {
     assert.equal(parseLeanRouteLedger(invalid), null, invalid);
   }
@@ -436,6 +456,36 @@ test("Codex trace proves independent review only after reviewer spawn and comple
         item: {
           type: "collab_tool_call",
           tool: "spawn_agent",
+          prompt: `$leanpowers:review\n\nOriginal task:\n${contract}\n\nReviewer context:\nReview the strict-risk diff.`,
+          receiver_thread_ids: ["reviewer"],
+          status: "completed",
+        },
+      }),
+      JSON.stringify({
+        type: "item.completed",
+        item: {
+          type: "collab_tool_call",
+          tool: "wait",
+          agents_states: {
+            reviewer: {
+              status: "completed",
+              message: "verdict: pass\nfindings: []\nunverified_areas: []",
+            },
+          },
+          status: "completed",
+        },
+      }),
+    ].join("\n"), { expectedReviewContract: contract })
+      .workflow_trace.independent_review_contract_verbatim_observed,
+    true,
+  );
+  assert.equal(
+    parseCodexResult([
+      JSON.stringify({
+        type: "item.completed",
+        item: {
+          type: "collab_tool_call",
+          tool: "spawn_agent",
           prompt: "Review a paraphrased contract.",
           receiver_thread_ids: ["reviewer"],
           status: "completed",
@@ -461,6 +511,7 @@ test("Codex trace proves independent review only after reviewer spawn and comple
   );
   for (const prompt of [
     `$leanpowers:review\nReview first.\nOriginal task:\n${contract}\n\nReviewer context:\nContext.`,
+    `$leanpowers:review\n\n\nOriginal task:\n${contract}\n\nReviewer context:\nContext.`,
     `$leanpowers:review\nOriginal task: ${contract}\n\nReviewer context:\nContext.`,
     `$leanpowers:review\nOriginal task:\n${contract} Added requirement.\n\nReviewer context:\nContext.`,
   ]) {
