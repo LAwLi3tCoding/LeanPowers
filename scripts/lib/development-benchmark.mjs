@@ -17,6 +17,7 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 const WORKFLOWS = new Set(["superpowers-6.1.1", "leanpowers-0.2.0"]);
 const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -115,8 +116,31 @@ export async function loadDevelopmentSuite(input) {
       if (!Array.isArray(benchmarkCase?.verifier_files) || benchmarkCase.verifier_files.length === 0) {
         errors.push(`cases[${index}].verifier_files must be non-empty`);
       }
-      if (!benchmarkCase?.change_policy?.product || !benchmarkCase?.change_policy?.workflow) {
-        errors.push(`cases[${index}].change_policy must declare product and workflow globs`);
+      if (
+        !Array.isArray(benchmarkCase?.change_policy?.product) ||
+        benchmarkCase.change_policy.product.length === 0 ||
+        !Array.isArray(benchmarkCase?.change_policy?.tests) ||
+        benchmarkCase.change_policy.tests.length === 0 ||
+        !Array.isArray(benchmarkCase?.change_policy?.workflow) ||
+        benchmarkCase.change_policy.workflow.length === 0
+      ) {
+        errors.push(`cases[${index}].change_policy must declare product, tests, and workflow globs`);
+      }
+      if (benchmarkCase?.expected_workflow === "debug") {
+        const contract = benchmarkCase?.reproduction_contract;
+        if (
+          typeof contract?.command !== "string" ||
+          canonicalReproductionCommand(contract.command) !== contract.command
+        ) {
+          errors.push(`cases[${index}].reproduction_contract.command must be one canonical executable command`);
+        }
+        if (
+          contract?.expected_output === null ||
+          typeof contract?.expected_output !== "object" ||
+          Array.isArray(contract?.expected_output)
+        ) {
+          errors.push(`cases[${index}].reproduction_contract.expected_output must be an object`);
+        }
       }
     }
   }
@@ -247,7 +271,10 @@ export function parseClaudeResult(raw) {
 export function parseCodexResult(
   raw,
   {
+    changePolicy = null,
     expectedReviewContract = null,
+    expectedWorkflow = null,
+    reproductionContract = null,
     reviewerWorkspaceMutations = new Map(),
   } = {},
 ) {
@@ -547,6 +574,13 @@ export function parseCodexResult(
   const firstProgressMessage = events.find(
     (event) => event?.type === "item.completed" && event?.item?.type === "agent_message",
   );
+  const capsuleStage = traceCapsuleStage(
+    events,
+    expectedWorkflow,
+    changePolicy,
+    reproductionContract,
+    expectedReviewContract,
+  );
   return {
     completed:
       Boolean(usageEvent) &&
@@ -583,6 +617,7 @@ export function parseCodexResult(
         unexpectedStrictCollabToolObserved,
       post_change_spawn_calls: postChangeSpawnAttempts.size,
       post_change_wait_calls: postChangeWaitAttempts.size,
+      ...(capsuleStage === null ? {} : { capsule_stage: capsuleStage }),
     },
     tokens: hasUsage
       ? {
@@ -596,6 +631,216 @@ export function parseCodexResult(
         }
       : null,
   };
+}
+
+function traceCapsuleStage(
+  events,
+  expectedWorkflow,
+  changePolicy,
+  reproductionContract,
+  expectedReviewContract,
+) {
+  if (!["build", "debug"].includes(expectedWorkflow)) return null;
+
+  const indexed = events.map((event, index) => ({ event, index }));
+  const routeLedgers = indexed.filter(({ event }) =>
+    event?.type === "item.completed" &&
+    event?.item?.type === "agent_message" &&
+    parseLeanRouteLedger(event.item.text) !== null
+  );
+  const routeLedgerOccurrences = routeLedgers.length;
+  const firstToolIndex = indexed.find(({ event }) =>
+    ["item.started", "item.completed"].includes(event?.type) &&
+    !["agent_message", "reasoning"].includes(event?.item?.type)
+  )?.index ?? events.length;
+  const ledgerBeforeToolsObserved =
+    routeLedgers.length === 1 && routeLedgers[0].index < firstToolIndex;
+  const declaredRisk = routeLedgers.length === 1
+    ? parseLeanRouteLedger(routeLedgers[0].event.item.text)?.risk
+    : null;
+  const firstChangeIndex = indexed.find(
+    ({ event }) => isCompletedFileChange(event),
+  )?.index ?? -1;
+  const firstReviewSpawnIndex = declaredRisk === "strict"
+    ? indexed.find(
+        ({ event, index }) =>
+          index > firstChangeIndex &&
+          event?.item?.type === "collab_tool_call" &&
+          event.item.tool === "spawn_agent" &&
+          hasExactCodexReviewContract(event.item.prompt, expectedReviewContract) &&
+          parseCompleteCodexReviewPacket(
+            event.item.prompt,
+            expectedReviewContract,
+          ) !== null &&
+          ["item.started", "item.completed"].includes(event.type),
+      )?.index ?? events.length
+    : events.length;
+  const taskChanges = indexed.filter(
+    ({ event, index }) => index < firstReviewSpawnIndex && isCompletedFileChange(event),
+  );
+  const taskFirstChangeIndex = taskChanges[0]?.index ?? -1;
+  const taskLastChangeIndex = taskChanges.at(-1)?.index ?? -1;
+  const workflowReads = indexed.filter(
+    ({ event, index }) =>
+      index < firstReviewSpawnIndex &&
+      event?.type === "item.completed" &&
+      event?.item?.type === "command_execution" &&
+      isWorkflowReadCommand(event.item.command),
+  );
+  const taskCommands = indexed.filter(
+    ({ event, index }) =>
+      index < firstReviewSpawnIndex &&
+      event?.type === "item.completed" &&
+      event?.item?.type === "command_execution" &&
+      !isWorkflowReadCommand(event.item.command),
+  );
+  const preChangeCommands = taskCommands.filter(
+    ({ index }) => taskFirstChangeIndex < 0 || index < taskFirstChangeIndex,
+  );
+  const postChangeCommands = taskCommands.filter(
+    ({ index }) => taskLastChangeIndex >= 0 && index > taskLastChangeIndex,
+  );
+  const patchPaths = [...new Set(taskChanges.flatMap(({ event }) =>
+    (event.item.changes ?? [])
+      .map((change) => benchmarkObservedPath(change?.path))
+      .filter(Boolean)
+  ))].sort();
+  const expectedPreChangeCalls = expectedWorkflow === "debug" ? 3 : 2;
+  const discoverObserved = isContentAwareDiscover(preChangeCommands[0]?.event?.item);
+  const readObserved = isBatchRead(preChangeCommands[1]?.event?.item);
+  const reproduceObserved = expectedWorkflow === "debug"
+    ? isExecutableReproduction(
+        preChangeCommands[2]?.event?.item,
+        reproductionContract,
+      )
+    : null;
+  const testPatterns = changePolicy?.tests ?? [];
+  const productPatterns = changePolicy?.product ?? [];
+  const testPatchObserved = patchPaths.some((changedPath) =>
+    testPatterns.some((pattern) => matchGlob(changedPath, pattern))
+  );
+  const implementationPatchObserved = patchPaths.some((changedPath) =>
+    productPatterns.some((pattern) => matchGlob(changedPath, pattern)) &&
+    !testPatterns.some((pattern) => matchGlob(changedPath, pattern))
+  );
+  const multiFilePatchObserved =
+    taskChanges.length === 1 &&
+    implementationPatchObserved &&
+    testPatchObserved;
+  const validationObserved =
+    postChangeCommands.length === 1 &&
+    postChangeCommands[0].event.item.exit_code === 0 &&
+    canonicalValidationCommand(postChangeCommands[0].event.item.command) !== null;
+  const protocolObserved =
+    routeLedgerOccurrences === 1 &&
+    ledgerBeforeToolsObserved &&
+    workflowReads.length === 0 &&
+    preChangeCommands.length === expectedPreChangeCalls &&
+    discoverObserved &&
+    readObserved &&
+    (expectedWorkflow !== "debug" || reproduceObserved) &&
+    multiFilePatchObserved &&
+    validationObserved;
+
+  return {
+    workflow: expectedWorkflow,
+    route_ledger_occurrences: routeLedgerOccurrences,
+    ledger_before_tools_observed: ledgerBeforeToolsObserved,
+    workflow_read_calls: workflowReads.length,
+    pre_change_command_calls: preChangeCommands.length,
+    discover_observed: discoverObserved,
+    read_observed: readObserved,
+    reproduce_observed: reproduceObserved,
+    patch_calls: taskChanges.length,
+    patch_paths: patchPaths,
+    implementation_patch_observed: implementationPatchObserved,
+    test_patch_observed: testPatchObserved,
+    multi_file_patch_observed: multiFilePatchObserved,
+    post_change_command_calls: postChangeCommands.length,
+    validation_observed: validationObserved,
+    protocol_observed: protocolObserved,
+  };
+}
+
+function isCompletedFileChange(event) {
+  return (
+    event?.type === "item.completed" &&
+    event?.item?.type === "file_change" &&
+    event.item.status !== "failed" &&
+    Array.isArray(event.item.changes) &&
+    event.item.changes.length > 0
+  );
+}
+
+function isWorkflowReadCommand(command) {
+  return /(?:^|[\/\s"'])(?:skills\/[^/\s"']+\/SKILL\.md|references\/[^/\s"']+\.md)/u
+    .test(String(command ?? ""));
+}
+
+function isContentAwareDiscover(item) {
+  if (item?.exit_code !== 0) return false;
+  const command = String(item?.command ?? "");
+  const hasPathListing =
+    /\brg\s+--files\b|\bfind\s+|(?:^|[;&|\s])ls(?:\s|$)/iu.test(command);
+  const searchSegments = command
+    .split(/[;&|\r\n]+/u)
+    .filter((segment) => /\b(?:rg|grep)\b/iu.test(segment));
+  const hasContentSearch = searchSegments.some(
+    (segment) => !/\brg\s+--files\b/iu.test(segment),
+  );
+  const hasContentOutput = /(?:^|\r?\n)[^:\r\n]+:\d+:[^\r\n]+/u
+    .test(String(item?.aggregated_output ?? ""));
+  return hasPathListing && hasContentSearch && hasContentOutput;
+}
+
+function isBatchRead(item) {
+  if (item?.exit_code !== 0 || String(item?.aggregated_output ?? "").length === 0) {
+    return false;
+  }
+  const command = String(item?.command ?? "");
+  const readOperations = command.match(/\b(?:cat|sed|awk|head|tail)\b/giu) ?? [];
+  const fileReferences = new Set(
+    command.match(/(?:\.\.?\/)?[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*\.(?:c|cc|cpp|go|java|js|json|jsx|mjs|py|rb|rs|ts|tsx|xml|ya?ml|toml)/giu) ?? [],
+  );
+  return readOperations.length >= 2 ||
+    (readOperations.length >= 1 && (/\bfor\b/iu.test(command) || fileReferences.size >= 2));
+}
+
+function isExecutableReproduction(item, contract) {
+  if (
+    item?.type !== "command_execution" ||
+    item?.exit_code !== 0 ||
+    canonicalReproductionCommand(item.command) !== contract?.command
+  ) {
+    return false;
+  }
+  try {
+    const output = JSON.parse(String(item?.aggregated_output ?? "").trim());
+    return isDeepStrictEqual(output, contract.expected_output);
+  } catch {
+    return false;
+  }
+}
+
+function canonicalReproductionCommand(command) {
+  let text = String(command ?? "");
+  const shellPrefix = /^(?:(?:\/(?:usr\/)?bin\/)?(?:bash|sh|zsh))\s+-lc\s+/u;
+  if (shellPrefix.test(text)) {
+    const wrapped = text.match(
+      /^(?:(?:\/(?:usr\/)?bin\/)?(?:bash|sh|zsh))\s+-lc\s+(['"])([\s\S]*)\1$/u,
+    );
+    if (!wrapped) return null;
+    text = wrapped[2];
+  }
+  if (
+    text.length === 0 ||
+    text !== text.trim() ||
+    /[\r\n;&|`!<>#$]/u.test(text) ||
+    !/^(?:bun|cargo|go|gradle|java|mvn|node|npm|pnpm|pytest|python3?|ruby|yarn)\b/iu.test(text)
+  ) {
+    return null;
+  }
+  return text;
 }
 
 export function createReviewerWorkspaceMutationTracker(snapshotWorkspace) {
@@ -915,6 +1160,49 @@ export function evaluateWorkflowConformance(run) {
     ) {
       reasons.push(`declared ${run.declared_risk} risk instead of ${run.risk_level}`);
     }
+    if (["build", "debug"].includes(run.expected_workflow)) {
+      const capsule = run.telemetry?.workflow_trace?.capsule_stage;
+      if (!capsule) {
+        reasons.push("capsule stage trace was unavailable");
+      } else {
+        const expectedPreChangeCalls = run.expected_workflow === "debug" ? 3 : 2;
+        if (capsule.route_ledger_occurrences !== 1) {
+          reasons.push("route ledger was not emitted exactly once");
+        }
+        if (!capsule.ledger_before_tools_observed) {
+          reasons.push("route ledger was not emitted before task tools");
+        }
+        if (capsule.workflow_read_calls !== 0) {
+          reasons.push("capsule reloaded a Skill or reference");
+        }
+        if (capsule.pre_change_command_calls !== expectedPreChangeCalls) {
+          reasons.push("capsule pre-change stage budget was not observed");
+        }
+        if (!capsule.discover_observed) {
+          reasons.push("content-aware DISCOVER was not observed");
+        }
+        if (!capsule.read_observed) {
+          reasons.push("batched READ was not observed");
+        }
+        if (run.expected_workflow === "debug" && !capsule.reproduce_observed) {
+          reasons.push("pre-edit executable REPRODUCE was not observed");
+        }
+        if (
+          capsule.patch_calls !== 1 ||
+          !capsule.implementation_patch_observed ||
+          !capsule.test_patch_observed ||
+          !capsule.multi_file_patch_observed
+        ) {
+          reasons.push("one multi-file PATCH was not observed");
+        }
+        if (
+          capsule.post_change_command_calls !== 1 ||
+          !capsule.validation_observed
+        ) {
+          reasons.push("one successful post-edit VALIDATE was not observed");
+        }
+      }
+    }
     const strictRequired = run.risk_level === "strict" || run.declared_risk === "strict";
     if (
       strictRequired &&
@@ -1199,13 +1487,14 @@ export function renderDevelopmentReport(result) {
     "## Interpretation boundary",
     "",
     "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    "- LeanPowers conformance requires the exact four-line route-ledger prefix. Each strict review cycle requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
+    "- LeanPowers conformance requires one exact four-line route ledger before any task tool. Build/debug capsule traces must show no Skill/reference reload, content-aware discovery, batched reads, fixture-owned structured pre-edit reproduction for debug, one multi-file patch, and one successful validation. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Each strict review cycle additionally requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
     "- Codex JSONL does not expose raw spawn arguments such as `fork_context`; observable spawn/wait behavior is checked dynamically, while exact argument shape is covered by static workflow tests and remains a runtime telemetry gap.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
     "- Paired reductions are computed within each identical case and repetition before taking the median. Each metric shows its own valid sample count; incomplete telemetry is excluded from that metric only. The task-PASS-and-conformant population is primary, so failing faster or skipping workflow gates never counts as an improvement.",
     "- Codex CLI does not expose a deterministic seed, so paired repetitions reduce noise but do not eliminate it.",
     "- The three cases cover a small feature, an unknown-cause cache defect, and a security-compatible API extension. They do not establish universal non-inferiority.",
+    "- The localized-cache hidden verifier samples representative single-, control-, repeated-, and multi-character separators. Passing those samples is not mathematical proof of collision freedom for every possible string; the task contract still requires an unambiguous structural identity.",
     "- Raw transcripts remain local and are written only after every run finishes. Disposable workspaces are destroyed after each run and are not publication artifacts.",
     "",
   ].join("\n");
@@ -1283,7 +1572,10 @@ async function runSingleCase({
     });
     const wallSeconds = (Date.now() - startedAt) / 1000;
     const telemetry = parseCodexResult(agent.stdout, {
+      changePolicy: benchmarkCase.change_policy,
       expectedReviewContract: benchmarkCase.task,
+      expectedWorkflow: benchmarkCase.expected_workflow,
+      reproductionContract: benchmarkCase.reproduction_contract,
       reviewerWorkspaceMutations: reviewerMutationTracker?.mutations(),
     });
     const routeLedger = parseLeanRouteLedger(telemetry.first_progress_message);

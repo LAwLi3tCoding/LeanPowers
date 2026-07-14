@@ -33,6 +33,53 @@ const suitePath = new URL(
   "../evals/development-effects/pilot-suite.json",
   import.meta.url,
 );
+const capsuleChangePolicy = {
+  product: ["src/**", "test/**"],
+  tests: ["test/**"],
+  workflow: [],
+};
+const capsuleReproductionContract = {
+  command: "node repro/localized-template-cache.mjs",
+  expected_output: {
+    scenario: "localized-template-cache",
+    requests: [
+      {
+        name: "welcome",
+        locale: "EN",
+        normalized_locale: "en",
+        cache_key: "welcome",
+        resolved: "welcome:en",
+      },
+      {
+        name: "welcome",
+        locale: "fr",
+        normalized_locale: "fr",
+        cache_key: "welcome",
+        resolved: "welcome:en",
+      },
+    ],
+    loader_calls: [["welcome", "en"]],
+    first_incorrect_transition: {
+      stage: "templateCacheKey",
+      distinct_normalized_locales_share_key: true,
+    },
+  },
+};
+const cacheFixtureRoot = fileURLToPath(new URL(
+  "../evals/development-effects/cases/localized-template-cache/workspace/",
+  import.meta.url,
+));
+const capsuleReproductionOutput = execFileSync(
+  process.execPath,
+  ["repro/localized-template-cache.mjs"],
+  { cwd: cacheFixtureRoot, encoding: "utf8" },
+).trim();
+const capsuleReviewContract = "Implement the benchmark fixture change.";
+
+assert.deepEqual(
+  JSON.parse(capsuleReproductionOutput),
+  capsuleReproductionContract.expected_output,
+);
 
 function strictReviewPrompt(contract, {
   ledger = "exact clauses -> positive and negative evidence",
@@ -55,6 +102,177 @@ function strictReviewPrompt(contract, {
     "findings: []",
     "unverified_areas: []",
   ].join("\n");
+}
+
+function passingCapsuleStage(workflow = "build") {
+  return {
+    workflow,
+    route_ledger_occurrences: 1,
+    ledger_before_tools_observed: true,
+    workflow_read_calls: 0,
+    pre_change_command_calls: workflow === "debug" ? 3 : 2,
+    discover_observed: true,
+    read_observed: true,
+    reproduce_observed: workflow === "debug" ? true : null,
+    patch_calls: 1,
+    patch_paths: ["src/index.mjs", "test/index.test.mjs"],
+    implementation_patch_observed: true,
+    test_patch_observed: true,
+    multi_file_patch_observed: true,
+    post_change_command_calls: 1,
+    validation_observed: true,
+    protocol_observed: true,
+  };
+}
+
+function capsuleTraceOptions(expectedWorkflow) {
+  return {
+    changePolicy: capsuleChangePolicy,
+    expectedReviewContract: capsuleReviewContract,
+    expectedWorkflow,
+    reproductionContract:
+      expectedWorkflow === "debug" ? capsuleReproductionContract : null,
+  };
+}
+
+function capsuleTraceEvents({
+  discoverCommand = "rg --files; rg -n 'cache|locale' src test",
+  discoverOutput = "src/index.mjs:1:cache\ntest/index.test.mjs:1:test",
+  duplicateLedger = false,
+  expectedWorkflow = "debug",
+  extraPostCommand = false,
+  extraPreCommand = false,
+  ledgerAfterDiscover = false,
+  nonReviewTail = false,
+  patchEvents = 1,
+  patchPaths = ["src/index.mjs", "test/index.test.mjs"],
+  readCommand = "cat src/index.mjs; cat test/index.test.mjs; cat package.json",
+  reproduceCommand = capsuleReproductionContract.command,
+  reproduceOutput = capsuleReproductionOutput,
+  validationExitCode = 0,
+  workflowRead = false,
+} = {}) {
+  const ledger = [
+    "entrypoint: leanpowers:route",
+    `workflow: ${expectedWorkflow}`,
+    "risk: standard",
+    "required_gates: [current_evidence]",
+    "",
+    "Starting work.",
+  ].join("\n");
+  const completed = (item) => ({ type: "item.completed", item });
+  const events = [];
+  if (!ledgerAfterDiscover) {
+    events.push(completed({ type: "agent_message", text: ledger }));
+  }
+  if (workflowRead) {
+    events.push(completed({
+      type: "command_execution",
+      command: "cat skills/debug/SKILL.md",
+      aggregated_output: "debug workflow",
+      exit_code: 0,
+      status: "completed",
+    }));
+  }
+  events.push(completed({
+    type: "command_execution",
+    command: discoverCommand,
+    aggregated_output: discoverOutput,
+    exit_code: 0,
+    status: "completed",
+  }));
+  if (ledgerAfterDiscover) {
+    events.push(completed({ type: "agent_message", text: ledger }));
+  }
+  events.push(completed({
+    type: "command_execution",
+    command: readCommand,
+    aggregated_output: "source and test contents",
+    exit_code: 0,
+    status: "completed",
+  }));
+  if (extraPreCommand) {
+    events.push(completed({
+      type: "command_execution",
+      command: "git status --short",
+      aggregated_output: "",
+      exit_code: 0,
+      status: "completed",
+    }));
+  }
+  if (expectedWorkflow === "debug") {
+    events.push(completed({
+      type: "command_execution",
+      command: reproduceCommand,
+      aggregated_output: reproduceOutput,
+      exit_code: 0,
+      status: "completed",
+    }));
+  }
+  const changes = patchPaths.map((changedPath) => ({
+    path: `/tmp/run/workspace/${changedPath}`,
+    kind: "update",
+  }));
+  const changeSets = patchEvents === 1
+    ? [changes]
+    : changes.map((change) => [change]);
+  for (const changes of changeSets) {
+    events.push(completed({
+      type: "file_change",
+      changes,
+      status: "completed",
+    }));
+  }
+  events.push(completed({
+    type: "command_execution",
+    command: "npm test",
+    aggregated_output: validationExitCode === 0 ? "pass" : "fail",
+    exit_code: validationExitCode,
+    status: "completed",
+  }));
+  if (nonReviewTail) {
+    events.push(completed({
+      id: "helper-spawn",
+      type: "collab_tool_call",
+      tool: "spawn_agent",
+      prompt: "Review a helper detail without using the LeanPowers review packet.",
+      receiver_thread_ids: ["helper"],
+      status: "completed",
+    }));
+    events.push(completed({
+      type: "file_change",
+      changes: [{
+        path: "/tmp/run/workspace/src/extra.mjs",
+        kind: "update",
+      }],
+      status: "completed",
+    }));
+    events.push(completed({
+      type: "command_execution",
+      command: "npm test",
+      aggregated_output: "pass",
+      exit_code: 0,
+      status: "completed",
+    }));
+  }
+  if (extraPostCommand) {
+    events.push(completed({
+      type: "command_execution",
+      command: "git diff --check",
+      aggregated_output: "",
+      exit_code: 0,
+      status: "completed",
+    }));
+  }
+  events.push(completed({
+    type: "agent_message",
+    text: duplicateLedger ? ledger : "Done",
+  }));
+  events.push({
+    type: "turn.completed",
+    usage: { input_tokens: 100, cached_input_tokens: 50, output_tokens: 20 },
+  });
+  return events;
 }
 
 test("development pilot declares three executable risk-calibrated scenario classes", async () => {
@@ -80,6 +298,11 @@ test("development pilot declares three executable risk-calibrated scenario class
     ],
   );
   assert.ok(suite.cases.every(({ task }) => task.trim().length > 80));
+  assert.ok(suite.cases.every(({ change_policy }) => change_policy.tests.includes("test/**")));
+  assert.deepEqual(
+    suite.cases.find(({ id }) => id === "localized-template-cache")?.reproduction_contract,
+    capsuleReproductionContract,
+  );
 });
 
 test("the runner isolates one plugin and preserves workflow-neutral prompts", async () => {
@@ -426,6 +649,55 @@ test("Codex trace records tool types and exact workflow file reads", () => {
   });
 });
 
+test("Codex trace observes the complete debug capsule stage protocol", () => {
+  const parsed = parseCodexResult(
+    capsuleTraceEvents().map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  );
+
+  assert.deepEqual(parsed.workflow_trace.capsule_stage, passingCapsuleStage("debug"));
+});
+
+test("debug capsule stage protocol rejects one-property trace regressions", () => {
+  const cases = [
+    [{ duplicateLedger: true }, "route_ledger_occurrences"],
+    [{ ledgerAfterDiscover: true }, "ledger_before_tools_observed"],
+    [{ workflowRead: true }, "workflow_read_calls"],
+    [{ discoverCommand: "rg -n 'cache|locale' src test" }, "discover_observed"],
+    [{
+      discoverCommand: "rg --files | rg -n 'src|test'",
+      discoverOutput: "1:src/index.mjs\n2:test/index.test.mjs",
+    }, "discover_observed"],
+    [{ readCommand: "cat src/index.mjs" }, "read_observed"],
+    [{ reproduceCommand: "npm test", reproduceOutput: "pass" }, "reproduce_observed"],
+    [{ reproduceOutput: "arbitrary executable output" }, "reproduce_observed"],
+    [{ patchEvents: 2 }, "patch_calls"],
+    [{ patchPaths: ["src/index.mjs", "src/helper.mjs"] }, "test_patch_observed"],
+    [{ nonReviewTail: true }, "patch_calls"],
+    [{ validationExitCode: 1 }, "validation_observed"],
+    [{ extraPreCommand: true }, "pre_change_command_calls"],
+    [{ extraPostCommand: true }, "post_change_command_calls"],
+  ];
+
+  for (const [mutation, field] of cases) {
+    const stage = parseCodexResult(
+      capsuleTraceEvents(mutation).map(JSON.stringify).join("\n"),
+      capsuleTraceOptions("debug"),
+    ).workflow_trace.capsule_stage;
+    assert.equal(stage.protocol_observed, false, field);
+    assert.notDeepEqual(stage[field], passingCapsuleStage("debug")[field], field);
+  }
+});
+
+test("build capsule stage protocol omits reproduction but keeps all other gates", () => {
+  const stage = parseCodexResult(
+    capsuleTraceEvents({ expectedWorkflow: "build" }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("build"),
+  ).workflow_trace.capsule_stage;
+
+  assert.deepEqual(stage, passingCapsuleStage("build"));
+});
+
 test("process stdout callbacks preserve complete line order across chunks", async () => {
   const lines = [];
   const result = await runProcess(process.execPath, [
@@ -615,7 +887,13 @@ test("Codex trace proves independent review only after reviewer spawn and comple
       declared_workflow: "build",
       declared_risk: "strict",
       risk_level: "standard",
-      telemetry: parsed,
+      telemetry: {
+        ...parsed,
+        workflow_trace: {
+          ...parsed.workflow_trace,
+          capsule_stage: passingCapsuleStage("build"),
+        },
+      },
     }),
     { status: "PASS", reasons: [] },
   );
@@ -1325,6 +1603,7 @@ test("workflow declaration and risk classification are separate conformance evid
       risk_level: "strict",
       telemetry: {
         workflow_trace: {
+          capsule_stage: passingCapsuleStage("build"),
           independent_review_pass_observed: true,
           independent_review_contract_verbatim_observed: true,
           independent_review_skill_invoked: true,
@@ -1347,7 +1626,7 @@ test("workflow declaration and risk classification are separate conformance evid
       declared_workflow: "build",
       declared_risk: "lean",
       risk_level: "standard",
-      telemetry: { workflow_trace: {} },
+      telemetry: { workflow_trace: { capsule_stage: passingCapsuleStage("build") } },
     }),
     { status: "FAIL", reasons: ["declared lean risk instead of standard"] },
   );
@@ -1362,6 +1641,7 @@ test("workflow declaration and risk classification are separate conformance evid
       risk_level: "standard",
       telemetry: {
         workflow_trace: {
+          capsule_stage: passingCapsuleStage("build"),
           independent_review_pass_observed: true,
           independent_review_contract_verbatim_observed: true,
           independent_review_skill_invoked: true,
@@ -1382,7 +1662,7 @@ test("workflow declaration and risk classification are separate conformance evid
       declared_workflow: "build",
       declared_risk: "standard",
       risk_level: "lean",
-      telemetry: { workflow_trace: {} },
+      telemetry: { workflow_trace: { capsule_stage: passingCapsuleStage("build") } },
     }),
     { status: "PASS", reasons: [] },
   );
@@ -1395,7 +1675,7 @@ test("workflow declaration and risk classification are separate conformance evid
       declared_workflow: "build",
       declared_risk: "strict",
       risk_level: "standard",
-      telemetry: { workflow_trace: {} },
+      telemetry: { workflow_trace: { capsule_stage: passingCapsuleStage("build") } },
     }),
     {
       status: "FAIL",
@@ -1419,6 +1699,7 @@ test("workflow declaration and risk classification are separate conformance evid
       risk_level: "strict",
       telemetry: {
         workflow_trace: {
+          capsule_stage: passingCapsuleStage("debug"),
           independent_review_pass_observed: true,
           independent_review_contract_verbatim_observed: true,
           independent_review_skill_invoked: true,
@@ -1544,10 +1825,69 @@ test("workflow declaration and risk classification are separate conformance evid
       declared_workflow: "build",
       declared_risk: "strict",
       risk_level: "strict",
-      telemetry: { workflow_trace: workflowTrace },
+      telemetry: {
+        workflow_trace: {
+          ...workflowTrace,
+          capsule_stage: passingCapsuleStage("build"),
+        },
+      },
     });
     assert.deepEqual(conformance, { status: "FAIL", reasons: [expectedReason] });
   }
+});
+
+test("capsule stage telemetry independently gates workflow conformance", () => {
+  const passing = {
+    workflow: "leanpowers-0.2.0",
+    activation_reported: true,
+    route_ledger_reported: true,
+    expected_workflow: "build",
+    declared_workflow: "build",
+    declared_risk: "lean",
+    risk_level: "lean",
+    telemetry: {
+      workflow_trace: { capsule_stage: passingCapsuleStage("build") },
+    },
+  };
+  assert.deepEqual(evaluateWorkflowConformance(passing), { status: "PASS", reasons: [] });
+
+  const mutations = [
+    [null, "capsule stage trace was unavailable"],
+    [{ route_ledger_occurrences: 2 }, "route ledger was not emitted exactly once"],
+    [{ ledger_before_tools_observed: false }, "route ledger was not emitted before task tools"],
+    [{ workflow_read_calls: 1 }, "capsule reloaded a Skill or reference"],
+    [{ pre_change_command_calls: 3 }, "capsule pre-change stage budget was not observed"],
+    [{ discover_observed: false }, "content-aware DISCOVER was not observed"],
+    [{ read_observed: false }, "batched READ was not observed"],
+    [{ patch_calls: 2 }, "one multi-file PATCH was not observed"],
+    [{ implementation_patch_observed: false }, "one multi-file PATCH was not observed"],
+    [{ test_patch_observed: false }, "one multi-file PATCH was not observed"],
+    [{ multi_file_patch_observed: false }, "one multi-file PATCH was not observed"],
+    [{ post_change_command_calls: 2 }, "one successful post-edit VALIDATE was not observed"],
+    [{ validation_observed: false }, "one successful post-edit VALIDATE was not observed"],
+  ];
+  for (const [mutation, expectedReason] of mutations) {
+    const run = structuredClone(passing);
+    run.telemetry.workflow_trace.capsule_stage = mutation === null
+      ? null
+      : { ...passingCapsuleStage("build"), ...mutation };
+    assert.deepEqual(
+      evaluateWorkflowConformance(run),
+      { status: "FAIL", reasons: [expectedReason] },
+    );
+  }
+
+  const debugRun = structuredClone(passing);
+  debugRun.expected_workflow = "debug";
+  debugRun.declared_workflow = "debug";
+  debugRun.telemetry.workflow_trace.capsule_stage = {
+    ...passingCapsuleStage("debug"),
+    reproduce_observed: false,
+  };
+  assert.deepEqual(evaluateWorkflowConformance(debugRun), {
+    status: "FAIL",
+    reasons: ["pre-edit executable REPRODUCE was not observed"],
+  });
 });
 
 test("raw benchmark output cannot be written into tracked repository paths", () => {
@@ -1740,6 +2080,38 @@ test("pristine fixtures pass visible tests but fail hidden acceptance tests", as
       assert.equal(result.visible.exit_code, 0, `${benchmarkCase.id} visible tests`);
       assert.notEqual(result.hidden.exit_code, 0, `${benchmarkCase.id} hidden tests`);
       assert.ok(result.hidden.output.includes("fail"), benchmarkCase.id);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  }
+});
+
+test("localized cache hidden acceptance rejects sampled delimiter-composite keys", async () => {
+  const suite = await loadDevelopmentSuite(suitePath);
+  const benchmarkCase = suite.cases.find(({ id }) => id === "localized-template-cache");
+  assert.ok(benchmarkCase);
+
+  for (const [index, separator] of [":", "|", "/", "\u001f", "::", "<->"].entries()) {
+    const root = await mkdtemp(path.join(os.tmpdir(), `leanpowers-cache-separator-${index}-`));
+    try {
+      const workspace = path.join(root, "workspace");
+      await cp(new URL(benchmarkCase.workspace, suitePath), workspace, {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(workspace, "src", "cache-key.mjs"),
+        `export function templateCacheKey(name, locale) {\n  return \`${"${name}"}${separator}${"${locale}"}\`;\n}\n`,
+      );
+      const result = await runVerifier({
+        workspace,
+        verifierFiles: benchmarkCase.verifier_files.map((file) =>
+          new URL(file, suitePath)
+        ),
+      });
+
+      assert.equal(result.visible.exit_code, 0, `${separator} visible tests`);
+      assert.notEqual(result.hidden.exit_code, 0, `${separator} hidden tests`);
+      assert.match(result.hidden.output, /collision-free/u);
     } finally {
       await rm(root, { force: true, recursive: true });
     }

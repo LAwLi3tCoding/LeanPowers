@@ -28,6 +28,7 @@
       "task": "Extend parseDuration so it keeps accepting non-negative integer millisecond values and also accepts strings in the exact forms <integer>ms, <integer>s, and <integer>m, with optional surrounding whitespace. Invalid strings, negative values, decimals, NaN, and Infinity must throw TypeError. Preserve the existing formatter and public exports. Add focused regression tests, make the smallest compatible change, run the test suite, and do not commit, install packages, use the network, or create another worktree.",
       "change_policy": {
         "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
         "workflow": ["docs/plans/**", ".superpowers/**"]
       }
     },
@@ -40,9 +41,37 @@
       "verifier_files": [
         "cases/localized-template-cache/verifier/cache.hidden.mjs"
       ],
-      "task": "Users report that after loading a template in one locale, requesting the same template in another locale can return the first locale's content. Reproduce the problem, trace the first incorrect assumption, and fix the root cause while keeping the cache, the current public API, locale normalization, error propagation, and same-locale cache hits intact. Add a regression test and run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "task": "Users report that after loading a template in one locale, requesting the same template in another locale can return the first locale's content. Before editing, run the included `node repro/localized-template-cache.mjs`; use its structured output to trace the first incorrect assumption. Fix the root cause while keeping the cache, the current public API, locale normalization, error propagation, and same-locale cache hits intact. Cache identity must remain unambiguous even when template names or locales contain separator characters. Add a regression test and run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "reproduction_contract": {
+        "command": "node repro/localized-template-cache.mjs",
+        "expected_output": {
+          "scenario": "localized-template-cache",
+          "requests": [
+            {
+              "name": "welcome",
+              "locale": "EN",
+              "normalized_locale": "en",
+              "cache_key": "welcome",
+              "resolved": "welcome:en"
+            },
+            {
+              "name": "welcome",
+              "locale": "fr",
+              "normalized_locale": "fr",
+              "cache_key": "welcome",
+              "resolved": "welcome:en"
+            }
+          ],
+          "loader_calls": [["welcome", "en"]],
+          "first_incorrect_transition": {
+            "stage": "templateCacheKey",
+            "distinct_normalized_locales_share_key": true
+          }
+        }
+      },
       "change_policy": {
         "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
         "workflow": ["docs/plans/**", ".superpowers/**"]
       }
     },
@@ -58,6 +87,7 @@
       "task": "Extend verifySignature(payload, header, secret) to support webhook secret rotation. The third argument may be the existing single non-empty string or a non-empty array of non-empty strings; a match against any secret succeeds. Preserve the single-secret API and payload byte semantics. Accept only the exact lowercase sha256= prefix followed by exactly 64 hexadecimal characters in either case, return false for malformed headers or mismatches, reject invalid or empty secret inputs with TypeError, and keep constant-time digest comparison. Add positive, negative, and compatibility tests, run the suite, and do not commit, install packages, use the network, or create another worktree.",
       "change_policy": {
         "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
         "workflow": ["docs/plans/**", ".superpowers/**"]
       }
     }

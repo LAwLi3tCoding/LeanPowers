@@ -36,6 +36,22 @@ test("normalizes locale before both caching and loading", async () => {
   ]);
 });
 
+test("keeps composite cache identity collision-free", async () => {
+  for (const separator of [":", "|", "/", "\u001f", "::", "<->"]) {
+    const calls = [];
+    const resolve = createTemplateResolver(async (name, locale) => {
+      calls.push([name, locale]);
+      return JSON.stringify([name, locale]);
+    });
+
+    const first = [`a${separator}b`, "c"];
+    const second = ["a", `b${separator}c`];
+    assert.equal(await resolve(...first), JSON.stringify(first));
+    assert.equal(await resolve(...second), JSON.stringify(second));
+    assert.deepEqual(calls, [first, second]);
+  }
+});
+
 test("retains cache hits without hiding loader failures", async () => {
   let calls = 0;
   const resolve = createTemplateResolver(async (name, locale) => {
