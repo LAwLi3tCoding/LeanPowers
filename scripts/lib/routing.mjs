@@ -64,6 +64,8 @@ export function selectInitialWorkflow({
   deliveryRequested = false,
   needsShaping = false,
   reviewRequested = false,
+  risk = "standard",
+  independentReview = false,
   verificationCurrent = false,
   verificationRequested = false,
 } = {}) {
@@ -71,8 +73,9 @@ export function selectInitialWorkflow({
     return null;
   }
   if (explicitWorkflow !== null) {
-    if (explicitWorkflow === "ship" && !verificationCurrent) {
-      return "verify";
+    if (explicitWorkflow === "ship") {
+      if (!verificationCurrent) return "verify";
+      if (risk === "strict" && !independentReview) return "review";
     }
     if (["adapt", "build", "debug", "review", "shape", "ship", "verify"].includes(explicitWorkflow)) {
       return explicitWorkflow;
@@ -82,7 +85,8 @@ export function selectInitialWorkflow({
     return "adapt";
   }
   if (deliveryOnly) {
-    return verificationCurrent ? "ship" : "verify";
+    if (!verificationCurrent) return "verify";
+    return risk === "strict" && !independentReview ? "review" : "ship";
   }
   if (causeKnown === false) {
     return "debug";
@@ -97,4 +101,45 @@ export function selectInitialWorkflow({
     return "verify";
   }
   return "build";
+}
+
+export function requiredGates(risk) {
+  return risk === "strict"
+    ? ["independent_review", "current_evidence"]
+    : ["current_evidence"];
+}
+
+export function selectNextWorkflow({
+  current,
+  risk = "standard",
+  evidenceCurrent = false,
+  independentReview = false,
+  reviewVerdict = null,
+  repairOwner = "build",
+  verificationRequested = false,
+  deliveryRequested = false,
+  crossArtifactClaim = false,
+} = {}) {
+  if (current === "review") {
+    if (risk === "strict" && !independentReview) return "incomplete";
+    if (reviewVerdict === "changes_required") {
+      return repairOwner === "debug" ? "debug" : "build";
+    }
+    return reviewVerdict === "pass" ? "verify" : "incomplete";
+  }
+  if (current !== "build" && current !== "debug") {
+    return null;
+  }
+  if (risk === "strict") {
+    return "review";
+  }
+  if (
+    !evidenceCurrent ||
+    verificationRequested ||
+    deliveryRequested ||
+    crossArtifactClaim
+  ) {
+    return "verify";
+  }
+  return null;
 }

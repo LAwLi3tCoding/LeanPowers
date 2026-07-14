@@ -26,7 +26,7 @@ const suitePath = new URL(
   import.meta.url,
 );
 
-test("development pilot declares three executable scenario classes", async () => {
+test("development pilot declares three executable risk-calibrated scenario classes", async () => {
   const suite = await loadDevelopmentSuite(suitePath);
 
   assert.equal(suite.schema_version, 1);
@@ -37,11 +37,11 @@ test("development pilot declares three executable scenario classes", async () =>
     "leanpowers-0.2.0": "$leanpowers:route",
   });
   assert.deepEqual(
-    suite.cases.map(({ scenario_class }) => scenario_class),
+    suite.cases.map(({ scenario_class, risk_level }) => [scenario_class, risk_level]),
     [
-      "small-explicit-feature",
-      "unknown-cause-defect",
-      "security-authorization-or-data-risk",
+      ["small-explicit-feature", "lean"],
+      ["unknown-cause-defect", "standard"],
+      ["security-authorization-or-data-risk", "strict"],
     ],
   );
   assert.ok(suite.cases.every(({ task }) => task.trim().length > 80));
@@ -163,6 +163,14 @@ test("Codex JSONL usage and completion are independently parsed", () => {
       output: 20,
       reasoning_output: 10,
       total: 120,
+      uncached_plus_output: 80,
+      telemetry_complete: true,
+    },
+    tool_calls_by_type: { command_execution: 1 },
+    workflow_trace: {
+      read_calls: 0,
+      read_output_chars: 0,
+      skills_observed: [],
     },
   });
   assert.equal(parseCodexResult('{"type":"turn.failed"}').tokens, null);
@@ -179,6 +187,51 @@ test("Codex JSONL usage and completion are independently parsed", () => {
     ].join("\n")).first_progress_message,
     "first",
   );
+});
+
+test("Codex usage preserves incomplete telemetry and rejects impossible cache values", () => {
+  const missing = parseCodexResult(JSON.stringify({
+    type: "turn.completed",
+    usage: { input_tokens: 100, output_tokens: 20 },
+  }));
+  assert.equal(missing.tokens.cached_input, null);
+  assert.equal(missing.tokens.uncached_plus_output, null);
+  assert.equal(missing.tokens.telemetry_complete, false);
+
+  const impossible = parseCodexResult(JSON.stringify({
+    type: "turn.completed",
+    usage: { input_tokens: 100, cached_input_tokens: 120, output_tokens: 20 },
+  }));
+  assert.equal(impossible.tokens.telemetry_complete, false);
+  assert.equal(impossible.tokens.uncached_plus_output, null);
+});
+
+test("Codex trace records tool types and exact workflow file reads", () => {
+  const parsed = parseCodexResult([
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "command_execution",
+        command: "sed -n 1,200p /plugin/skills/build/SKILL.md",
+        aggregated_output: "build workflow",
+      },
+    }),
+    JSON.stringify({
+      type: "item.completed",
+      item: { type: "file_change", changes: [] },
+    }),
+    JSON.stringify({
+      type: "turn.completed",
+      usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 },
+    }),
+  ].join("\n"));
+
+  assert.deepEqual(parsed.tool_calls_by_type, { command_execution: 1, file_change: 1 });
+  assert.deepEqual(parsed.workflow_trace, {
+    read_calls: 1,
+    read_output_chars: 14,
+    skills_observed: ["build"],
+  });
 });
 
 test("changed-path evaluation separates product changes, workflow artifacts, and violations", () => {
@@ -257,6 +310,8 @@ test("partial case runs are complete for their declared selected scope", async (
     { workflow: "leanpowers-0.2.0" },
   ].map((run) => ({
     ...run,
+    case_id: selectedCases[0].id,
+    repetition: 1,
     activation_reported: true,
     changes: { violations: [], workflow: [] },
     outcome: { status: "PASS", reasons: [] },
@@ -269,7 +324,81 @@ test("partial case runs are complete for their declared selected scope", async (
   assert.deepEqual(result.cases, [{
     id: selectedCases[0].id,
     scenario_class: selectedCases[0].scenario_class,
+    risk_level: selectedCases[0].risk_level,
   }]);
+  assert.equal(result.aggregate["leanpowers-0.2.0"].median_uncached_plus_output_tokens, null);
+});
+
+test("paired reductions are calculated per matched pair and prioritize both-PASS runs", async () => {
+  const suite = await loadDevelopmentSuite(suitePath);
+  const selectedCases = [suite.cases[0], suite.cases[1]];
+  const run = (workflow, caseId, repetition, total, fresh, wall, tools, reads, status) => ({
+    workflow,
+    case_id: caseId,
+    risk_level: caseId === selectedCases[0].id ? "lean" : "standard",
+    repetition,
+    activation_reported: true,
+    changes: { violations: [], workflow: [] },
+    outcome: { status, reasons: [] },
+    telemetry: {
+      tokens: { total, uncached_plus_output: fresh },
+      turns: 1,
+      tool_calls: tools,
+      workflow_trace: { read_calls: reads },
+    },
+    wall_seconds: wall,
+  });
+  const runs = [
+    run("superpowers-6.1.1", selectedCases[0].id, 1, 100, 80, 10, 10, 4, "PASS"),
+    run("leanpowers-0.2.0", selectedCases[0].id, 1, 60, 60, 8, 8, 2, "PASS"),
+    run("superpowers-6.1.1", selectedCases[1].id, 1, 200, 100, 20, 20, 5, "PASS"),
+    run("leanpowers-0.2.0", selectedCases[1].id, 1, 20, 10, 2, 2, 1, "FAIL"),
+  ];
+  const result = makePilotResult(suite, {}, runs, 1, selectedCases);
+
+  assert.deepEqual(result.paired.both_pass_pairs, {
+    count: 1,
+    token_pairs: 1,
+    fresh_token_pairs: 1,
+    wall_pairs: 1,
+    tool_call_pairs: 1,
+    workflow_read_pairs: 1,
+    median_token_reduction_pct: 40,
+    median_fresh_token_reduction_pct: 25,
+    median_wall_reduction_pct: 20,
+    median_tool_call_reduction_pct: 20,
+    median_workflow_read_reduction_pct: 50,
+  });
+  assert.equal(result.paired.all_pairs.count, 2);
+  assert.equal(result.paired.all_pairs.median_token_reduction_pct, 65);
+  assert.equal(result.paired.by_risk.lean.both_pass_pairs.count, 1);
+  assert.equal(result.paired.by_risk.standard.both_pass_pairs.count, 0);
+});
+
+test("completion and pairing reject duplicate runs that mask a missing counterpart", async () => {
+  const suite = await loadDevelopmentSuite(suitePath);
+  const selectedCases = [suite.cases[0]];
+  const duplicate = {
+    workflow: "leanpowers-0.2.0",
+    case_id: selectedCases[0].id,
+    risk_level: "lean",
+    repetition: 1,
+    outcome: { status: "PASS", reasons: [] },
+    telemetry: { tokens: { total: 10 }, tool_calls: 1, workflow_trace: { read_calls: 1 } },
+    wall_seconds: 1,
+    changes: { violations: [], workflow: [] },
+    activation_reported: true,
+  };
+  const result = makePilotResult(
+    suite,
+    {},
+    [duplicate, structuredClone(duplicate)],
+    1,
+    selectedCases,
+  );
+
+  assert.equal(result.completion, "incomplete");
+  assert.equal(result.paired.all_pairs.count, 0);
 });
 
 test("Git scope inspection stays anchored to the immutable baseline commit", async () => {

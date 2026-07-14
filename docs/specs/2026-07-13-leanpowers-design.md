@@ -99,7 +99,7 @@ Use for clear, local, reversible changes with an established validation path and
 Default flow:
 
 ```text
-build -> verify
+build -> complete with current applicable evidence; otherwise verify
 ```
 
 ### 6.2 Standard
@@ -109,7 +109,7 @@ Use for normal features, multi-file behavior changes, ordinary defects, bounded 
 Default flow:
 
 ```text
-shape(light) -> build/debug -> verify
+shape(light, if unclear) -> build/debug -> complete with current applicable evidence; otherwise verify
 ```
 
 Review is added when the change boundary or uncertainty warrants it.
@@ -121,7 +121,7 @@ Use for security, authorization, payment, privacy, migration, concurrency, produ
 Default flow:
 
 ```text
-shape(full) -> build/debug -> review -> verify -> ship
+shape(full, if unclear) -> build/debug -> independent review -> verify -> ship(if requested)
 ```
 
 ### 6.4 Upgrade signals
@@ -270,8 +270,8 @@ These invariants are always active:
 
 | Task | Default workflow |
 | --- | --- |
-| Small explicit change | `build -> verify` |
-| Normal feature | `shape(light) -> build -> verify` |
+| Small explicit change | `build -> complete` with current applicable evidence; otherwise `verify` |
+| Normal feature | `shape(light, if unclear) -> build -> complete` with current applicable evidence; otherwise `verify` |
 | Complex feature | `shape(full) -> build -> review -> verify` |
 | Unknown defect | `debug -> verify` |
 | Large root-cause repair | `debug -> build -> review -> verify` |

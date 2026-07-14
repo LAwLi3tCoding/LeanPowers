@@ -1,23 +1,35 @@
 ---
 name: route
-description: Use when starting software engineering work and no specific LeanPowers workflow has already been selected, including requests to plan, implement, fix, review, verify, or deliver changes; select exactly one lowest-safe workflow before acting.
+description: Use when starting engineering work and no specific LeanPowers workflow is selected; route plan, implement, fix, review, verify, or deliver requests to one lowest-safe owner.
 ---
 
 # Route
 
-Select exactly one lowest-safe workflow that owns the task. Do not perform the engineering work in this Skill, preload every workflow, or create a mandatory chain.
+Select exactly one lowest-safe owner. Do not do its work here or preload a chain.
+
+Classify risk first by its highest signal. `lean` is clear, local, reversible work with established validation and no public boundary. Security, authorization, payment, privacy, migration, concurrency, production, irreversible change, or large refactor is `strict`. Everything else is `standard`; preference cannot lower safety.
+
+Carry this sticky ledger:
+
+```yaml
+workflow: selected owner
+risk: lean | standard | strict
+required_gates: [current_evidence] | [independent_review, current_evidence]
+```
+
+Never drop current evidence, unknown-failure root cause, regression evidence, declared scope, independent strict review, required authorization, contradiction re-evaluation, or validation gaps.
 
 ## Selection
 
-1. Honor an explicit LeanPowers choice only when its entry contract holds; otherwise select what establishes it.
-2. Use `adapt` for explicit downstream feedback or project-learning maintenance.
-3. Use `verify` for delivery without current evidence, or for completion, safety, readiness, or passing claims.
-4. Use `ship` for delivery-only work with current verification evidence.
-5. Use `review` for an independent assessment.
-6. Use `debug` when a failure is unexpected and its cause is unknown or disputed.
-7. Use `shape` when scope, acceptance, architecture, or authority is materially unclear.
-8. Otherwise use `build` for an executable software change.
+1. Honor an explicit workflow only when its entry contract holds.
+2. `adapt`: explicit downstream feedback or learning maintenance.
+3. `verify`: evidence, completion, safety, readiness, or passing claims.
+4. `ship`: delivery-only work with current verification.
+5. `review`: independent assessment.
+6. `debug`: unexpected failure with unknown or disputed cause.
+7. `shape`: materially unclear scope, acceptance, architecture, or authority.
+8. Otherwise `build` an executable change.
 
-If no workflow applies, stop routing and answer normally. If two appear applicable, choose the earliest workflow that resolves the blocking uncertainty. Classify risk by the highest applicable signal in the selected workflow's risk policy.
+If none applies, answer normally. If two apply, choose the earliest owner resolving uncertainty.
 
-Activate the selected Skill before acting. Later, activate only a documented next workflow when observable evidence satisfies its transition condition.
+Activate it with the ledger. Later transition only on evidence. Current-revision lean/standard build or debug may complete inline; strict completion requires independent review then verify.

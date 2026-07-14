@@ -72,7 +72,7 @@ Disabling retains local data for inspection or later re-enablement. Forget and c
 
 1. **Capture your current baseline.** Record the Superpowers version, runtimes, normal prompts, task outcomes, tokens, elapsed time, agent calls, and known failure categories.
 2. **Install LeanPowers in an isolated profile or session.** Keep Superpowers available elsewhere for rollback, but do not activate both routers together.
-3. **Start with low-risk tasks.** Compare `build → verify` against your existing process and inspect completion evidence, not just speed.
+3. **Start with low-risk tasks.** Compare `build` with inline current-revision evidence against your existing process and inspect completion evidence, not just speed.
 4. **Exercise unknown-failure work.** Confirm `debug` reproduces the issue, tests one hypothesis at a time, and covers the real failure path.
 5. **Exercise strict tasks.** Verify security, authorization, migration, or production-shaped scenarios still receive independent review and authorization gates.
 6. **Test delivery.** Confirm `ship` preserves unrelated work and reads back the actual branch, commit, PR, or package target.

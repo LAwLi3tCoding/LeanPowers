@@ -9,7 +9,7 @@ Judge whether a change is safe and fit for its declared purpose. Review is an in
 
 For strict or high-risk work, the reviewer must be a different agent, fresh session, qualified human, or external review result from the implementer perspective. A self-review may find defects but does not satisfy the independent-review gate; report the gap when no independent perspective is available.
 
-Read [quality gates](../../references/quality-gates.md), [evidence protocol](../../references/evidence-protocol.md), and [subagent policy](../../references/subagent-policy.md).
+Inherit the routing ledger. If entered directly or the ledger is missing, read the [runtime contract](../../references/runtime-contract.md) once; do not reload it after transitions.
 
 If project learning is enabled, use `adapt` to query once at entry under the [learning policy](../../references/learning-policy.md) with this workflow, relevant paths, and tags; add at most three behavior-changing advisory rules to the task brief. Treat prior confirmations as advisory, never current review evidence, and send explicit downstream feedback to `adapt`.
 
@@ -37,6 +37,7 @@ Hard failures dominate aggregate scores and deadline pressure. A known validatio
 
 ```yaml
 verdict: pass | changes_required | blocked
+perspective: independent | unavailable
 findings:
   - severity: critical | high | medium | low
     location: path:line
@@ -47,6 +48,8 @@ unverified_areas: unavailable review evidence
 ```
 
 Return `pass` only when no material findings remain. If a finding is uncertain, state the missing evidence instead of presenting speculation as fact.
+
+For a delegated strict review, send only the task contract, risk ledger, relevant diff and code, and current evidence—not the implementation transcript.
 
 ## Boundaries
 

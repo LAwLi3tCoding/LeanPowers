@@ -8,9 +8,13 @@ A transition activates the named next Skill; do not merely mention it while cont
 | --- | --- | --- |
 | `shape` | Scope and acceptance are executable | `build` |
 | `build` | Cause becomes unknown | `debug` |
-| `build` | High-risk implementation is complete | `review` |
+| `build` | Strict implementation is complete | `review` |
+| `build` | Lean/standard implementation has current applicable evidence | complete; no extra workflow |
+| `build` | Evidence is stale/cross-session, verification or delivery was requested, or claim crosses artifact/runtime boundaries | `verify` |
 | `debug` | Root cause needs a larger change | `build` |
-| `debug` | Minimal repair is complete | `verify` |
+| `debug` | Strict minimal repair is complete | `review` |
+| `debug` | Lean/standard repair has current reproduction, regression, and affected integration evidence | complete; no extra workflow |
+| `debug` | Evidence is stale/cross-session, verification or delivery was requested, or claim crosses artifact/runtime boundaries | `verify` |
 | `review` | Findings require change | `build` or `debug` |
 | `review` | Verdict passes | `verify` |
 | `review` | Required independent perspective is unavailable | `verify` with `incomplete` verdict; never `ship` |

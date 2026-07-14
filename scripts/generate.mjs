@@ -24,6 +24,7 @@ const REFERENCES = [
   "learning-policy.md",
   "quality-gates.md",
   "risk-policy.md",
+  "runtime-contract.md",
   "subagent-policy.md",
   "workflow-transitions.md",
 ];

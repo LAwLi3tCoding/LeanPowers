@@ -7,7 +7,7 @@ description: Use when software, tests, builds, integrations, performance, hooks,
 
 Convert an observed failure into a reproducible root cause and a regression-proven repair. A plausible guess is not a diagnosis.
 
-Read [quality gates](../../references/quality-gates.md), [evidence protocol](../../references/evidence-protocol.md), and [workflow transitions](../../references/workflow-transitions.md).
+Inherit the routing ledger. If entered directly or the ledger is missing, read the [runtime contract](../../references/runtime-contract.md) once; do not reload it after transitions.
 
 If project learning is enabled, use `adapt` to query once at entry under the [learning policy](../../references/learning-policy.md) with this workflow, relevant paths, and tags; add at most three behavior-changing advisory rules to the task brief. Treat lessons as hypotheses, never root cause, and send explicit downstream outcome or correction feedback to `adapt`.
 
@@ -22,10 +22,13 @@ If project learning is enabled, use `adapt` to query once at entry under the [le
 7. Apply the smallest root-cause repair. Avoid broad defensive changes that merely hide the symptom.
 8. Re-run reproduction, regression evidence, and affected integration checks.
 
+Before `fixed`, map every repair claim to current reproduction, regression, and applicable integration, lint, typecheck, static, package, or full-suite evidence. A failure or material validation gap blocks completion.
+
 ## Output
 
 ```yaml
 status: fixed | reproduced | not_reproduced | blocked
+risk: lean | standard | strict
 symptom: observed failure
 reproduction: command or artifact and result
 root_cause: first incorrect transition or null
@@ -36,7 +39,7 @@ hypothesis:
 repair: changed boundary or null
 evidence: commands and current results
 validation_gaps: unproven claims
-next: build | verify | null
+next: build | review | verify | null
 ```
 
 ## Stop conditions
@@ -45,7 +48,7 @@ next: build | verify | null
 - Do not stack unrelated fixes to “see what works.” Change one causal variable per experiment.
 - Do not treat absence of logs as evidence that a component behaved correctly.
 
-Use `build` when the root cause requires a broader implementation slice. Use `verify` after a minimal repair has current regression evidence.
+Use `build` when the root cause requires a broader implementation slice. Strict repair always sets `next: review`. Lean or standard repair with current reproduction, regression, and affected integration evidence sets `next: null`; use `verify` only for explicit verification, stale or cross-session evidence, requested delivery, or cross-artifact/runtime claims.
 
 ## Common mistakes
 

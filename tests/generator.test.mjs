@@ -22,6 +22,7 @@ const referenceNames = [
   "learning-policy.md",
   "quality-gates.md",
   "risk-policy.md",
+  "runtime-contract.md",
   "subagent-policy.md",
   "workflow-transitions.md",
 ];
@@ -86,10 +87,10 @@ test("published instruction counts match the canonical source exactly", async ()
   assert.deepEqual(
     { engineeringWords, routeWords, adaptWords, totalWords, charterWords },
     {
-      engineeringWords: 2561,
-      routeWords: 219,
+      engineeringWords: 2819,
+      routeWords: 234,
       adaptWords: 329,
-      totalWords: 3109,
+      totalWords: 3382,
       charterWords: 111,
     },
   );
@@ -99,7 +100,7 @@ test("published instruction counts match the canonical source exactly", async ()
     "docs/comparison-superpowers.md",
   ]) {
     const document = await readFile(new URL(relativePath, projectRoot), "utf8");
-    for (const expected of ["2,561", "219", "329", "3,109", "86.2%", "83.2%"]) {
+    for (const expected of ["2,819", "234", "329", "3,382", "84.8%", "81.7%"]) {
       assert.ok(document.includes(expected), `${relativePath} missing ${expected}`);
     }
   }

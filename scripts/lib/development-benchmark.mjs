@@ -95,6 +95,9 @@ export async function loadDevelopmentSuite(input) {
       if (!benchmarkCase?.scenario_class || !benchmarkCase?.task) {
         errors.push(`cases[${index}] must declare scenario_class and task`);
       }
+      if (!["lean", "standard", "strict"].includes(benchmarkCase?.risk_level)) {
+        errors.push(`cases[${index}].risk_level must be lean, standard, or strict`);
+      }
       for (const field of ["workspace", ...(benchmarkCase?.verifier_files ?? [])]) {
         if (!isSafeRelativePath(field)) {
           errors.push(`cases[${index}] contains an unsafe relative path`);
@@ -243,14 +246,36 @@ export function parseCodexResult(raw) {
     });
   const usageEvent = [...events].reverse().find((event) => event?.type === "turn.completed");
   const usage = usageEvent?.usage;
-  const hasUsage = usage && [
+  const hasUsage = Boolean(usage) && [
     usage.input_tokens,
     usage.cached_input_tokens,
     usage.output_tokens,
     usage.reasoning_output_tokens,
   ].some(Number.isFinite);
-  const input = finiteNumber(usage?.input_tokens) ?? 0;
-  const output = finiteNumber(usage?.output_tokens) ?? 0;
+  const input = finiteNumber(usage?.input_tokens);
+  const cachedInput = finiteNumber(usage?.cached_input_tokens);
+  const output = finiteNumber(usage?.output_tokens);
+  const cacheValid = input !== null && cachedInput !== null && cachedInput >= 0 && cachedInput <= input;
+  const telemetryComplete = cacheValid && output !== null;
+  const completedItems = events.filter((event) => event?.type === "item.completed");
+  const toolItems = completedItems.filter(
+    (event) => !["agent_message", "reasoning"].includes(event?.item?.type),
+  );
+  const toolCallsByType = Object.fromEntries(
+    [...new Set(toolItems.map((event) => event?.item?.type ?? "unknown"))]
+      .sort()
+      .map((type) => [type, toolItems.filter((event) => (event?.item?.type ?? "unknown") === type).length]),
+  );
+  const workflowReads = completedItems.filter((event) => {
+    if (event?.item?.type !== "command_execution") return false;
+    return /\/(?:skills\/[^/\s]+\/SKILL\.md|references\/[^/\s]+\.md)/u
+      .test(event?.item?.command ?? "");
+  });
+  const skillsObserved = [...new Set(workflowReads.flatMap((event) =>
+    [...String(event?.item?.command ?? "").matchAll(
+      /\/skills\/([^/\s]+)\/SKILL\.md/gu,
+    )].map((match) => match[1])
+  ))].sort();
   const finalMessage = [...events].reverse().find(
     (event) => event?.type === "item.completed" && event?.item?.type === "agent_message",
   );
@@ -265,18 +290,25 @@ export function parseCodexResult(raw) {
     first_progress_message:
       typeof firstProgressMessage?.item?.text === "string" ? firstProgressMessage.item.text : "",
     turns: events.filter((event) => event?.type === "turn.started").length,
-    tool_calls: events.filter(
-      (event) =>
-        event?.type === "item.completed" &&
-        !["agent_message", "reasoning"].includes(event?.item?.type),
-    ).length,
+    tool_calls: toolItems.length,
+    tool_calls_by_type: toolCallsByType,
+    workflow_trace: {
+      read_calls: workflowReads.length,
+      read_output_chars: workflowReads.reduce(
+        (total, event) => total + String(event?.item?.aggregated_output ?? "").length,
+        0,
+      ),
+      skills_observed: skillsObserved,
+    },
     tokens: hasUsage
       ? {
           input,
-          cached_input: finiteNumber(usage?.cached_input_tokens) ?? 0,
+          cached_input: cachedInput,
           output,
-          reasoning_output: finiteNumber(usage?.reasoning_output_tokens) ?? 0,
-          total: input + output,
+          reasoning_output: finiteNumber(usage?.reasoning_output_tokens),
+          total: input !== null && output !== null ? input + output : null,
+          uncached_plus_output: telemetryComplete ? input - cachedInput + output : null,
+          telemetry_complete: telemetryComplete,
         }
       : null,
   };
@@ -467,16 +499,20 @@ export async function runDevelopmentPilot({
 
 export function renderDevelopmentReport(result) {
   const aggregate = aggregateRuns(result.runs);
+  const paired = aggregatePairedRuns(result.runs);
   const rows = result.runs.map((run) =>
     [
       run.case_id,
+      run.risk_level,
       String(run.repetition),
       run.workflow,
       run.outcome.status,
       run.activation_reported ? "yes" : "no",
       displayMetric(run.telemetry.tokens?.total),
+      displayMetric(run.telemetry.tokens?.uncached_plus_output),
       displayMetric(round(run.wall_seconds, 1)),
-      displayMetric(run.telemetry.turns),
+      displayMetric(run.telemetry.tool_calls),
+      displayMetric(run.telemetry.workflow_trace?.read_calls),
       String(run.changes.product.length),
       String(run.changes.workflow.length),
       String(run.changes.violations.length),
@@ -488,8 +524,10 @@ export function renderDevelopmentReport(result) {
       workflow,
       `${metrics.passed}/${metrics.total}`,
       displayMetric(metrics.median_tokens),
+      displayMetric(metrics.median_uncached_plus_output_tokens),
       displayMetric(metrics.median_wall_seconds),
-      displayMetric(metrics.median_turns),
+      displayMetric(metrics.median_tool_calls),
+      displayMetric(metrics.median_workflow_read_calls),
       String(metrics.activation_failures),
       String(metrics.scope_violations),
     ].join(" | ");
@@ -512,14 +550,24 @@ export function renderDevelopmentReport(result) {
     "",
     "## Aggregate",
     "",
-    "Workflow | Passed runs | Median model tokens | Median wall seconds | Median turns | Activation failures | Scope violations",
-    "--- | ---: | ---: | ---: | ---: | ---: | ---:",
+    "Workflow | Passed runs | Median model tokens | Median fresh tokens | Median wall seconds | Median tool calls | Median workflow reads | Activation failures | Scope violations",
+    "--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:",
     ...summaryRows,
+    "",
+    "## Paired reductions",
+    "",
+    "Population | Matched pairs | Median model-token reduction | Median fresh-token reduction | Median wall reduction | Median tool-call reduction | Median workflow-read reduction",
+    "--- | ---: | ---: | ---: | ---: | ---: | ---:",
+    pairedRow("Both workflows PASS", paired.both_pass_pairs),
+    pairedRow("Both PASS: lean", paired.by_risk.lean.both_pass_pairs),
+    pairedRow("Both PASS: standard", paired.by_risk.standard.both_pass_pairs),
+    pairedRow("Both PASS: strict", paired.by_risk.strict.both_pass_pairs),
+    pairedRow("All matched runs", paired.all_pairs),
     "",
     "## Paired runs",
     "",
-    "Case | Rep | Workflow | Outcome | Activated | Model tokens | Wall seconds | Turns | Product files | Workflow artifacts | Scope violations",
-    "--- | ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---:",
+    "Case | Risk | Rep | Workflow | Outcome | Activated | Model tokens | Fresh tokens | Wall seconds | Tool calls | Workflow reads | Product files | Workflow artifacts | Scope violations",
+    "--- | --- | ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:",
     ...rows,
     "",
     "## Failed-run reasons",
@@ -529,12 +577,26 @@ export function renderDevelopmentReport(result) {
     "## Interpretation boundary",
     "",
     "- PASS requires reported workflow activation, successful agent completion, no timeout, both visible and hidden test success, and no changed-path scope violation.",
-    "- Model tokens sum Codex input and output tokens; cached input is reported separately in raw local results and is not double-counted. Missing telemetry is shown as n/a, never zero.",
+    "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
+    "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
+    "- Paired reductions are computed within each identical case and repetition before taking the median. Each metric shows its own valid sample count; incomplete telemetry is excluded from that metric only. The both-PASS population is primary, so failing faster never counts as an improvement.",
     "- Codex CLI does not expose a deterministic seed, so paired repetitions reduce noise but do not eliminate it.",
     "- The three cases cover a small feature, an unknown-cause cache defect, and a security-compatible API extension. They do not establish universal non-inferiority.",
     "- Raw transcripts remain local and are written only after every run finishes. Disposable workspaces are destroyed after each run and are not publication artifacts.",
     "",
   ].join("\n");
+}
+
+function pairedRow(label, metrics) {
+  return [
+    label,
+    String(metrics.count),
+    displayPairedMetric(metrics.median_token_reduction_pct, metrics.token_pairs),
+    displayPairedMetric(metrics.median_fresh_token_reduction_pct, metrics.fresh_token_pairs),
+    displayPairedMetric(metrics.median_wall_reduction_pct, metrics.wall_pairs),
+    displayPairedMetric(metrics.median_tool_call_reduction_pct, metrics.tool_call_pairs),
+    displayPairedMetric(metrics.median_workflow_read_reduction_pct, metrics.workflow_read_pairs),
+  ].join(" | ");
 }
 
 async function runSingleCase({
@@ -607,6 +669,7 @@ async function runSingleCase({
       workflow,
       case_id: benchmarkCase.id,
       scenario_class: benchmarkCase.scenario_class,
+      risk_level: benchmarkCase.risk_level,
       repetition,
       agent_exit_code: agent.exitCode,
       agent_timed_out: agent.timedOut,
@@ -617,6 +680,8 @@ async function runSingleCase({
       telemetry: {
         turns: telemetry.turns,
         tool_calls: telemetry.tool_calls,
+        tool_calls_by_type: telemetry.tool_calls_by_type,
+        workflow_trace: telemetry.workflow_trace,
         tokens: telemetry.tokens,
       },
       changes,
@@ -644,12 +709,19 @@ export function makePilotResult(suite, runtime, runs, repetitions, selectedCases
     suite_id: suite.suite_id,
     evidence_level: suite.evidence_level,
     activation_mode: suite.activation_mode,
-    completion: runs.length === selectedCases.length * repetitions * 2 ? "complete" : "incomplete",
+    completion: hasCompleteRunMatrix(runs, selectedCases, repetitions)
+      ? "complete"
+      : "incomplete",
     runtime,
     repetitions,
-    cases: selectedCases.map(({ id, scenario_class }) => ({ id, scenario_class })),
+    cases: selectedCases.map(({ id, scenario_class, risk_level }) => ({
+      id,
+      scenario_class,
+      risk_level,
+    })),
     runs,
     aggregate: aggregateRuns(runs),
+    paired: aggregatePairedRuns(runs),
   };
 }
 
@@ -660,6 +732,20 @@ function aggregateRuns(runs) {
       total: selected.length,
       passed: selected.filter((run) => run.outcome.status === "PASS").length,
       median_tokens: median(selected.map((run) => run.telemetry.tokens?.total)),
+      median_cached_input_tokens: median(
+        selected.map((run) => run.telemetry.tokens?.cached_input),
+      ),
+      median_uncached_plus_output_tokens: median(
+        selected.map((run) => run.telemetry.tokens?.uncached_plus_output),
+      ),
+      median_output_tokens: median(selected.map((run) => run.telemetry.tokens?.output)),
+      median_tool_calls: median(selected.map((run) => run.telemetry.tool_calls)),
+      median_workflow_read_calls: median(
+        selected.map((run) => run.telemetry.workflow_trace?.read_calls),
+      ),
+      median_workflow_read_output_chars: median(
+        selected.map((run) => run.telemetry.workflow_trace?.read_output_chars),
+      ),
       median_wall_seconds: round(median(selected.map((run) => run.wall_seconds)), 1),
       median_turns: median(selected.map((run) => run.telemetry.turns)),
       scope_violations: selected.reduce((sum, run) => sum + run.changes.violations.length, 0),
@@ -667,6 +753,86 @@ function aggregateRuns(runs) {
       workflow_artifacts: selected.reduce((sum, run) => sum + run.changes.workflow.length, 0),
     }];
   }));
+}
+
+function aggregatePairedRuns(runs) {
+  const groups = new Map();
+  for (const run of runs) {
+    const key = `${run.case_id}\u0000${run.repetition}`;
+    const group = groups.get(key) ?? Object.fromEntries(
+      [...WORKFLOWS].map((workflow) => [workflow, []]),
+    );
+    if (WORKFLOWS.has(run.workflow)) group[run.workflow].push(run);
+    groups.set(key, group);
+  }
+  const pairs = [...groups.values()]
+    .filter((group) => [...WORKFLOWS].every((workflow) => group[workflow].length === 1))
+    .map((group) => Object.fromEntries(
+      [...WORKFLOWS].map((workflow) => [workflow, group[workflow][0]]),
+    ));
+  const bothPass = pairs.filter((group) =>
+    [...WORKFLOWS].every((workflow) => group[workflow].outcome.status === "PASS")
+  );
+  const byRisk = Object.fromEntries(["lean", "standard", "strict"].map((risk) => {
+    const selected = pairs.filter((pair) => pair["leanpowers-0.2.0"].risk_level === risk);
+    return [risk, {
+      all_pairs: summarizePairs(selected),
+      both_pass_pairs: summarizePairs(selected.filter((pair) =>
+        [...WORKFLOWS].every((workflow) => pair[workflow].outcome.status === "PASS")
+      )),
+    }];
+  }));
+  return {
+    all_pairs: summarizePairs(pairs),
+    both_pass_pairs: summarizePairs(bothPass),
+    by_risk: byRisk,
+  };
+}
+
+function hasCompleteRunMatrix(runs, selectedCases, repetitions) {
+  const expected = new Map();
+  for (let repetition = 1; repetition <= repetitions; repetition += 1) {
+    for (const benchmarkCase of selectedCases) {
+      for (const workflow of WORKFLOWS) {
+        expected.set(`${benchmarkCase.id}\u0000${repetition}\u0000${workflow}`, 0);
+      }
+    }
+  }
+  for (const run of runs) {
+    const key = `${run.case_id}\u0000${run.repetition}\u0000${run.workflow}`;
+    if (!expected.has(key)) return false;
+    expected.set(key, expected.get(key) + 1);
+  }
+  return [...expected.values()].every((count) => count === 1);
+}
+
+function summarizePairs(pairs) {
+  const reduction = (selector) => pairs.flatMap((pair) => {
+    const baseline = selector(pair["superpowers-6.1.1"]);
+    const candidate = selector(pair["leanpowers-0.2.0"]);
+    if (!Number.isFinite(baseline) || !Number.isFinite(candidate) || baseline <= 0) {
+      return [];
+    }
+    return [(1 - candidate / baseline) * 100];
+  });
+  const token = reduction((run) => run.telemetry.tokens?.total);
+  const fresh = reduction((run) => run.telemetry.tokens?.uncached_plus_output);
+  const wall = reduction((run) => run.wall_seconds);
+  const tools = reduction((run) => run.telemetry.tool_calls);
+  const workflowReads = reduction((run) => run.telemetry.workflow_trace?.read_calls);
+  return {
+    count: pairs.length,
+    token_pairs: token.length,
+    fresh_token_pairs: fresh.length,
+    wall_pairs: wall.length,
+    tool_call_pairs: tools.length,
+    workflow_read_pairs: workflowReads.length,
+    median_token_reduction_pct: round(median(token), 1),
+    median_fresh_token_reduction_pct: round(median(fresh), 1),
+    median_wall_reduction_pct: round(median(wall), 1),
+    median_tool_call_reduction_pct: round(median(tools), 1),
+    median_workflow_read_reduction_pct: round(median(workflowReads), 1),
+  };
 }
 
 async function prepareCodexHomes({
@@ -1078,6 +1244,14 @@ function round(value, digits) {
 
 function displayMetric(value) {
   return Number.isFinite(value) ? String(value) : "n/a";
+}
+
+function displayPercent(value) {
+  return Number.isFinite(value) ? `${value}%` : "n/a";
+}
+
+function displayPairedMetric(value, count) {
+  return `${displayPercent(value)} (n=${count})`;
 }
 
 function toFileUrl(input) {

@@ -31,11 +31,67 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
   }
   assert.match(body, /exactly one/i);
   assert.match(body, /lowest-safe|lowest safe/i);
+  assert.match(body, /security.*authorization.*payment.*privacy/is);
+  assert.match(body, /risk: lean \| standard \| strict/i);
+  assert.match(body, /required_gates/i);
   for (const workflow of ["shape", "build", "debug", "review", "verify", "ship", "adapt"]) {
     assert.match(body, new RegExp(`\\b${workflow}\\b`, "i"), workflow);
   }
   assert.doesNotMatch(body, /1%|before any response|you do not have a choice/i);
-  assert.ok(wordCount(content) <= 220, `route has ${wordCount(content)} words`);
+  assert.ok(wordCount(content) <= 260, `route has ${wordCount(content)} words`);
+});
+
+test("direct workflow entry loads one compact runtime contract at most once", async () => {
+  const contract = await readFile(
+    path.join(root, "references", "runtime-contract.md"),
+    "utf8",
+  );
+  assert.ok(wordCount(contract) <= 360, `runtime contract has ${wordCount(contract)} words`);
+
+  for (const phrase of [
+    "current evidence",
+    "root cause",
+    "regression evidence",
+    "declared scope",
+    "independent review",
+    "authorization",
+    "validation gap",
+    "strict is sticky",
+  ]) {
+    assert.match(contract.toLowerCase(), new RegExp(phrase), `missing: ${phrase}`);
+  }
+
+  for (const name of engineeringSkills) {
+    const content = await readFile(path.join(skillsRoot, name, "SKILL.md"), "utf8");
+    assert.match(content, /runtime contract/i, name);
+    assert.match(content, /loaded|read[\s\S]{0,80}once/i, name);
+    for (const legacy of [
+      "risk-policy.md",
+      "quality-gates.md",
+      "evidence-protocol.md",
+      "subagent-policy.md",
+      "workflow-transitions.md",
+    ]) {
+      assert.doesNotMatch(content, new RegExp(legacy.replace(".", "\\."), "i"), `${name}: ${legacy}`);
+    }
+  }
+
+  const route = await readFile(path.join(skillsRoot, "route", "SKILL.md"), "utf8");
+  assert.doesNotMatch(route, /\.\.\/\.\.\/references\//i);
+});
+
+test("ordinary completion is inline while strict review remains mandatory", async () => {
+  const build = await readFile(path.join(skillsRoot, "build", "SKILL.md"), "utf8");
+  const debug = await readFile(path.join(skillsRoot, "debug", "SKILL.md"), "utf8");
+  const verify = await readFile(path.join(skillsRoot, "verify", "SKILL.md"), "utf8");
+
+  assert.match(build, /lean or standard[\s\S]{0,180}next: null/i);
+  assert.match(debug, /lean or standard[\s\S]{0,180}next: null/i);
+  assert.match(build, /strict[\s\S]{0,100}next: review/i);
+  assert.match(debug, /strict[\s\S]{0,100}next: review/i);
+  assert.match(verify, /independent_review: pass \| missing \| not_required/i);
+  assert.match(build, /affected integration[\s\S]{0,120}full-suite/i);
+  assert.match(build, /validation gap blocks `complete`/i);
 });
 
 test("skill frontmatter is portable and descriptions are discovery-focused", async () => {

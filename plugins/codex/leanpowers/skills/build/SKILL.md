@@ -7,7 +7,7 @@ description: Use when a software change has an executable scope and needs implem
 
 Implement one delivery slice at a time and keep the feedback loop proportional to its risk. Correctness comes from early evidence, not end-loaded testing.
 
-Read [risk policy](../../references/risk-policy.md), [quality gates](../../references/quality-gates.md), [subagent policy](../../references/subagent-policy.md), and [workflow transitions](../../references/workflow-transitions.md).
+Inherit the routing ledger. If entered directly or the ledger is missing, read the [runtime contract](../../references/runtime-contract.md) once; do not reload it after transitions.
 
 If project learning is enabled, use `adapt` to query once at entry under the [learning policy](../../references/learning-policy.md) with this workflow, relevant paths, and tags; add at most three behavior-changing advisory rules to the task brief. Send explicit downstream outcome, correction, confirmation, or durable-preference feedback to `adapt`.
 
@@ -25,15 +25,17 @@ Start only when goal, declared scope, acceptance evidence, and constraints are e
    - Documentation: define link, example, structure, or rendering checks.
 4. Implement the minimum change that satisfies the slice.
 5. Run targeted validation immediately and inspect its output.
-6. Remove only duplication or debris introduced by the slice while evidence remains green.
-7. Record changed files, supported claims, and residual risk before the next slice.
+6. Before completion, map every claim to current targeted evidence plus affected integration, lint, typecheck, static, package, or full-suite checks when applicable. A failure or material validation gap blocks `complete`.
+7. Remove only duplication or debris introduced by the slice while evidence remains green.
+8. Record changed files, supported claims, and residual risk before the next slice.
 
-Do not write all implementation first and add tests at the end. Do not create a child agent for each file. Delegate only independent delivery boundaries under the [subagent policy](../../references/subagent-policy.md).
+Do not write all implementation first and add tests at the end. Do not create a child agent for each file. Delegate only independent, verifiable delivery boundaries without shared-write conflict.
 
 ## Output
 
 ```yaml
 status: complete | blocked | needs_debug | needs_review
+risk: lean | standard | strict
 slices:
   - outcome: delivered behavior
     files: changed paths
@@ -46,8 +48,9 @@ next: verify | review | debug | null
 
 - New unknown failure: transition to `debug`.
 - Material scope expansion: transition to `shape`.
-- High-risk or broad completed change: transition to `review`.
-- Implemented requested scope: transition to `verify`.
+- Strict completion always sets `next: review`; this rule wins over every ordinary completion path.
+- Lean or standard completion with current applicable evidence sets `next: null` and may finish in this workflow.
+- Use `verify` only for explicit verification, stale or cross-session evidence, requested delivery, or a cross-artifact/runtime claim.
 
 ## Common mistakes
 

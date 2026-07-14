@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { classifyRisk, selectInitialWorkflow } from "../scripts/lib/routing.mjs";
+import {
+  classifyRisk,
+  requiredGates,
+  selectInitialWorkflow,
+  selectNextWorkflow,
+} from "../scripts/lib/routing.mjs";
 
 const cases = JSON.parse(
   await readFile(new URL("../evals/routing-cases.json", import.meta.url), "utf8"),
@@ -51,6 +56,23 @@ test("routing resolves entry contracts and competing intents one workflow at a t
     "ship",
   );
   assert.equal(
+    selectInitialWorkflow({
+      explicitWorkflow: "ship",
+      verificationCurrent: true,
+      risk: "strict",
+    }),
+    "review",
+  );
+  assert.equal(
+    selectInitialWorkflow({
+      deliveryOnly: true,
+      verificationCurrent: true,
+      risk: "strict",
+      independentReview: true,
+    }),
+    "ship",
+  );
+  assert.equal(
     selectInitialWorkflow({ reviewRequested: true, deliveryRequested: true }),
     "review",
   );
@@ -62,4 +84,69 @@ test("routing resolves entry contracts and competing intents one workflow at a t
     selectInitialWorkflow({ deliveryOnly: true, verificationCurrent: false }),
     "verify",
   );
+});
+
+test("risk becomes a sticky gate ledger across workflow transitions", () => {
+  assert.deepEqual(requiredGates("lean"), ["current_evidence"]);
+  assert.deepEqual(requiredGates("standard"), ["current_evidence"]);
+  assert.deepEqual(requiredGates("strict"), ["independent_review", "current_evidence"]);
+
+  assert.equal(
+    selectNextWorkflow({ current: "build", risk: "strict", evidenceCurrent: true }),
+    "review",
+  );
+  assert.equal(
+    selectNextWorkflow({ current: "debug", risk: "strict", evidenceCurrent: true }),
+    "review",
+  );
+  assert.equal(
+    selectNextWorkflow({ current: "build", risk: "standard", evidenceCurrent: true }),
+    null,
+  );
+  assert.equal(
+    selectNextWorkflow({ current: "debug", risk: "lean", evidenceCurrent: true }),
+    null,
+  );
+  assert.equal(
+    selectNextWorkflow({
+      current: "review",
+      risk: "strict",
+      independentReview: true,
+      reviewVerdict: "pass",
+    }),
+    "verify",
+  );
+  assert.equal(
+    selectNextWorkflow({ current: "review", risk: "strict", independentReview: false }),
+    "incomplete",
+  );
+  assert.equal(
+    selectNextWorkflow({
+      current: "review",
+      risk: "strict",
+      independentReview: true,
+      reviewVerdict: "changes_required",
+      repairOwner: "debug",
+    }),
+    "debug",
+  );
+  assert.equal(
+    selectNextWorkflow({
+      current: "review",
+      risk: "standard",
+      reviewVerdict: "blocked",
+    }),
+    "incomplete",
+  );
+});
+
+test("verification is reserved for stale, explicit, delivery, and strict post-review evidence", () => {
+  for (const input of [
+    { current: "build", risk: "standard", evidenceCurrent: false },
+    { current: "build", risk: "standard", verificationRequested: true },
+    { current: "build", risk: "standard", deliveryRequested: true },
+    { current: "build", risk: "standard", crossArtifactClaim: true },
+  ]) {
+    assert.equal(selectNextWorkflow(input), "verify");
+  }
 });
