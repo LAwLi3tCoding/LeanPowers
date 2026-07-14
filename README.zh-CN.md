@@ -10,7 +10,7 @@ LeanPowers 保留真正影响工程结果的约束：明确需求边界、回归
 
 > **发布状态：**`0.2.0` 是技术预览版，新增了基于显式反馈、按项目主动开启的学习能力。确定性评分器和模拟测试夹具已经实现，但 LeanPowers 与 Superpowers 的成对 live benchmark 尚未执行。下文的效率与非劣效阈值是稳定版 `1.0.0` 的门槛，不是已经测得的产品结论。
 
-> **项目谱系与致谢：**LeanPowers 是一个受 [Superpowers](https://github.com/obra/superpowers) 启发的独立项目。Superpowers 对证据优先工程、TDD、系统化调试、审查、验证和安全交付的实践，为本项目提供了基础。LeanPowers 探索的是另一个优化点：让完整流程按风险选择，同时保留工程严谨性。它不以击败、取代或贬低 Superpowers 为目标。详见[致谢](ACKNOWLEDGMENTS.md)。
+> **项目谱系与致谢：**LeanPowers 是一个受 [Superpowers](https://github.com/obra/superpowers) 启发的独立项目。Superpowers 对证据优先工程、TDD、系统化调试、审查、验证和安全交付的实践，为本项目提供了基础。LeanPowers 探索的是另一个优化点：让完整流程按风险选择，同时保留工程严谨性。LeanPowers 不是为了和 Superpowers 分高下，也不打算取代它。详见[致谢](ACKNOWLEDGMENTS.md)。
 
 ## 为什么是 LeanPowers
 

@@ -6,7 +6,7 @@
 
 LeanPowers 是一个受 [Superpowers](https://github.com/obra/superpowers) 启发的独立项目。Superpowers 对证据优先工程、测试驱动开发、系统化调试、独立审查、完成前验证、安全分支交付以及规范使用子 Agent 和 worktree 的实践，是 LeanPowers 的直接思想基础。
 
-感谢 Jesse Vincent 和所有 Superpowers 贡献者创建并开放这个项目、文档与工程方法。LeanPowers 的目标不是击败、取代或贬低 Superpowers，而是在认可这些工程原则的前提下，探索另一个优化点：能否用更小、按风险自适应的控制面保留影响工程结果的关键保障。
+感谢 Jesse Vincent 和所有 Superpowers 贡献者创建并开放这个项目、文档与工程方法。LeanPowers 不想和 Superpowers 分高下，也不是为了取代它。它是在认可这些工程原则的前提下，继续探索另一个问题：能否用更小、按风险自适应的控制面，保留影响工程结果的关键保障。
 
 因此，这是一份谱系与取舍对比，不是胜负排名。
 
@@ -91,6 +91,6 @@ LeanPowers 将部分流程改为按条件触发，例如：清晰局部任务不
 
 - **Superpowers** 是 LeanPowers 的上游灵感来源和完整工程工作流参考。
 - **LeanPowers** 是在致敬这一基础上的轻量、按风险自适应探索。
-- **基准测试**要判断的是 LeanPowers 是否能在预先声明的非劣边界内保持效果并减少资源，而不是制造“击败 Superpowers”的叙事。
+- **基准测试**要判断的是 LeanPowers 能否在预先声明的非劣边界内保持效果并减少资源，而不是排出谁胜谁负。
 
 未来即使基准测试通过，也只能说明 LeanPowers 在所测试的模型、任务、权限和预算条件下保持了结果；不能据此概括为一个项目普遍优于另一个项目。完整方法和当前证据缺口见 [benchmark.md](benchmark.md)。
