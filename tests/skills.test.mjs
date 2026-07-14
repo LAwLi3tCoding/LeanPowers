@@ -32,7 +32,7 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
   for (const trigger of ["plan", "implement", "fix", "review", "verify", "deliver"]) {
     assert.match(frontmatter.description, new RegExp(trigger, "i"), trigger);
   }
-  assert.match(body, /Choose the lowest-safe owner/i);
+  assert.match(body, /Choose lowest-safe owner/i);
   assert.match(body, /lowest-safe|lowest safe/i);
   assert.match(body, /security.*authorization.*payment.*privacy/is);
   assert.match(body, /credentials\/secrets/i);
@@ -48,7 +48,7 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
     assert.match(body, new RegExp(`\\b${workflow}\\b`, "i"), workflow);
   }
   assert.doesNotMatch(body, /1%|before any response|you do not have a choice/i);
-  assert.ok(wordCount(content) <= 599, `route has ${wordCount(content)} words`);
+  assert.ok(wordCount(content) <= 598, `route has ${wordCount(content)} words`);
 });
 
 test("direct workflow entry loads one compact runtime contract at most once", async () => {
@@ -105,19 +105,21 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(verify, /independent_review: pass \| missing \| not_required/i);
   assert.match(build, /affected integration[\s\S]{0,120}full-suite/i);
   assert.match(build, /validation gap blocks `complete`/i);
-  assert.match(route, /material request\/scope ambiguity to `shape` first/i);
-  assert.match(route, /reported defect with known cause declares `build`/i);
-  assert.match(route, /every other reported defect MUST declare `debug` and at least `standard`/i);
-  assert.match(route, /deterministic single-component defects only/i);
-  assert.match(route, /failure-path regression-test changes/i);
-  assert.match(route, /Intermittent\/disputed\/cross-component defects load installed `debug`/i);
+  assert.match(route, /material request\/scope ambiguity to `shape`/i);
+  assert.match(route, /known-cause defect declares `build`/i);
+  assert.match(route, /every other defect MUST declare `debug` and at least `standard`/i);
+  assert.match(route, /deterministic single-component defects/i);
+  assert.match(route, /read no Skill\/reference/i);
+  assert.match(route, /failure-path regression tests/i);
+  assert.match(route, /Intermittent\/disputed\/cross-component defects load `debug`/i);
   assert.match(route, /`shape` material request\/scope ambiguity/i);
-  assert.match(route, /`debug` reported defect with unknown cause/i);
+  assert.match(route, /`debug` unknown-cause defect/i);
   assert.match(route, /`build` known-cause defect\/change/i);
-  assert.match(route, /Otherwise load selected Skill/i);
+  assert.match(route, /other requests load only selected Skill/i);
   assert.match(route, /BEFORE any prose or tool, output exactly these four resolved plain lines once/i);
   assert.match(route, /Then one blank line and prose/i);
   assert.match(route, /Stage counts are green-path tool budgets/i);
+  assert.match(route, /Destructive\/irreversible\/credential-gated\/production action requires prior explicit authorization/i);
   assert.match(route, /not quality ceilings/i);
   assert.match(route, /`build` = DISCOVER\(1\)→READ\(1\)→PATCH\(1\)→VALIDATE\(1\)/i);
   assert.match(route, /`debug` = DISCOVER\(1\)→READ\(1\)→REPRODUCE\/TRACE\(1\)→PATCH\(1\)→VALIDATE\(1\)/i);
@@ -132,8 +134,8 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /show both its failure and first wrong transition/i);
   assert.match(route, /inspection or inference is not reproduction/i);
   assert.match(route, /each rejection mutates one property of an asserted-passing case/i);
-  assert.match(route, /PATCH is ONE repository-relative multi-file call containing all code and failure-path regression-test changes/i);
-  assert.match(route, /never split edits or repatch on green evidence/i);
+  assert.match(route, /PATCH is exactly ONE repository-relative multi-file patch\/edit call containing code plus failure-path regression tests/i);
+  assert.match(route, /never call per file or repatch on green evidence/i);
   assert.match(route, /output a clause→test ledger/i);
   assert.match(route, /VALIDATE is ONE applicable command/i);
   assert.match(route, /debug reruns the reproduction\/regression and affected checks/i);
@@ -198,6 +200,7 @@ test("strict route protocol rejects one-property instruction regressions", async
     "No other review-tool action.",
     "Copy original task byte-for-byte—including case/punctuation—under `Original task:`.",
     "Spawn message MUST equal the filled template, starting at its invocation line; omit only the runtime label.",
+    "Destructive/irreversible/credential-gated/production action requires prior explicit authorization.",
     "Findings require repair/retest, then restart step 5 with a fresh reviewer and current Test result.",
   ];
   const preservesStrictProtocol = (candidate) =>
