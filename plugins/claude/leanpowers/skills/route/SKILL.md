@@ -5,11 +5,11 @@ description: Use when starting engineering work without a selected LeanPowers wo
 
 # Route
 
-Choose the lowest-safe owner. Capsule handles clear builds and deterministic single-component failures only. Unknown cause declares `debug`: reproduce, locate first wrong transition, add failure-path regression evidence. Intermittent/disputed/cross-component failures load `debug`; material ambiguity loads `shape`; otherwise load selected Skill.
+Choose the lowest-safe owner. Route material request/scope ambiguity to `shape` first. Otherwise, a reported defect with known cause declares `build`; every other reported defect MUST declare `debug` and at least `standard`. Capsule handles clear builds and deterministic single-component defects only. Debug capsule must reproduce, locate first wrong transition, add failure-path regression evidence. Intermittent/disputed/cross-component defects load installed `debug`; otherwise load selected Skill.
 
 `lean`: clear, local, reversible, validated, no public boundary. `strict`: security/authentication/credentials/secrets/cryptography/signatures, authorization, payment, privacy, migration, concurrency, production, irreversible work, or large refactor. Otherwise `standard`; preference cannot lower risk.
 
-`OWNER`: explicit or `adapt` feedback, `verify` evidence, `ship` delivery, `review` assessment, `debug` unknown failure, `shape` ambiguity, `build` change; never a risk. `RISK`: `lean`, `standard`, or `strict`.
+`OWNER`: explicit or `adapt` feedback, `verify` evidence, `ship` delivery, `review` assessment; otherwise `shape` material request/scope ambiguity, `debug` reported defect with unknown cause, `build` known-cause defect/change; never a risk. `RISK`: `lean`, `standard`, or `strict`.
 
 First message starts with these four lines; resolve `OWNER`, `RISK`, `GATES`; no fence, label, bullet, or prefix. Prose follows one blank line:
 

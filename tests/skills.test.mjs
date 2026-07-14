@@ -48,7 +48,7 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
     assert.match(body, new RegExp(`\\b${workflow}\\b`, "i"), workflow);
   }
   assert.doesNotMatch(body, /1%|before any response|you do not have a choice/i);
-  assert.ok(wordCount(content) <= 482, `route has ${wordCount(content)} words`);
+  assert.ok(wordCount(content) <= 512, `route has ${wordCount(content)} words`);
 });
 
 test("direct workflow entry loads one compact runtime contract at most once", async () => {
@@ -105,12 +105,16 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(verify, /independent_review: pass \| missing \| not_required/i);
   assert.match(build, /affected integration[\s\S]{0,120}full-suite/i);
   assert.match(build, /validation gap blocks `complete`/i);
-  assert.match(route, /deterministic single-component failures only/i);
-  assert.match(route, /Unknown cause declares `debug`/i);
-  assert.match(route, /reproduce, locate first wrong transition/i);
+  assert.match(route, /material request\/scope ambiguity to `shape` first/i);
+  assert.match(route, /reported defect with known cause declares `build`/i);
+  assert.match(route, /every other reported defect MUST declare `debug` and at least `standard`/i);
+  assert.match(route, /deterministic single-component defects only/i);
+  assert.match(route, /Debug capsule must reproduce, locate first wrong transition/i);
   assert.match(route, /add failure-path regression evidence/i);
-  assert.match(route, /Intermittent\/disputed\/cross-component failures load `debug`/i);
-  assert.match(route, /material ambiguity loads `shape`/i);
+  assert.match(route, /Intermittent\/disputed\/cross-component defects load installed `debug`/i);
+  assert.match(route, /`shape` material request\/scope ambiguity/i);
+  assert.match(route, /`debug` reported defect with unknown cause/i);
+  assert.match(route, /`build` known-cause defect\/change/i);
   assert.match(route, /Otherwise load selected Skill/i);
   assert.match(route, /one-call stage targets/i);
   assert.match(route, /not quality ceilings/i);

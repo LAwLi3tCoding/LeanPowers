@@ -22,6 +22,7 @@ test("structured risk fixtures use the highest applicable signal", () => {
 test("user rigor can upgrade but never downgrade a strict signal", () => {
   assert.equal(classifyRisk({ preferredMode: "strict", local: true }), "strict");
   assert.equal(classifyRisk({ preferredMode: "lean", security: true }), "strict");
+  assert.equal(classifyRisk({ causeKnown: false, preferredMode: "lean" }), "standard");
 });
 
 test("security-boundary signals are always strict", () => {
@@ -48,6 +49,10 @@ test("initial workflow selection covers every workflow owner", () => {
   assert.equal(
     selectInitialWorkflow({ causeKnown: false, deliveryOnly: false, needsShaping: false }),
     "debug",
+  );
+  assert.equal(
+    selectInitialWorkflow({ causeKnown: false, deliveryOnly: false, needsShaping: true }),
+    "shape",
   );
   assert.equal(
     selectInitialWorkflow({ causeKnown: true, deliveryOnly: false, needsShaping: true }),

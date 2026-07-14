@@ -93,14 +93,14 @@ export function selectInitialWorkflow({
     if (!verificationCurrent) return "verify";
     return risk === "strict" && !independentReview ? "review" : "ship";
   }
-  if (causeKnown === false) {
-    return "debug";
-  }
   if (reviewRequested) {
     return "review";
   }
   if (needsShaping) {
     return "shape";
+  }
+  if (causeKnown === false) {
+    return "debug";
   }
   if (verificationRequested) {
     return "verify";
