@@ -24,10 +24,10 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
   const content = await readFile(path.join(skillsRoot, "route", "SKILL.md"), "utf8");
   const { frontmatter, body } = parseSkill(content);
 
-  assert.match(frontmatter.description, /start(?:ing| of) .*engineering work/i);
+  assert.match(frontmatter.description, /Use when engineering work/i);
   assert.match(
     frontmatter.description,
-    /no specific .*workflow .*selected|without a selected .*workflow/i,
+    /no specific .*workflow .*selected|without a selected .*workflow|lacks a selected .*workflow/i,
   );
   for (const trigger of ["plan", "implement", "fix", "review", "verify", "deliver"]) {
     assert.match(frontmatter.description, new RegExp(trigger, "i"), trigger);
@@ -122,7 +122,7 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /BEFORE prose\/tool, output exactly these four resolved plain lines once/i);
   assert.match(route, /Never repeat them:[\s\S]{0,120}final MUST omit lines beginning `entrypoint:`, `workflow:`, `risk:`, or `required_gates:`/i);
   assert.match(route, /Final MUST omit the four opening ledger lines/i);
-  assert.match(route, /Then one blank line and prose/i);
+  assert.match(route, /Then blank line, prose/i);
   assert.match(route, /Green-path budgets/i);
   assert.match(route, /Codex one call\/stage; Claude adjacent adapters/i);
   assert.match(route, /Destructive\/irreversible\/credential-gated\/production action requires prior explicit authorization/i);
@@ -143,15 +143,17 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /DEBUG then, pre-edit:[\s\S]{0,100}executes the real failing path/i);
   assert.match(route, /showing failure and first wrong transition/i);
   assert.match(route, /inspection\/inference is not reproduction/i);
-  assert.match(route, /each rejection mutates one (?:property of an )?asserted-passing case(?: property)?/i);
-  assert.match(route, /PATCH: Codex ONE repository-relative `apply_patch` containing all code\/tests/i);
+  assert.match(route, /each rejection mutates one passing-case property/i);
+  assert.match(route, /preflight distinguishing test inputs/i);
+  assert.match(route, /PATCH cycle: Codex ONE repository-relative `apply_patch` containing all code\/tests/i);
   assert.match(route, /Claude adjacent native `Edit`\/`Write` calls without prose\/inspection/i);
-  assert.match(route, /Include failure-path tests; never repatch green evidence/i);
+  assert.match(route, /Include failure-path tests/i);
+  assert.match(route, /Failed validation\/review opens next cycle/i);
   assert.match(route, /Pre-PATCH emit header `Clause→test ledger:`/i);
   assert.match(route, /one distinct `<clause retaining marker>→<test>` line per[\s\S]{0,80}occurrence/i);
   assert.match(route, /never repeat after PATCH/i);
-  assert.match(route, /VALIDATE uses ONE canonical test\/build command covering regression and affected checks/i);
-  assert.match(route, /never chain reproduction\/diagnostics/i);
+  assert.match(route, /VALIDATE runs the discovered canonical test\/build command alone, covering regression\/affected checks/i);
+  assert.match(route, /exclude reproduction\/diagnostics\/chaining/i);
   assert.match(route, /On green lean\/standard, STOP tooling, skip step 5, and answer/i);
   assert.match(route, /Only strict continues below/i);
   assert.match(route, /Mandatory strict gate/i);

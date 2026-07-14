@@ -1691,6 +1691,7 @@ export function evaluateWorkflowConformance(run) {
         }
         if (
           capsule.highest_presented_risk !== "strict" &&
+          capsule.validation_observed &&
           !capsule.ordinary_stop_observed
         ) {
           reasons.push("lean or standard capsule continued tooling after successful validation");

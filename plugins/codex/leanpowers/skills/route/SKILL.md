@@ -1,6 +1,6 @@
 ---
 name: route
-description: Use when starting engineering work without a selected workflow; route plan, implement, fix, review, verify, or deliver to lowest-safe owner.
+description: Use when engineering work lacks a selected workflow; route plan, implement, fix, review, verify, or deliver to lowest-safe owner.
 ---
 
 # Route
@@ -11,22 +11,22 @@ Choose lowest-safe owner. Route material request/scope ambiguity→`shape`. With
 
 `OWNER`: explicit-feedback→`adapt`, evidence→`verify`, delivery→`ship`, assessment→`review`; otherwise ambiguity→`shape`, requested diagnosis/cause discovery→`debug`, explicit cause/repair or change→`build`; never a risk. `RISK`: `lean`/`standard`/`strict`.
 
-BEFORE prose/tool, output exactly these four resolved plain lines once. Never repeat them: final MUST omit lines beginning `entrypoint:`, `workflow:`, `risk:`, or `required_gates:`. Then one blank line and prose:
+BEFORE prose/tool, output exactly these four resolved plain lines once. Never repeat them: final MUST omit lines beginning `entrypoint:`, `workflow:`, `risk:`, or `required_gates:`. Then blank line, prose:
 
 entrypoint: leanpowers:route
 workflow: OWNER
 risk: RISK
 required_gates: GATES
 
-Strict `GATES` is `[independent_review, current_evidence]`; otherwise `[current_evidence]`.
+Strict `GATES`: `[independent_review, current_evidence]`; otherwise `[current_evidence]`.
 Destructive/irreversible/credential-gated/production action requires prior explicit authorization.
 
 Green-path budgets: `build` DISCOVER(1)→READ(1)→PATCH(1)→VALIDATE(1); `debug` adds REPRODUCE/TRACE(1) before PATCH. Codex one call/stage; Claude adjacent adapters. Expand failed/missing/contradictory stages only; restart invalidated gates.
 
 1. DISCOVER: Preset repository cwd applies throughout. Codex runs exactly `rg --files .; rg -n -- 'TERMS' .`; TERMS is plain `a|b`, never backslashed. No prefix/`cd`/pipes/globs/redirections/extra paths. Claude uses adjacent native `Glob`+`Grep`. Identify implementation, callers, tests, repro, validation manifest.
 2. READ immediately follows DISCOVER. Codex MUST run one `tail -n +1 --` command with selected candidates and validation manifest as shell-safe operands; no printf/echo/chaining/re-read. Claude uses adjacent native `Read`, each candidate once without prose/inspection. DEBUG then, pre-edit: ONE focused command executes the real failing path, showing failure and first wrong transition; inspection/inference is not reproduction.
-3. Pre-PATCH emit header `Clause→test ledger:`, then one distinct `<clause retaining marker>→<test>` line per `must`/`only`/`exact`/`preserve`/`reject` occurrence; never repeat after PATCH. Each rejection mutates one asserted-passing case property. PATCH: Codex ONE repository-relative `apply_patch` containing all code/tests; Claude adjacent native `Edit`/`Write` calls without prose/inspection. Include failure-path tests; never repatch green evidence.
-4. VALIDATE uses ONE canonical test/build command covering regression and affected checks; never chain reproduction/diagnostics. Failure enters `debug`; never claim completion. On green lean/standard, STOP tooling, skip step 5, and answer. Only strict continues below. Final MUST omit the four opening ledger lines.
+3. Pre-PATCH emit header `Clause→test ledger:`, then one distinct `<clause retaining marker>→<test>` line per `must`/`only`/`exact`/`preserve`/`reject` occurrence; never repeat after PATCH. Each rejection mutates one passing-case property; preflight distinguishing test inputs. PATCH cycle: Codex ONE repository-relative `apply_patch` containing all code/tests; Claude adjacent native `Edit`/`Write` calls without prose/inspection. Include failure-path tests. Failed validation/review opens next cycle.
+4. VALIDATE runs the discovered canonical test/build command alone, covering regression/affected checks; exclude reproduction/diagnostics/chaining. Failure enters `debug`; never claim completion. On green lean/standard, STOP tooling, skip step 5, and answer. Only strict continues below. Final MUST omit the four opening ledger lines.
 
 **Mandatory strict gate — final answer forbidden until exact pass**
 

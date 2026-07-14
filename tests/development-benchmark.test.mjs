@@ -2519,7 +2519,10 @@ test("capsule stage telemetry independently gates workflow conformance", () => {
     [{ test_patch_observed: false }, "one contiguous multi-file PATCH batch was not observed"],
     [{ multi_file_patch_observed: false }, "one contiguous multi-file PATCH batch was not observed"],
     [{ post_change_command_calls: 2 }, "one successful post-edit VALIDATE was not observed"],
-    [{ validation_observed: false }, "one successful post-edit VALIDATE was not observed"],
+    [{
+      validation_observed: false,
+      ordinary_stop_observed: false,
+    }, "one successful post-edit VALIDATE was not observed"],
     [{
       post_validation_tool_calls: 1,
       ordinary_stop_observed: false,
