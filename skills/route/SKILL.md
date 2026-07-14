@@ -64,4 +64,4 @@ verdict: pass
 findings: []
 unverified_areas: []
 
-5. Read result; blocking runtimes never wait again. Exact pass freezes files: record suggestions without editing, reuse tests, finish. Otherwise return incomplete or repair; no retry or added reviewer this cycle. Implementers cannot overrule findings.
+5. Read result. Exact pass freezes files; finish. Findings require repair/retest and a new strict cycle with one fresh reviewer. Blocked/unavailable returns incomplete. Never rewait/retry a reviewer, add reviewers within a cycle, or overrule findings.

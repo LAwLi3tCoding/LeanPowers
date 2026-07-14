@@ -141,8 +141,9 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /including case\/punctuation/i);
   assert.match(route, /under `Original task:`/i);
   assert.match(route, /wait_agent` once with `targets:\[ID\]`/i);
-  assert.match(route, /blocking runtimes (?:do not|never) wait again/i);
-  assert.match(route, /suggestions without editing/i);
+  assert.match(route, /Findings require repair\/retest and a new strict cycle with one fresh reviewer/i);
+  assert.match(route, /Blocked\/unavailable returns incomplete/i);
+  assert.match(route, /Never rewait\/retry a reviewer, add reviewers within a cycle, or overrule findings/i);
   assert.match(route, /Review schema on findings or uncertainty/i);
   assert.match(route, /only a true pass returns/i);
   assert.match(route, /verdict: pass[\s\S]{0,80}findings: \[\][\s\S]{0,80}unverified_areas: \[\]/i);
@@ -167,6 +168,7 @@ test("strict route protocol rejects one-property instruction regressions", async
     "with only `message`, `fork_context:false`; save ID, then call `multi_agent_v1.wait_agent` once with `targets:[ID]`",
     "No other review-tool action.",
     "Copy entire original task byte-for-byte—including case/punctuation—under `Original task:`.",
+    "Findings require repair/retest and a new strict cycle with one fresh reviewer.",
   ];
   const preservesStrictProtocol = (candidate) =>
     clauses.every((clause) => candidate.includes(clause));
