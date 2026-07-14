@@ -775,7 +775,7 @@ function benchmarkObservedPath(value) {
 }
 
 function parseValidationEvidence(evidence) {
-  const match = String(evidence ?? "").match(/^(.+); exit 0$/u);
+  const match = String(evidence ?? "").match(/^exit=0; command=(.+)$/u);
   if (!match) return null;
   const testCommand = canonicalValidationCommand(match[1]);
   return testCommand === null ? null : { test_command: testCommand };

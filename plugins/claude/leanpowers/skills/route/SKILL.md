@@ -22,7 +22,7 @@ Strict `GATES` is `[independent_review, current_evidence]`; otherwise `[current_
 
 One-call stage targets are not quality ceilings. Expand only for missing, contradictory, or failed evidence; restart affected gates.
 
-1. Green path: one shell command locates and prints full implementation, tests, and validation metadata.
+1. Green path: ONE shell call locates and prints full implementation, tests, validation metadata; never split reads.
 2. Before editing, output a clause→test ledger for every literal `must`/`only`/`exact`/`preserve`/`reject`; each rejection mutates one property of an asserted-passing case. Use one repository-relative multi-file patch for code/tests; never repatch on the green path.
 3. Run one applicable validation command. Failure enters `debug`; never claim completion. Green lean/standard may finish; strict **MUST NOT answer**; continue below.
 
@@ -40,7 +40,7 @@ Reviewer context:
 Sole reviewer; read diff/code; do not edit/delegate.
 Ledger: {one-line clause→boundary evidence; no task restatement}
 Paths: {repository-relative changed paths}
-Test: {exact validation command}; exit 0
+Test: exit=0; command={exact validation command}
 Return Review YAML raw—no JSON/fence/heading/prose. Pass: exactly these three lines:
 
 verdict: pass
@@ -57,7 +57,7 @@ Reviewer context:
 Sole reviewer; read diff/code; do not edit/delegate.
 Ledger: {one-line clause→boundary evidence; no task restatement}
 Paths: {repository-relative changed paths}
-Test: {exact validation command}; exit 0
+Test: exit=0; command={exact validation command}
 Return Review YAML raw—no JSON/fence/heading/prose. Pass: exactly these three lines:
 
 verdict: pass

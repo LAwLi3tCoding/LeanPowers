@@ -111,9 +111,10 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /one-call stage targets/i);
   assert.match(route, /not quality ceilings/i);
   assert.match(route, /Expand only for missing, contradictory, or failed evidence/i);
-  assert.match(route, /Green path: one shell command/i);
+  assert.match(route, /Green path: ONE shell call/i);
+  assert.match(route, /never split reads/i);
   assert.match(route, /each rejection mutates one property of an asserted-passing case/i);
-  assert.match(route, /one shell command/i);
+  assert.match(route, /shell call locates and prints full implementation, tests, validation metadata/i);
   assert.match(route, /one repository-relative multi-file patch(?: call)? for (?:implementation and tests|code\/tests)/i);
   assert.match(route, /never (?:patch the same file twice|repatch) on the green path/i);
   assert.match(route, /output a clause→test ledger/i);
@@ -144,10 +145,10 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /including case\/punctuation/i);
   assert.match(route, /under `Original task:`/i);
   assert.match(route, /wait_agent` once with `targets:\[ID\]`/i);
-  assert.match(route, /Test: \{exact validation command\}; exit 0/i);
+  assert.match(route, /Test: exit=0; command=\{exact validation command\}/i);
   assert.match(route, /one-line clause→boundary evidence; no task restatement/i);
   assert.match(route, /repository-relative changed paths/i);
-  assert.match(route, /exact validation command.*exit 0/i);
+  assert.match(route, /exit=0.*exact validation command/i);
   assert.match(route, /Findings require repair\/retest, then restart step 4 with a fresh reviewer and current Test result/i);
   assert.match(route, /Blocked\/unavailable returns incomplete/i);
   assert.match(route, /Never rewait\/retry a reviewer, add reviewers within a cycle, or overrule findings/i);

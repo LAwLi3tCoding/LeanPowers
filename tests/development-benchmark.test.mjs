@@ -36,7 +36,7 @@ const suitePath = new URL(
 function strictReviewPrompt(contract, {
   ledger = "exact clauses -> positive and negative evidence",
   paths = "src/index.mjs, test/index.test.mjs",
-  testEvidence = "npm test; exit 0",
+  testEvidence = "exit=0; command=npm test",
 } = {}) {
   return [
     "$leanpowers:review",
@@ -956,9 +956,9 @@ test("strict review protocol accepts remediated fresh cycles and rejects one-pro
     prompt.replace("Paths: src/index.mjs, test/index.test.mjs", "Paths:   "),
     prompt.replace("Paths: src/index.mjs, test/index.test.mjs", "Paths: []"),
     prompt.replace("Paths: src/index.mjs, test/index.test.mjs", "Paths: test/index.test.mjs"),
-    prompt.replace("Test: npm test; exit 0", "Test: {exact validation command}; exit 0"),
-    prompt.replace("Test: npm test; exit 0", "Test: npm test; exit 1"),
-    prompt.replace("Test: npm test; exit 0", "Test: npm test; exit 0; 47/47 passed"),
+    prompt.replace("Test: exit=0; command=npm test", "Test: exit=0; command={exact validation command}"),
+    prompt.replace("Test: exit=0; command=npm test", "Test: exit=1; command=npm test"),
+    prompt.replace("Test: exit=0; command=npm test", "Test: exit=0; command=npm test; 47/47 passed"),
     `summary first\n${prompt}`,
   ]) {
     const trace = parse([
@@ -979,7 +979,7 @@ test("strict review protocol accepts remediated fresh cycles and rejects one-pro
     assert.equal(trace.strict_review_protocol_observed, false);
   }
   const mismatchedCommandPacket = strictReviewPrompt(contract, {
-    testEvidence: "node --test tests/claimed.mjs; exit 0",
+    testEvidence: "exit=0; command=node --test tests/claimed.mjs",
   });
   assert.equal(parse([
     event({
@@ -998,7 +998,7 @@ test("strict review protocol accepts remediated fresh cycles and rejects one-pro
     ...waitEvents("wait-mismatch", "reviewer-mismatch", pass),
   ], new Map([["reviewer-mismatch", false]])).strict_review_protocol_observed, false);
   const quotedWhitespacePacket = strictReviewPrompt(contract, {
-    testEvidence: "node --test --test-name-pattern='foo bar'; exit 0",
+    testEvidence: "exit=0; command=node --test --test-name-pattern='foo bar'",
   });
   assert.equal(parse([
     event({
@@ -1017,8 +1017,8 @@ test("strict review protocol accepts remediated fresh cycles and rejects one-pro
     ...waitEvents("wait-whitespace", "reviewer-whitespace", pass),
   ], new Map([["reviewer-whitespace", false]])).strict_review_protocol_observed, false);
   for (const [id, testEvidence, command] of [
-    ["leading", " npm test; exit 0", "/bin/zsh -lc ' npm test'"],
-    ["trailing", "npm test ; exit 0", "/bin/zsh -lc \"npm test \""],
+    ["leading", "exit=0; command= npm test", "/bin/zsh -lc ' npm test'"],
+    ["trailing", "exit=0; command=npm test ", "/bin/zsh -lc \"npm test \""],
   ]) {
     const edgeWhitespacePacket = strictReviewPrompt(contract, { testEvidence });
     assert.equal(parse([
