@@ -114,7 +114,8 @@ function passingCapsuleStage(workflow = "build") {
     discover_observed: true,
     read_observed: true,
     reproduce_observed: workflow === "debug" ? true : null,
-    patch_calls: 1,
+    patch_batches: 1,
+    patch_file_events: 2,
     patch_paths: ["src/index.mjs", "test/index.test.mjs"],
     implementation_patch_observed: true,
     test_patch_observed: true,
@@ -136,7 +137,7 @@ function capsuleTraceOptions(expectedWorkflow) {
 }
 
 function capsuleTraceEvents({
-  discoverCommand = "rg --files; rg -n 'cache|locale' src test",
+  discoverCommand = "/bin/zsh -lc \"(rg --files; rg -n 'cache|locale' .)\"",
   discoverOutput = "src/index.mjs:1:cache\ntest/index.test.mjs:1:test",
   duplicateLedger = false,
   expectedWorkflow = "debug",
@@ -144,12 +145,13 @@ function capsuleTraceEvents({
   extraPreCommand = false,
   ledgerAfterDiscover = false,
   nonReviewTail = false,
-  patchEvents = 1,
+  patchBatches = 1,
   patchPaths = ["src/index.mjs", "test/index.test.mjs"],
   readCommand = "cat src/index.mjs; cat test/index.test.mjs; cat package.json",
   reproduceCommand = capsuleReproductionContract.command,
   reproduceOutput = capsuleReproductionOutput,
   validationExitCode = 0,
+  validationCommand = "npm test",
   workflowRead = false,
 } = {}) {
   const ledger = [
@@ -213,19 +215,22 @@ function capsuleTraceEvents({
     path: `/tmp/run/workspace/${changedPath}`,
     kind: "update",
   }));
-  const changeSets = patchEvents === 1
-    ? [changes]
-    : changes.map((change) => [change]);
-  for (const changes of changeSets) {
-    events.push(completed({
+  for (const [index, change] of changes.entries()) {
+    const item = {
+      id: `patch-${index}`,
       type: "file_change",
-      changes,
+      changes: [change],
       status: "completed",
-    }));
+    };
+    events.push({ type: "item.started", item: { ...item, status: "in_progress" } });
+    events.push(completed(item));
+    if (patchBatches > 1 && index < changes.length - 1) {
+      events.push(completed({ type: "agent_message", text: "Starting another patch." }));
+    }
   }
   events.push(completed({
     type: "command_execution",
-    command: "npm test",
+    command: validationCommand,
     aggregated_output: validationExitCode === 0 ? "pass" : "fail",
     exit_code: validationExitCode,
     status: "completed",
@@ -664,6 +669,10 @@ test("debug capsule stage protocol rejects one-property trace regressions", () =
     [{ ledgerAfterDiscover: true }, "ledger_before_tools_observed"],
     [{ workflowRead: true }, "workflow_read_calls"],
     [{ discoverCommand: "rg -n 'cache|locale' src test" }, "discover_observed"],
+    [{ discoverCommand: "rg --files; rg -n 'cache|locale' src test" }, "discover_observed"],
+    [{ discoverCommand: "rg --files; rg -n 'cache|locale'" }, "discover_observed"],
+    [{ discoverCommand: "rg --files; rg -n '.' src test" }, "discover_observed"],
+    [{ discoverCommand: "rg --files; rg --sort path '.' src test" }, "discover_observed"],
     [{
       discoverCommand: "rg --files | rg -n 'src|test'",
       discoverOutput: "1:src/index.mjs\n2:test/index.test.mjs",
@@ -671,10 +680,16 @@ test("debug capsule stage protocol rejects one-property trace regressions", () =
     [{ readCommand: "cat src/index.mjs" }, "read_observed"],
     [{ reproduceCommand: "npm test", reproduceOutput: "pass" }, "reproduce_observed"],
     [{ reproduceOutput: "arbitrary executable output" }, "reproduce_observed"],
-    [{ patchEvents: 2 }, "patch_calls"],
+    [{ patchBatches: 2 }, "patch_batches"],
     [{ patchPaths: ["src/index.mjs", "src/helper.mjs"] }, "test_patch_observed"],
-    [{ nonReviewTail: true }, "patch_calls"],
+    [{ nonReviewTail: true }, "patch_batches"],
     [{ validationExitCode: 1 }, "validation_observed"],
+    [{ validationCommand: "node -e \"console.log('test')\"" }, "validation_observed"],
+    [{ validationCommand: "npm --version test" }, "validation_observed"],
+    [{ validationCommand: "node --test --help" }, "validation_observed"],
+    [{ validationCommand: "npm run test --if-present" }, "validation_observed"],
+    [{ validationCommand: "cargo test --no-run" }, "validation_observed"],
+    [{ validationCommand: "pytest --collect-only" }, "validation_observed"],
     [{ extraPreCommand: true }, "pre_change_command_calls"],
     [{ extraPostCommand: true }, "post_change_command_calls"],
   ];
@@ -1859,10 +1874,10 @@ test("capsule stage telemetry independently gates workflow conformance", () => {
     [{ pre_change_command_calls: 3 }, "capsule pre-change stage budget was not observed"],
     [{ discover_observed: false }, "content-aware DISCOVER was not observed"],
     [{ read_observed: false }, "batched READ was not observed"],
-    [{ patch_calls: 2 }, "one multi-file PATCH was not observed"],
-    [{ implementation_patch_observed: false }, "one multi-file PATCH was not observed"],
-    [{ test_patch_observed: false }, "one multi-file PATCH was not observed"],
-    [{ multi_file_patch_observed: false }, "one multi-file PATCH was not observed"],
+    [{ patch_batches: 2 }, "one contiguous multi-file PATCH batch was not observed"],
+    [{ implementation_patch_observed: false }, "one contiguous multi-file PATCH batch was not observed"],
+    [{ test_patch_observed: false }, "one contiguous multi-file PATCH batch was not observed"],
+    [{ multi_file_patch_observed: false }, "one contiguous multi-file PATCH batch was not observed"],
     [{ post_change_command_calls: 2 }, "one successful post-edit VALIDATE was not observed"],
     [{ validation_observed: false }, "one successful post-edit VALIDATE was not observed"],
   ];

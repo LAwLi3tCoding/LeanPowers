@@ -107,7 +107,8 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(build, /validation gap blocks `complete`/i);
   assert.match(route, /material request\/scope ambiguity to `shape`/i);
   assert.match(route, /known-cause defect declares `build`/i);
-  assert.match(route, /every other defect MUST declare `debug` and at least `standard`/i);
+  assert.match(route, /reproduce\/trace\/diagnose\/root-cause\/why\/first-wrong-transition MUST declare `debug` and at least `standard`/i);
+  assert.match(route, /even if a fix seems obvious/i);
   assert.match(route, /deterministic single-component defects/i);
   assert.match(route, /read no Skill\/reference/i);
   assert.match(route, /failure-path regression tests/i);
@@ -117,6 +118,7 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /`build` known-cause defect\/change/i);
   assert.match(route, /other requests load only selected Skill/i);
   assert.match(route, /BEFORE any prose or tool, output exactly these four resolved plain lines once/i);
+  assert.match(route, /never repeat them, including final/i);
   assert.match(route, /Then one blank line and prose/i);
   assert.match(route, /Stage counts are green-path tool budgets/i);
   assert.match(route, /Destructive\/irreversible\/credential-gated\/production action requires prior explicit authorization/i);
@@ -125,10 +127,12 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /`debug` = DISCOVER\(1\)→READ\(1\)→REPRODUCE\/TRACE\(1\)→PATCH\(1\)→VALIDATE\(1\)/i);
   assert.match(route, /Expand only when a call returns concrete failed, missing, or contradictory evidence/i);
   assert.match(route, /wanting more context is not evidence/i);
-  assert.match(route, /DISCOVER is ONE content-aware shell call combining path listing with symbol\/content search/i);
+  assert.match(route, /DISCOVER is ONE content-aware shell call[\s\S]{0,100}combining path listing with symbol\/content search/i);
+  assert.match(route, /final `\.` root—not guessed directories/i);
   assert.match(route, /never filter by filename keywords alone/i);
-  assert.match(route, /affected implementation, imports\/callers, tests, and validation manifests/i);
-  assert.match(route, /READ is ONE compound command printing every discovered candidate plus validation metadata/i);
+  assert.match(route, /Identify implementation, imports\/callers, tests, validation manifests/i);
+  assert.match(route, /READ immediately follows DISCOVER:[\s\S]{0,40}ONE compound command printing every discovered candidate plus validation metadata/i);
+  assert.match(route, /READ immediately follows DISCOVER/i);
   assert.match(route, /no later green-path read/i);
   assert.match(route, /before any edit[\s\S]{0,100}execute the real failing path/i);
   assert.match(route, /show both its failure and first wrong transition/i);
@@ -137,8 +141,8 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /PATCH is exactly ONE repository-relative multi-file patch\/edit call containing code plus failure-path regression tests/i);
   assert.match(route, /never call per file or repatch on green evidence/i);
   assert.match(route, /output a clause→test ledger/i);
-  assert.match(route, /VALIDATE is ONE applicable command/i);
-  assert.match(route, /debug reruns the reproduction\/regression and affected checks/i);
+  assert.match(route, /VALIDATE is ONE canonical test\/build command covering regression and affected checks/i);
+  assert.match(route, /never chain standalone reproduction or diagnostics/i);
   assert.match(route, /strict \*\*MUST NOT answer\*\*/i);
   assert.match(route, /Mandatory strict gate/i);
   assert.match(route, /multi_agent_v1\.spawn_agent[\s\S]{0,220}wait_agent/i);

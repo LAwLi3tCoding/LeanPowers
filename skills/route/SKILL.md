@@ -5,13 +5,13 @@ description: Use when starting engineering work without a selected LeanPowers wo
 
 # Route
 
-Choose lowest-safe owner. Route material request/scope ambiguity to `shape`. A known-cause defect declares `build`; every other defect MUST declare `debug` and at least `standard`. Capsule fully executes clear builds and deterministic single-component defects—read no Skill/reference. Intermittent/disputed/cross-component defects load `debug`; other requests load only selected Skill.
+Choose lowest-safe owner. Route material request/scope ambiguity to `shape`. A user-evidenced known-cause defect declares `build`; reproduce/trace/diagnose/root-cause/why/first-wrong-transition MUST declare `debug` and at least `standard`, even if a fix seems obvious. Capsule executes clear builds and deterministic single-component defects—read no Skill/reference. Intermittent/disputed/cross-component defects load `debug`; other requests load only selected Skill.
 
-`lean`: clear, local, reversible, validated, no public boundary. `strict`: security/authentication/credentials/secrets/cryptography/signatures, authorization, payment, privacy, migration, concurrency, production, irreversible work, or large refactor. Otherwise `standard`; preference cannot lower risk.
+`lean`: clear, local, reversible/validated, no public boundary. `strict`: security/authentication/credentials/secrets/cryptography/signatures/authorization/payment/privacy/migration/concurrency/production/irreversible/large-refactor. Otherwise `standard`; preference cannot lower risk.
 
-`OWNER`: explicit/`adapt` feedback, `verify` evidence, `ship` delivery, `review` assessment; otherwise `shape` material request/scope ambiguity, `debug` unknown-cause defect, `build` known-cause defect/change; never a risk. `RISK`: `lean`, `standard`, or `strict`.
+`OWNER`: feedback→explicit/`adapt`, evidence→`verify`, delivery→`ship`, assessment→`review`; otherwise `shape` material request/scope ambiguity, `debug` unknown-cause defect, `build` known-cause defect/change; never a risk. `RISK`: `lean`, `standard`, or `strict`.
 
-BEFORE any prose or tool, output exactly these four resolved plain lines once; no label, bullet, fence, or prefix. Then one blank line and prose:
+BEFORE any prose or tool, output exactly these four resolved plain lines once—never repeat them, including final; no label, bullet, fence, or prefix. Then one blank line and prose:
 
 entrypoint: leanpowers:route
 workflow: OWNER
@@ -21,12 +21,12 @@ required_gates: GATES
 Strict `GATES` is `[independent_review, current_evidence]`; otherwise `[current_evidence]`.
 Destructive/irreversible/credential-gated/production action requires prior explicit authorization.
 
-Stage counts are green-path tool budgets, not quality ceilings: `build` = DISCOVER(1)→READ(1)→PATCH(1)→VALIDATE(1); `debug` = DISCOVER(1)→READ(1)→REPRODUCE/TRACE(1)→PATCH(1)→VALIDATE(1). Expand only when a call returns concrete failed, missing, or contradictory evidence; wanting more context is not evidence. Expand only that stage and restart invalidated gates.
+Stage counts are green-path tool budgets, not quality ceilings: `build` = DISCOVER(1)→READ(1)→PATCH(1)→VALIDATE(1); `debug` = DISCOVER(1)→READ(1)→REPRODUCE/TRACE(1)→PATCH(1)→VALIDATE(1). Expand only when a call returns concrete failed, missing, or contradictory evidence; wanting more context is not evidence. Expand that stage; restart invalidated gates.
 
-1. DISCOVER is ONE content-aware shell call combining path listing with symbol/content search; never filter by filename keywords alone. It identifies affected implementation, imports/callers, tests, and validation manifests.
-2. READ is ONE compound command printing every discovered candidate plus validation metadata; no later green-path read. DEBUG then, before any edit, uses ONE focused command to execute the real failing path and show both its failure and first wrong transition; inspection or inference is not reproduction.
+1. DISCOVER is ONE content-aware shell call using final `.` root—not guessed directories—combining path listing with symbol/content search; never filter by filename keywords alone. Identify implementation, imports/callers, tests, validation manifests.
+2. READ immediately follows DISCOVER: ONE compound command printing every discovered candidate plus validation metadata; no later green-path read. DEBUG only then, before any edit, uses ONE focused command to execute the real failing path and show both its failure and first wrong transition; inspection or inference is not reproduction.
 3. Before editing, output a clause→test ledger for every literal `must`/`only`/`exact`/`preserve`/`reject`; each rejection mutates one property of an asserted-passing case. PATCH is exactly ONE repository-relative multi-file patch/edit call containing code plus failure-path regression tests; never call per file or repatch on green evidence.
-4. VALIDATE is ONE applicable command; debug reruns the reproduction/regression and affected checks. Failure enters `debug`; never claim completion. Green lean/standard may finish; strict **MUST NOT answer**; continue below.
+4. VALIDATE is ONE canonical test/build command covering regression and affected checks; never chain standalone reproduction or diagnostics. Failure enters `debug`; never claim completion. Green lean/standard may finish; strict **MUST NOT answer**; continue below.
 
 **Mandatory strict gate — final answer forbidden until exact pass**
 

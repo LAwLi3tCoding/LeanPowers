@@ -678,6 +678,7 @@ function traceCapsuleStage(
   const taskChanges = indexed.filter(
     ({ event, index }) => index < firstReviewSpawnIndex && isCompletedFileChange(event),
   );
+  const patchBatches = groupContiguousFileChanges(events, taskChanges);
   const taskFirstChangeIndex = taskChanges[0]?.index ?? -1;
   const taskLastChangeIndex = taskChanges.at(-1)?.index ?? -1;
   const workflowReads = indexed.filter(
@@ -724,7 +725,7 @@ function traceCapsuleStage(
     !testPatterns.some((pattern) => matchGlob(changedPath, pattern))
   );
   const multiFilePatchObserved =
-    taskChanges.length === 1 &&
+    patchBatches.length === 1 &&
     implementationPatchObserved &&
     testPatchObserved;
   const validationObserved =
@@ -751,7 +752,8 @@ function traceCapsuleStage(
     discover_observed: discoverObserved,
     read_observed: readObserved,
     reproduce_observed: reproduceObserved,
-    patch_calls: taskChanges.length,
+    patch_batches: patchBatches.length,
+    patch_file_events: taskChanges.length,
     patch_paths: patchPaths,
     implementation_patch_observed: implementationPatchObserved,
     test_patch_observed: testPatchObserved,
@@ -760,6 +762,20 @@ function traceCapsuleStage(
     validation_observed: validationObserved,
     protocol_observed: protocolObserved,
   };
+}
+
+function groupContiguousFileChanges(events, taskChanges) {
+  const batches = [];
+  let previousIndex = -1;
+  for (const change of taskChanges) {
+    const separated = previousIndex >= 0 && events
+      .slice(previousIndex + 1, change.index)
+      .some((event) => event?.item?.type !== "file_change");
+    if (batches.length === 0 || separated) batches.push([]);
+    batches.at(-1).push(change);
+    previousIndex = change.index;
+  }
+  return batches;
 }
 
 function isCompletedFileChange(event) {
@@ -779,18 +795,168 @@ function isWorkflowReadCommand(command) {
 
 function isContentAwareDiscover(item) {
   if (item?.exit_code !== 0) return false;
-  const command = String(item?.command ?? "");
+  const command = unwrapShellInvocation(item?.command);
+  if (command === null) return false;
   const hasPathListing =
     /\brg\s+--files\b|\bfind\s+|(?:^|[;&|\s])ls(?:\s|$)/iu.test(command);
-  const searchSegments = command
-    .split(/[;&|\r\n]+/u)
+  const searchSegments = splitShellControlSegments(command)
     .filter((segment) => /\b(?:rg|grep)\b/iu.test(segment));
   const hasContentSearch = searchSegments.some(
-    (segment) => !/\brg\s+--files\b/iu.test(segment),
+    (segment) =>
+      !/\brg\s+--files\b/iu.test(segment) &&
+      contentSearchCoversRoot(segment),
   );
   const hasContentOutput = /(?:^|\r?\n)[^:\r\n]+:\d+:[^\r\n]+/u
     .test(String(item?.aggregated_output ?? ""));
   return hasPathListing && hasContentSearch && hasContentOutput;
+}
+
+function contentSearchCoversRoot(command) {
+  const tokens = tokenizeShellWords(command);
+  const executableIndex = tokens.findIndex((token) =>
+    /^(?:.*\/)?(?:grep|rg)$/iu.test(token)
+  );
+  if (executableIndex < 0) return false;
+
+  const optionsWithValues = new Set([
+    "--after-context",
+    "--before-context",
+    "--context",
+    "--encoding",
+    "--file",
+    "--glob",
+    "--iglob",
+    "--max-columns",
+    "--max-count",
+    "--regexp",
+    "--sort",
+    "--type",
+    "--type-add",
+    "-A",
+    "-B",
+    "-C",
+    "-e",
+    "-f",
+    "-g",
+    "-m",
+    "-t",
+  ]);
+  const valuelessOptions = new Set([
+    "--case-sensitive",
+    "--fixed-strings",
+    "--follow",
+    "--hidden",
+    "--ignore-case",
+    "--line-number",
+    "--no-heading",
+    "--no-ignore",
+    "--smart-case",
+    "--word-regexp",
+  ]);
+  let endOfOptions = false;
+  let patternObserved = false;
+  for (let index = executableIndex + 1; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!endOfOptions && token === "--") {
+      endOfOptions = true;
+      continue;
+    }
+    if (!endOfOptions && token.startsWith("-")) {
+      if (/^(?:--file=.+|--regexp=.+|-e.+|-f.+)$/u.test(token)) patternObserved = true;
+      if (optionsWithValues.has(token)) {
+        if (["--regexp", "--file", "-e", "-f"].includes(token)) {
+          patternObserved = true;
+        }
+        index += 1;
+      } else if (
+        /^(?:--after-context|--before-context|--context|--encoding|--file|--glob|--iglob|--max-columns|--max-count|--sort|--type|--type-add)=.+$/u.test(token) ||
+        /^-[ABCefgmt].+$/u.test(token) ||
+        valuelessOptions.has(token) ||
+        /^-[FHISilnRrsw]+$/u.test(token)
+      ) {
+        continue;
+      } else {
+        return false;
+      }
+      continue;
+    }
+    if (!patternObserved) {
+      patternObserved = true;
+      continue;
+    }
+    if (token === ".") return index === tokens.length - 1;
+  }
+  return false;
+}
+
+function tokenizeShellWords(command) {
+  const tokens = [];
+  let current = "";
+  let escaped = false;
+  let quote = null;
+  const finish = () => {
+    if (current.length > 0) tokens.push(current);
+    current = "";
+  };
+  for (const character of command) {
+    if (escaped) {
+      current += character;
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote !== null) {
+      if (character === quote) quote = null;
+      else current += character;
+      continue;
+    }
+    if (character === "\"" || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (/\s/u.test(character) || character === "(" || character === ")") {
+      finish();
+      continue;
+    }
+    current += character;
+  }
+  finish();
+  return tokens;
+}
+
+function splitShellControlSegments(command) {
+  const segments = [];
+  let escaped = false;
+  let quote = null;
+  let start = 0;
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote !== null) {
+      if (character === quote) quote = null;
+      continue;
+    }
+    if (character === "\"" || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (/[;&|\r\n]/u.test(character)) {
+      segments.push(command.slice(start, index));
+      start = index + 1;
+    }
+  }
+  segments.push(command.slice(start));
+  return segments;
 }
 
 function isBatchRead(item) {
@@ -823,15 +989,8 @@ function isExecutableReproduction(item, contract) {
 }
 
 function canonicalReproductionCommand(command) {
-  let text = String(command ?? "");
-  const shellPrefix = /^(?:(?:\/(?:usr\/)?bin\/)?(?:bash|sh|zsh))\s+-lc\s+/u;
-  if (shellPrefix.test(text)) {
-    const wrapped = text.match(
-      /^(?:(?:\/(?:usr\/)?bin\/)?(?:bash|sh|zsh))\s+-lc\s+(['"])([\s\S]*)\1$/u,
-    );
-    if (!wrapped) return null;
-    text = wrapped[2];
-  }
+  const text = unwrapShellInvocation(command);
+  if (text === null) return null;
   if (
     text.length === 0 ||
     text !== text.trim() ||
@@ -1039,33 +1198,50 @@ function parseValidationEvidence(evidence) {
 }
 
 function canonicalValidationCommand(command) {
-  let text = String(command ?? "");
-  const shellPrefix = /^(?:(?:\/(?:usr\/)?bin\/)?(?:bash|sh|zsh))\s+-lc\s+/u;
-  if (shellPrefix.test(text)) {
-    const wrapped = text.match(
-      /^(?:(?:\/(?:usr\/)?bin\/)?(?:bash|sh|zsh))\s+-lc\s+(['"])([\s\S]*)\1$/u,
-    );
-    if (!wrapped) return null;
-    text = wrapped[2];
-  }
+  const text = unwrapShellInvocation(command);
+  if (text === null) return null;
   if (
     text.length === 0 ||
     text !== text.trim() ||
     /[\r\n;&|`!<>#$]/u.test(text) ||
-    !/^(?:bun|cargo|go|gradle|make|mvn|node|npm|pnpm|pytest|yarn)\b/iu.test(text) ||
-    validationCommandFragment(text) === null
+    !isSupportedValidationInvocation(text)
   ) {
     return null;
   }
   return text;
 }
 
-function validationCommandFragment(command) {
+function unwrapShellInvocation(command) {
   const text = String(command ?? "");
-  const match = text.match(
-    /\b(?:bun|cargo|go|gradle|make|mvn|node|npm|pnpm|yarn)\b[^;&|\r\n]{0,80}\b(?:build|check|lint|test|typecheck)\b|\bpytest\b/iu,
+  const shellPrefix = /^(?:(?:\/(?:usr\/)?bin\/)?(?:bash|sh|zsh))\s+-lc\s+/u;
+  if (!shellPrefix.test(text)) return text;
+  const wrapped = text.match(
+    /^(?:(?:\/(?:usr\/)?bin\/)?(?:bash|sh|zsh))\s+-lc\s+(['"])([\s\S]*)\1$/u,
   );
-  return match ? match[0].replace(/\s+/gu, " ").trim().toLowerCase() : null;
+  return wrapped?.[2] ?? null;
+}
+
+function isSupportedValidationInvocation(command) {
+  if (
+    /(?:^|\s)(?:--allow-?no-?tests|--collect-?only|--co|--dry-?run|--help|--if-present|--ignore-scripts|--list-?tests?|--no-run|--pass-?with-?no-?tests|--version)(?:[=\s]|$)/iu
+      .test(command) ||
+    /(?:^|\s)(?:-V|-h)(?:\s|$)/u.test(command) ||
+    /(?:^|\s)-run\s+['"]?\^\$['"]?(?:\s|$)/u.test(command) ||
+    /(?:^|\s)--test-name-pattern(?:=|\s+)['"]?\^\$['"]?(?:\s|$)/u.test(command)
+  ) {
+    return false;
+  }
+  const script = "(?:build|check|lint|test|typecheck)(?::[A-Za-z0-9_.-]+)?";
+  return [
+    new RegExp(`^(?:bun|npm|pnpm|yarn)\\s+(?:run\\s+)?${script}(?:\\s|$)`, "iu"),
+    /^cargo\s+(?:build|check|clippy|test)(?:\s|$)/iu,
+    /^go\s+(?:build|test|vet)(?:\s|$)/iu,
+    /^(?:gradle|\.\/gradlew)\s+(?:build|check|lint|test)(?:\s|$)/iu,
+    new RegExp(`^make\\s+${script}(?:\\s|$)`, "iu"),
+    /^mvn\s+(?:package|test|verify)(?:\s|$)/iu,
+    /^node\s+--test(?:\s|$)/iu,
+    /^(?:python3?\s+-m\s+)?pytest(?:\s|$)/iu,
+  ].some((pattern) => pattern.test(command));
 }
 
 export function isPassingReviewVerdict(message) {
@@ -1188,12 +1364,12 @@ export function evaluateWorkflowConformance(run) {
           reasons.push("pre-edit executable REPRODUCE was not observed");
         }
         if (
-          capsule.patch_calls !== 1 ||
+          capsule.patch_batches !== 1 ||
           !capsule.implementation_patch_observed ||
           !capsule.test_patch_observed ||
           !capsule.multi_file_patch_observed
         ) {
-          reasons.push("one multi-file PATCH was not observed");
+          reasons.push("one contiguous multi-file PATCH batch was not observed");
         }
         if (
           capsule.post_change_command_calls !== 1 ||
@@ -1487,7 +1663,7 @@ export function renderDevelopmentReport(result) {
     "## Interpretation boundary",
     "",
     "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    "- LeanPowers conformance requires one exact four-line route ledger before any task tool. Build/debug capsule traces must show no Skill/reference reload, content-aware discovery, batched reads, fixture-owned structured pre-edit reproduction for debug, one multi-file patch, and one successful validation. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Each strict review cycle additionally requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
+    "- LeanPowers conformance requires one exact four-line route ledger before any task tool. Build/debug capsule traces must show no Skill/reference reload, final-root content-aware discovery using a supported rg/grep command shape, batched reads, fixture-owned structured pre-edit reproduction for debug, one contiguous multi-file patch batch, and one supported successful validation command. Codex JSONL emits one file-change item per changed file and no patch-call identifier, so contiguous file-change items are an explicit call-cardinality proxy; immediately adjacent independent patch calls with no intervening JSONL event are indistinguishable and may be coalesced. The proxy does not prove exact patch-call cardinality. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Each strict review cycle additionally requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
     "- Codex JSONL does not expose raw spawn arguments such as `fork_context`; observable spawn/wait behavior is checked dynamically, while exact argument shape is covered by static workflow tests and remains a runtime telemetry gap.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
