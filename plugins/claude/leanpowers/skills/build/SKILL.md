@@ -17,7 +17,7 @@ Start only when goal, declared scope, acceptance evidence, and constraints are e
 
 ## Slice loop
 
-1. Inspect the affected implementation and existing tests. Preserve unrelated user changes.
+1. Batch-inspect the affected implementation and existing tests. Before editing, extract literal `must`, `only`, `exact`, `preserve`, and `reject` clauses plus their positive/negative boundaries. Preserve unrelated user changes.
 2. Choose the smallest slice that produces an independently useful outcome.
 3. Establish the pre-change signal:
    - Behavior or defect: write a focused test and observe the expected failure when practical.

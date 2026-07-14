@@ -9,7 +9,7 @@ Select exactly one lowest-safe owner; never implement.
 
 Use highest risk. `lean` is clear, local, reversible work with validation and no public boundary. Security—including authentication, credentials/secrets, cryptography, or signature verification—authorization, payment, privacy, migration, concurrency, production, irreversible change, or large refactor is `strict`. Otherwise `standard`; preference cannot lower safety.
 
-Carry this sticky ledger:
+First progress: `entrypoint: leanpowers:route`, then this sticky ledger:
 
 ```yaml
 workflow: selected owner
@@ -17,7 +17,7 @@ risk: lean | standard | strict
 required_gates: [current_evidence] | [independent_review, current_evidence]
 ```
 
-Preserve evidence, causes, regression, scope, independent review, authorization, contradictions, and validation gaps.
+Preserve evidence, regression, scope, independent review, authorization, contradictions, and validation gaps.
 
 ## Selection
 
@@ -32,4 +32,4 @@ Preserve evidence, causes, regression, scope, independent review, authorization,
 
 If none applies, answer; ties resolve uncertainty.
 
-Activate it with the ledger; lean/standard build/debug may complete inline. Strict: tool-search/load deferred Codex V1 `multi_agent_v1.spawn_agent` and `wait_agent`; others use native equivalents. Invisibility is not unavailability. Delegate installed LeanPowers `review` without inherited transcript, passing the original contract, final diff/code, and current evidence to a distinct Agent/subagent, then wait. Only its returned result satisfies `independent_review`; implementer-authored review text never does. Apply findings, then verify; otherwise return incomplete and never ship.
+Activate the installed LeanPowers owner with the ledger; Route never implements. Lean/standard may finish there. Strict: after final diff passes tests, tool-search/load deferred Codex V1 `multi_agent_v1.spawn_agent` and `wait_agent`, spawning with `fork_context:false`; others use native equivalents. Delegate a fresh-context Agent/subagent to directly run installed LeanPowers `review` without re-delegating, with the verbatim task, strict ledger, changed paths, concise evidence, and exact schema—never paraphrase or transcript. Wait. Only `verdict: pass` after last change satisfies `independent_review`; findings cannot be self-overruled. Any scoped edit requires retest/re-review. Then verify; otherwise incomplete, never ship.

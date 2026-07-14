@@ -1,10 +1,10 @@
 # Runtime contract
 
-Use this compact contract only when a workflow was entered directly or the routing ledger is missing. Read it once per task and reuse it across transitions.
+Use only for direct workflow entry or a missing routing ledger. Read once per task; reuse across transitions.
 
 ## Risk and gates
 
-Use the highest signal. `lean` is clear, local, reversible work with established validation and no public boundary. `standard` covers normal multi-file, public-boundary, dependency, or bounded-uncertainty work; unknown defaults to standard. `strict` covers security (including authentication, credentials/secrets, cryptography, or signature verification), authorization, payment, privacy, migration, concurrency, production, irreversible work, or a large refactor. Strict is sticky until an independent review and current verification both pass.
+Use highest signal. `lean` is clear, local, reversible, validated, and has no public boundary. `standard` covers normal multi-file, public-boundary, dependency, or bounded-uncertainty work; unknown defaults here. `strict` covers security (including authentication, credentials/secrets, cryptography, or signature verification), authorization, payment, privacy, migration, concurrency, production, irreversible work, or a large refactor. Strict is sticky until independent review and current verification pass.
 
 Carry this ledger:
 
@@ -25,7 +25,7 @@ required_gates: [current_evidence] | [independent_review, current_evidence]
 7. Re-evaluate when evidence contradicts the conclusion.
 8. Report every material validation gap; unavailable is never pass.
 
-Reuse evidence only while all relevant code, generated output, dependencies, configuration, environment, and supported scope remain unchanged. Keep full logs local.
+Reuse evidence only while relevant code, generated output, dependencies, configuration, environment, and scope remain unchanged. Keep logs local.
 
 ## Transitions
 
@@ -36,4 +36,4 @@ Reuse evidence only while all relevant code, generated output, dependencies, con
 - `review -> build/debug` on findings; independent strict pass goes to `verify`.
 - `verify -> ship` only when delivery was requested and every material claim passes.
 
-Default to one agent; delegate only independent, verifiable work without write conflicts, to at most three children whose diff/evidence the leader inspects. Strict tool-search/loads Codex V1 `multi_agent_v1.spawn_agent` and `wait_agent`, or native equivalents; delegates without inherited transcript the contract, final diff/code, and evidence; then waits for a passing result. Implementer-authored review text never satisfies the gate; otherwise return incomplete and never ship.
+Default to one agent; delegate only independent, verifiable work without write conflicts, to at most three children whose evidence the leader inspects. Strict stabilizes final diff and applicable tests, then tool-search/loads Codex V1 `multi_agent_v1.spawn_agent` and `wait_agent`, spawning with `fork_context:false`, or uses native equivalents. Send a fresh reviewer the verbatim task, changed paths, concise evidence, and exact verdict schema—not paraphrase or transcript—then wait. Only its pass after the last change satisfies the gate; any scoped edit requires retest/re-review. Implementer text never satisfies or overrules review; otherwise return incomplete and never ship.

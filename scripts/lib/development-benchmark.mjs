@@ -235,7 +235,7 @@ export function parseClaudeResult(raw) {
   };
 }
 
-export function parseCodexResult(raw) {
+export function parseCodexResult(raw, { expectedReviewContract = null } = {}) {
   const events = raw
     .split(/\r?\n/u)
     .filter((line) => line.trim().startsWith("{"))
@@ -282,7 +282,7 @@ export function parseCodexResult(raw) {
     (event) => event?.item?.type === "file_change",
   );
   const reviewAgentSpawns = new Map();
-  let independentReviewPassObserved = false;
+  let latestIndependentReview = null;
   completedItems.forEach((event, index) => {
     const item = event?.item;
     if (
@@ -293,7 +293,13 @@ export function parseCodexResult(raw) {
       /(?:\breview\b|reviewer|审查|复核)/iu.test(item.prompt ?? "")
     ) {
       for (const agentId of item.receiver_thread_ids ?? []) {
-        reviewAgentSpawns.set(agentId, index);
+        reviewAgentSpawns.set(agentId, {
+          contract_verbatim:
+            typeof expectedReviewContract === "string" &&
+            expectedReviewContract.length > 0 &&
+            String(item.prompt ?? "").includes(expectedReviewContract),
+          index,
+        });
       }
       return;
     }
@@ -302,15 +308,26 @@ export function parseCodexResult(raw) {
       item.tool === "wait" &&
       item.status === "completed"
     ) {
-      independentReviewPassObserved ||= Object.entries(item.agents_states ?? {}).some(
-        ([agentId, state]) =>
-          state?.status === "completed" &&
-          /(?:^|\n)\s*verdict\s*:\s*pass\s*(?:\n|$)/iu.test(
-            state?.message ?? "",
-          ) &&
-          reviewAgentSpawns.has(agentId) &&
-          reviewAgentSpawns.get(agentId) < index,
-      );
+      const completedReviews = [];
+      for (const [agentId, state] of Object.entries(item.agents_states ?? {})) {
+        const spawn = reviewAgentSpawns.get(agentId);
+        if (spawn?.index < index) {
+          completedReviews.push({
+            contract_verbatim: spawn.contract_verbatim,
+            pass:
+              state?.status === "completed" &&
+              isPassingReviewVerdict(state?.message),
+          });
+        }
+      }
+      if (completedReviews.length > 0) {
+        latestIndependentReview = {
+          contract_verbatim: completedReviews.every(
+            (review) => review.contract_verbatim,
+          ),
+          pass: completedReviews.every((review) => review.pass),
+        };
+      }
     }
   });
   const finalMessage = [...events].reverse().find(
@@ -336,7 +353,10 @@ export function parseCodexResult(raw) {
         0,
       ),
       skills_observed: skillsObserved,
-      independent_review_pass_observed: independentReviewPassObserved,
+      independent_review_pass_observed: latestIndependentReview?.pass === true,
+      independent_review_contract_verbatim_observed:
+        latestIndependentReview?.pass === true &&
+        latestIndependentReview.contract_verbatim === true,
     },
     tokens: hasUsage
       ? {
@@ -350,6 +370,22 @@ export function parseCodexResult(raw) {
         }
       : null,
   };
+}
+
+export function isPassingReviewVerdict(message) {
+  let text = String(message ?? "").trim();
+  const fenced = text.match(/^```(?:ya?ml)?\s*\n([\s\S]*?)\n```\s*$/iu);
+  if (fenced) text = fenced[1].trim();
+  const lines = text
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return (
+    lines.length === 3 &&
+    /^verdict\s*:\s*pass$/iu.test(lines[0]) &&
+    /^findings\s*:\s*\[\s*\]$/iu.test(lines[1]) &&
+    /^unverified_areas\s*:\s*\[\s*\]$/iu.test(lines[2])
+  );
 }
 
 export function evaluateChangedPaths(changedPaths, policy) {
@@ -397,6 +433,11 @@ export function evaluateWorkflowConformance(run) {
       !run.telemetry?.workflow_trace?.independent_review_pass_observed
     ) {
       reasons.push("current passing independent review was not observed");
+    } else if (
+      run.risk_level === "strict" &&
+      !run.telemetry?.workflow_trace?.independent_review_contract_verbatim_observed
+    ) {
+      reasons.push("passing independent review did not receive the verbatim task contract");
     }
   }
   return { status: reasons.length === 0 ? "PASS" : "FAIL", reasons };
@@ -705,7 +746,9 @@ async function runSingleCase({
       timeoutMs: 600_000,
     });
     const wallSeconds = (Date.now() - startedAt) / 1000;
-    const telemetry = parseCodexResult(agent.stdout);
+    const telemetry = parseCodexResult(agent.stdout, {
+      expectedReviewContract: benchmarkCase.task,
+    });
     const declaredRisk = extractDeclaredRisk(telemetry.first_progress_message);
     const activationReported = reportsWorkflowActivation({
       entrypoint,
@@ -1334,8 +1377,16 @@ export function reportsWorkflowActivation({ entrypoint, message, workflow }) {
     "iu",
   );
   if (negatedBefore.test(text) || unavailableAfter.test(text)) return false;
+  if (workflow === "leanpowers-0.2.0") {
+    const activationDenied = /\b(?:not|never)\s+activat(?:e|ed|ing)\b|\b(?:activation|entrypoint|workflow|skill)\s+(?:is\s+)?(?:unavailable|disabled|failed)\b|\bactivation\s+(?:did\s+not\s+succeed|was\s+unsuccessful)\b/iu;
+    const exactEntrypoint = new RegExp(
+      `(?:^|\\n)\\s*(?:[-*]\\s*)?entrypoint\\s*[:=]\\s*\`?${escapeRegex(entrypoint.slice(1))}\`?\\s*(?=\\n|$)`,
+      "iu",
+    );
+    return exactEntrypoint.test(text) && !activationDenied.test(text);
+  }
   const structured = new RegExp(
-    `(?:^|\\n)\\s*(?:workflow|skill)\\s*[:=]\\s*(?:${target})(?:\\s|$)`,
+    `(?:^|\\n)\\s*(?:[-*]\\s*)?(?:entrypoint|workflow|skill)\\s*[:=]\\s*(?:${target})(?:\\s|$)`,
     "iu",
   );
   const affirmative = new RegExp(

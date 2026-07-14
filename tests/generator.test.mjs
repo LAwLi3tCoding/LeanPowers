@@ -87,10 +87,10 @@ test("published instruction counts match the canonical source exactly", async ()
   assert.deepEqual(
     { engineeringWords, routeWords, adaptWords, totalWords, charterWords },
     {
-      engineeringWords: 2811,
-      routeWords: 239,
+      engineeringWords: 2865,
+      routeWords: 260,
       adaptWords: 329,
-      totalWords: 3379,
+      totalWords: 3454,
       charterWords: 111,
     },
   );

@@ -37,6 +37,7 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
   assert.match(body, /security.*authorization.*payment.*privacy/is);
   assert.match(body, /risk: lean \| standard \| strict/i);
   assert.match(body, /required_gates/i);
+  assert.match(body, /entrypoint: leanpowers:route/i);
   for (const workflow of ["shape", "build", "debug", "review", "verify", "ship", "adapt"]) {
     assert.match(body, new RegExp(`\\b${workflow}\\b`, "i"), workflow);
   }
@@ -98,17 +99,25 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(verify, /independent_review: pass \| missing \| not_required/i);
   assert.match(build, /affected integration[\s\S]{0,120}full-suite/i);
   assert.match(build, /validation gap blocks `complete`/i);
-  assert.match(route, /distinct Agent\/subagent[\s\S]{0,160}wait/i);
+  assert.match(route, /fresh-context Agent\/subagent[\s\S]{0,300}wait/i);
   assert.match(route, /multi_agent_v1\.spawn_agent[\s\S]{0,100}wait_agent/i);
-  assert.match(route, /implementer-authored review text never/i);
-  assert.match(route, /without inherited transcript/i);
+  assert.match(route, /fork_context:false/i);
+  assert.match(route, /verbatim task/i);
+  assert.match(route, /after (?:the )?last change/i);
+  assert.match(route, /scoped edit requires retest\/re-review/i);
   assert.match(route, /installed LeanPowers `review`/i);
+  assert.match(route, /without re-delegating/i);
+  assert.match(route, /Activate the installed LeanPowers owner/i);
+  assert.match(route, /Route never implements/i);
   assert.doesNotMatch(route, /\$leanpowers:review|\/leanpowers:review/i);
   assert.match(review, /runtime provenance, not self-report/i);
+  assert.match(review, /designated fresh reviewer reviews directly and never re-delegates/i);
   assert.match(review, /literal `must`[\s\S]{0,100}`only`[\s\S]{0,100}`exact`/i);
   assert.match(review, /positive and negative boundary evidence/i);
-  assert.match(runtime, /implementer-authored review text never/i);
+  assert.match(runtime, /implementer text never satisfies or overrules review/i);
   assert.match(runtime, /multi_agent_v1\.spawn_agent[\s\S]{0,100}wait_agent/i);
+  assert.match(runtime, /fork_context:false/i);
+  assert.match(runtime, /verbatim task/i);
 });
 
 test("skill frontmatter is portable and descriptions are discovery-focused", async () => {

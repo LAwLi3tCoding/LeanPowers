@@ -85,7 +85,7 @@ test("the Codex runner is writable, non-interactive, ephemeral, and model-paired
   assert.ok(!args.join(" ").includes("leanpowers-0.2.0"));
 });
 
-test("LeanPowers activation accepts semantic route and risk declarations", () => {
+test("LeanPowers activation requires its exact first-progress entrypoint marker", () => {
   const message = "Activating the `route` workflow with standard? strict owner selection.";
   const declaredRisk = extractDeclaredRisk(message);
 
@@ -96,13 +96,29 @@ test("LeanPowers activation accepts semantic route and risk declarations", () =>
       message,
       workflow: "leanpowers-0.2.0",
     }),
-    true,
+    false,
   );
   assert.equal(
     reportsWorkflowActivation({
       entrypoint: "$superpowers:using-superpowers",
       message: "Using `superpowers:using-superpowers` to establish the workflow.",
       workflow: "superpowers-6.1.1",
+    }),
+    true,
+  );
+  assert.equal(
+    reportsWorkflowActivation({
+      entrypoint: "$leanpowers:route",
+      message: "entrypoint: leanpowers:route\nworkflow: build\nrisk: strict",
+      workflow: "leanpowers-0.2.0",
+    }),
+    true,
+  );
+  assert.equal(
+    reportsWorkflowActivation({
+      entrypoint: "$leanpowers:route",
+      message: "- entrypoint: `leanpowers:route`\n- workflow: build\n- risk: strict",
+      workflow: "leanpowers-0.2.0",
     }),
     true,
   );
@@ -113,6 +129,15 @@ test("LeanPowers activation accepts semantic route and risk declarations", () =>
     "The route workflow cannot be used despite risk: strict and required_gates.",
     "Unable to use the route workflow; risk: strict; required_gates are known.",
     "I cannot use `leanpowers:route` here.",
+    "Routing this through LeanPowers workflow now; risk: strict.",
+    "entrypoint: build\nrisk: strict",
+    "entrypoint: leanpowers:route\nThe route workflow is unavailable.",
+    "entrypoint: leanpowers:route if available",
+    "entrypoint: leanpowers:route not activated",
+    "entrypoint: leanpowers:route\nActivation did not succeed.",
+    "entrypoint: leanpowers:route\nActivation was unsuccessful.",
+    "Using a router helper instead.",
+    "If available, use the route workflow.",
   ]) {
     assert.equal(
       reportsWorkflowActivation({
@@ -217,6 +242,7 @@ test("Codex JSONL usage and completion are independently parsed", () => {
       read_output_chars: 0,
       skills_observed: [],
       independent_review_pass_observed: false,
+      independent_review_contract_verbatim_observed: false,
     },
   });
   assert.equal(parseCodexResult('{"type":"turn.failed"}').tokens, null);
@@ -278,17 +304,19 @@ test("Codex trace records tool types and exact workflow file reads", () => {
     read_output_chars: 14,
     skills_observed: ["build"],
     independent_review_pass_observed: false,
+    independent_review_contract_verbatim_observed: false,
   });
 });
 
 test("Codex trace proves independent review only after reviewer spawn and completed wait", () => {
+  const contract = "Prefix sha256=; hexadecimal characters in either case.";
   const parsed = parseCodexResult([
     JSON.stringify({
       type: "item.completed",
       item: {
         type: "collab_tool_call",
         tool: "spawn_agent",
-        prompt: "Review the strict-risk diff and tests.",
+        prompt: `Review the strict-risk diff and tests. Original task: ${contract}`,
         receiver_thread_ids: ["reviewer"],
         agents_states: { reviewer: { status: "running" } },
         status: "completed",
@@ -300,7 +328,10 @@ test("Codex trace proves independent review only after reviewer spawn and comple
         type: "collab_tool_call",
         tool: "wait",
         agents_states: {
-          reviewer: { status: "completed", message: "verdict: pass\nfindings: []" },
+          reviewer: {
+            status: "completed",
+            message: "verdict: pass\nfindings: []\nunverified_areas: []",
+          },
         },
         status: "completed",
       },
@@ -309,9 +340,43 @@ test("Codex trace proves independent review only after reviewer spawn and comple
       type: "turn.completed",
       usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 },
     }),
-  ].join("\n"));
+  ].join("\n"), { expectedReviewContract: contract });
 
   assert.equal(parsed.workflow_trace.independent_review_pass_observed, true);
+  assert.equal(
+    parsed.workflow_trace.independent_review_contract_verbatim_observed,
+    true,
+  );
+  assert.equal(
+    parseCodexResult([
+      JSON.stringify({
+        type: "item.completed",
+        item: {
+          type: "collab_tool_call",
+          tool: "spawn_agent",
+          prompt: "Review a paraphrased contract.",
+          receiver_thread_ids: ["reviewer"],
+          status: "completed",
+        },
+      }),
+      JSON.stringify({
+        type: "item.completed",
+        item: {
+          type: "collab_tool_call",
+          tool: "wait",
+          agents_states: {
+            reviewer: {
+              status: "completed",
+              message: "verdict: pass\nfindings: []\nunverified_areas: []",
+            },
+          },
+          status: "completed",
+        },
+      }),
+    ].join("\n"), { expectedReviewContract: contract })
+      .workflow_trace.independent_review_contract_verbatim_observed,
+    false,
+  );
 });
 
 test("Codex trace rejects failed, unrelated, or out-of-order review evidence", () => {
@@ -330,7 +395,12 @@ test("Codex trace rejects failed, unrelated, or out-of-order review evidence", (
   const wait = (agentId = "reviewer") => event({
     type: "collab_tool_call",
     tool: "wait",
-    agents_states: { [agentId]: { status: "completed", message: "PASS" } },
+    agents_states: {
+      [agentId]: {
+        status: "completed",
+        message: "verdict: pass\nfindings: []\nunverified_areas: []",
+      },
+    },
     status: "completed",
   });
 
@@ -338,7 +408,7 @@ test("Codex trace rejects failed, unrelated, or out-of-order review evidence", (
     [spawn("failed"), wait(), turn],
     [spawn(), wait("other-agent"), turn],
     [wait(), spawn(), turn],
-    [event({ type: "agent_message", text: "verdict: pass\nperspective: independent" }), turn],
+    [event({ type: "agent_message", text: "verdict: pass\nfindings: []\nunverified_areas: []" }), turn],
   ]) {
     assert.equal(
       parseCodexResult(raw.join("\n")).workflow_trace.independent_review_pass_observed,
@@ -363,6 +433,31 @@ test("Codex trace requires a passing review after the final file change", () => 
     status: "completed",
   });
   const change = event({ type: "file_change", changes: [] });
+  const secondSpawn = event({
+    type: "collab_tool_call",
+    tool: "spawn_agent",
+    prompt: "Run another independent review.",
+    receiver_thread_ids: ["reviewer-2"],
+    status: "completed",
+  });
+  const mixedWait = (status) => event({
+    type: "collab_tool_call",
+    tool: "wait",
+    agents_states: {
+      reviewer: {
+        status: "completed",
+        message: "verdict: pass\nfindings: []\nunverified_areas: []",
+      },
+      "reviewer-2": {
+        status,
+        message:
+          status === "completed"
+            ? "verdict: pass\nfindings: []\nunverified_areas: []"
+            : null,
+      },
+    },
+    status: "completed",
+  });
   const turn = JSON.stringify({
     type: "turn.completed",
     usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 },
@@ -371,8 +466,20 @@ test("Codex trace requires a passing review after the final file change", () => 
   for (const raw of [
     [spawn, wait("verdict: changes_required"), turn],
     [spawn, wait("PASS is not granted; changes are required"), turn],
-    [spawn, change, wait("verdict: pass"), turn],
+    [spawn, change, wait("verdict: pass\nfindings: []\nunverified_areas: []"), turn],
     [spawn, wait("PASS — no blockers"), change, turn],
+    [spawn, wait("verdict: pass\nfindings:\n  - severity: critical\nunverified_areas: []"), turn],
+    [spawn, wait("verdict: pass\nfindings: []\nunverified_areas: [tests]"), turn],
+    [spawn, wait("verdict: pass\nfindings: []"), turn],
+    [spawn, wait("verdict: pass\nfindings: []\nunverified_areas: []\nverdict: changes_required"), turn],
+    [spawn, secondSpawn, mixedWait("running"), turn],
+    [spawn, secondSpawn, mixedWait("failed"), turn],
+    [
+      spawn,
+      wait("verdict: pass\nfindings: []\nunverified_areas: []"),
+      wait("verdict: changes_required\nfindings: []\nunverified_areas: []"),
+      turn,
+    ],
   ]) {
     assert.equal(
       parseCodexResult(raw.join("\n")).workflow_trace.independent_review_pass_observed,
@@ -380,7 +487,12 @@ test("Codex trace requires a passing review after the final file change", () => 
     );
   }
   assert.equal(
-    parseCodexResult([change, spawn, wait("verdict: pass"), turn].join("\n"))
+    parseCodexResult([
+      change,
+      spawn,
+      wait("verdict: pass\nfindings: []\nunverified_areas: []"),
+      turn,
+    ].join("\n"))
       .workflow_trace.independent_review_pass_observed,
     true,
   );
@@ -448,7 +560,12 @@ test("workflow declaration and risk classification are separate conformance evid
       activation_reported: true,
       declared_risk: "strict",
       risk_level: "strict",
-      telemetry: { workflow_trace: { independent_review_pass_observed: true } },
+      telemetry: {
+        workflow_trace: {
+          independent_review_pass_observed: true,
+          independent_review_contract_verbatim_observed: true,
+        },
+      },
     }),
     { status: "PASS", reasons: [] },
   );
@@ -479,6 +596,21 @@ test("workflow declaration and risk classification are separate conformance evid
       declared_risk: "strict",
       risk_level: "strict",
       telemetry: { workflow_trace: { independent_review_pass_observed: false } },
+    }).status,
+    "FAIL",
+  );
+  assert.equal(
+    evaluateWorkflowConformance({
+      workflow: "leanpowers-0.2.0",
+      activation_reported: true,
+      declared_risk: "strict",
+      risk_level: "strict",
+      telemetry: {
+        workflow_trace: {
+          independent_review_pass_observed: true,
+          independent_review_contract_verbatim_observed: false,
+        },
+      },
     }).status,
     "FAIL",
   );

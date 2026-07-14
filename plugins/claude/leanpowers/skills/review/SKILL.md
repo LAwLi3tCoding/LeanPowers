@@ -7,7 +7,7 @@ description: Use when code, configuration, tests, plans, agent workflows, or del
 
 Judge the change's safety and fitness. Return an evidence-based verdict, not author intent.
 
-Independence is runtime provenance, not self-report. If you implemented the change, tool-search/load Codex V1 `multi_agent_v1.spawn_agent` and `wait_agent`, or native equivalents; invoke one distinct reviewer with contract, final diff/code, and evidence; wait; otherwise return `blocked`. Only its result or supplied fresh-session, qualified-human, or external review may return `pass`; implementer-authored text never does.
+Independence is runtime provenance, not self-report. Implementers tool-search/load Codex V1 `multi_agent_v1.spawn_agent` and `wait_agent`, spawning with `fork_context:false`, or use native equivalents; delegate once and wait, or return `blocked` if unavailable. A designated fresh reviewer reviews directly and never re-delegates. Only its result or supplied fresh-session, qualified-human, or external review may return `pass`; implementer-authored text never does.
 
 Inherit the routing ledger. If entered directly or the ledger is missing, read the [runtime contract](../../references/runtime-contract.md) once; do not reload it after transitions.
 
@@ -48,7 +48,7 @@ unverified_areas: [] | [missing evidence]
 
 `pass` requires no material findings or unverified areas. State missing evidence; never speculate.
 
-For a delegated strict review, send only the task contract, risk ledger, relevant diff and code, and current evidence—not the implementation transcript.
+For a delegated strict review, send the verbatim task, risk ledger, changed paths, concise final-diff evidence, and the exact output schema—not a paraphrase, pasted diff/log, or implementation transcript. Read current diff/code from the shared workspace. If a finding conflicts with the contract, return it to an independent reviewer for a revised verdict; the implementer cannot overrule it.
 
 ## Boundaries
 
