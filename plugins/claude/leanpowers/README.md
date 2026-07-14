@@ -13,7 +13,8 @@ LeanPowers keeps the safeguards that matter—bounded requirements, regression e
 ## Why LeanPowers
 
 - Six focused engineering workflows instead of a long mandatory chain.
-- One event-driven `adapt` control Skill for optional project learning; it is not part of the engineering chain.
+- A 219-word `route` entry Skill improves discovery but activates only one workflow.
+- An event-driven `adapt` control Skill provides optional project learning; neither control Skill is an engineering stage.
 - `lean`, `standard`, and `strict` paths selected by observable risk.
 - Single-agent execution by default; bounded subagents only for independent work.
 - Current evidence required before completion or delivery claims.
@@ -55,12 +56,14 @@ LeanPowers can route from the task, or you can invoke a skill explicitly.
 
 ```text
 # Codex
+$leanpowers:route Choose the lightest safe workflow for this engineering task.
 $leanpowers:build mode=lean Add the missing validation and its regression test.
 $leanpowers:debug The integration test is intermittently returning an empty result.
 $leanpowers:verify Prove this branch is ready to deliver.
 $leanpowers:adapt Enable LeanPowers learning for this project.
 
 # Claude Code
+/leanpowers:route Choose the lightest safe workflow for this engineering task.
 /leanpowers:shape mode=standard Design a backward-compatible pagination change.
 /leanpowers:review Review this diff against the stated acceptance criteria.
 /leanpowers:ship Push the verified branch and open the requested pull request.
@@ -80,7 +83,9 @@ $leanpowers:adapt Enable LeanPowers learning for this project.
 | `verify` | Completion, safety, installability, or readiness claims | Claim-to-command evidence and explicit gaps |
 | `ship` | Commit, push, PR, package, release, or handoff | Destination readback for the delivered revision |
 
-`adapt` is a control-plane Skill, not a seventh engineering workflow. Its name means “change future behavior from verified feedback.” It handles explicit outcome feedback and learning maintenance without inserting another mandatory stage into `shape → build/debug → review? → verify → ship?`.
+`route` is a 219-word control-plane entry Skill. It raises automatic discovery—especially in Codex—by matching the start of engineering work, then activates exactly one lowest-safe workflow. It exits when a specific workflow already owns the task and never preloads the full chain.
+
+`adapt` is the other control-plane Skill, not a seventh engineering workflow. Its name means “change future behavior from verified feedback.” It handles explicit outcome feedback and learning maintenance without inserting another mandatory stage into `shape → build/debug → review? → verify → ship?`.
 
 ## Optional project learning
 
@@ -140,12 +145,12 @@ Evidence is keyed to the relevant revision and scope. Unchanged evidence may be 
 
 | Capability | Codex | Claude Code | Generic Agent Skills runtime |
 | --- | --- | --- | --- |
-| Six engineering workflows + `adapt` control Skill | Yes | Yes | Yes |
+| Six engineering workflows + `route`/`adapt` control Skills | Yes | Yes | Yes |
 | Startup injection | None | Compact routing charter | None assumed |
 | Optional reviewer/verifier agents | Runtime-native task prompts | Packaged agents | Single-agent execution; strict review must come from an external perspective |
 | Core quality gates | Yes | Yes | Yes |
 
-Codex retains zero startup injection. Claude Code receives one 99-word, read-only routing hint; it does not inspect `.leanpowers/`, scan or write the repository, access the network, or dispatch agents. The six engineering workflows require no Node.js runtime. The optional learning helper requires Node.js 20+ only when learning is explicitly enabled.
+Codex retains zero startup injection and discovers the 219-word `route` Skill through native metadata. Claude Code receives one 111-word, read-only routing hint that is restored after startup, clear, or compaction; it does not inspect `.leanpowers/`, scan or write the repository, access the network, or dispatch agents. The six engineering workflows require no Node.js runtime. The optional learning helper requires Node.js 20+ only when learning is explicitly enabled.
 
 ## Privacy and security
 
@@ -159,7 +164,7 @@ Agent instructions are not a security boundary. Review commands and diffs before
 
 ## Compared with Superpowers 6.1.1
 
-LeanPowers compares against all 14 Superpowers 6.1.1 Skills. It consolidates the 13 engineering-workflow concerns into six engineering workflows and keeps `writing-skills` as an external specialist concern. The six engineering `SKILL.md` files contain exactly 2,561 words, an 86.2% reduction from all 18,516 words in the 14-file Superpowers comparison set. The separate `adapt` control Skill adds 329 words, so all seven LeanPowers Skill files total 2,890 words—still 84.4% less. Counts use the same `wc -w` method; comparing against all 14 baseline files deliberately includes the external authoring Skill. Structural reduction is verified; equal real-world quality and targeted efficiency gains are not yet established by a live paired run.
+LeanPowers compares against all 14 Superpowers 6.1.1 Skills. It consolidates the 13 engineering-workflow concerns into six engineering workflows and keeps `writing-skills` as an external specialist concern. The six engineering `SKILL.md` files contain exactly 2,561 words, an 86.2% reduction from all 18,516 words in the 14-file Superpowers comparison set. The `route` and `adapt` control Skills add 219 and 329 words, so all eight LeanPowers Skill files total 3,109 words—still 83.2% less. Counts use the same `wc -w` method; comparing against all 14 baseline files deliberately includes the external authoring Skill. Structural reduction is verified; equal real-world quality and targeted efficiency gains are not yet established by a live paired run.
 
 The retained safeguards and intentional differences are documented in [docs/comparison-superpowers.md](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/comparison-superpowers.md). If you are migrating, read [docs/migration.md](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/migration.md)—do not enable both systems as automatic workflow routers in the same session.
 

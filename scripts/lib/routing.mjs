@@ -56,18 +56,45 @@ export function classifyRisk(signals = {}) {
 }
 
 export function selectInitialWorkflow({
+  engineeringWork = true,
+  explicitWorkflow = null,
+  learningRequest = false,
   causeKnown = true,
   deliveryOnly = false,
+  deliveryRequested = false,
   needsShaping = false,
+  reviewRequested = false,
+  verificationCurrent = false,
+  verificationRequested = false,
 } = {}) {
+  if (!engineeringWork) {
+    return null;
+  }
+  if (explicitWorkflow !== null) {
+    if (explicitWorkflow === "ship" && !verificationCurrent) {
+      return "verify";
+    }
+    if (["adapt", "build", "debug", "review", "shape", "ship", "verify"].includes(explicitWorkflow)) {
+      return explicitWorkflow;
+    }
+  }
+  if (learningRequest) {
+    return "adapt";
+  }
   if (deliveryOnly) {
-    return "ship";
+    return verificationCurrent ? "ship" : "verify";
   }
   if (causeKnown === false) {
     return "debug";
   }
+  if (reviewRequested) {
+    return "review";
+  }
   if (needsShaping) {
     return "shape";
+  }
+  if (verificationRequested) {
+    return "verify";
   }
   return "build";
 }

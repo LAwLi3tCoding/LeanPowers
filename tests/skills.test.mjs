@@ -7,9 +7,10 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const skillsRoot = path.join(root, "skills");
 const engineeringSkills = ["build", "debug", "review", "shape", "ship", "verify"];
-const expectedSkills = ["adapt", ...engineeringSkills].sort();
+const controlSkills = ["adapt", "route"];
+const expectedSkills = [...controlSkills, ...engineeringSkills].sort();
 
-test("six engineering workflows plus adapt control skill exist", async () => {
+test("six engineering workflows plus route and adapt control skills exist", async () => {
   const entries = await readdir(skillsRoot, { withFileTypes: true });
   const discovered = entries
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("_"))
@@ -17,6 +18,24 @@ test("six engineering workflows plus adapt control skill exist", async () => {
     .sort();
 
   assert.deepEqual(discovered, expectedSkills);
+});
+
+test("route is a high-recall, low-ceremony engineering entry point", async () => {
+  const content = await readFile(path.join(skillsRoot, "route", "SKILL.md"), "utf8");
+  const { frontmatter, body } = parseSkill(content);
+
+  assert.match(frontmatter.description, /start(?:ing| of) .*engineering work/i);
+  assert.match(frontmatter.description, /no specific .*workflow .*selected/i);
+  for (const trigger of ["plan", "implement", "fix", "review", "verify", "deliver"]) {
+    assert.match(frontmatter.description, new RegExp(trigger, "i"), trigger);
+  }
+  assert.match(body, /exactly one/i);
+  assert.match(body, /lowest-safe|lowest safe/i);
+  for (const workflow of ["shape", "build", "debug", "review", "verify", "ship", "adapt"]) {
+    assert.match(body, new RegExp(`\\b${workflow}\\b`, "i"), workflow);
+  }
+  assert.doesNotMatch(body, /1%|before any response|you do not have a choice/i);
+  assert.ok(wordCount(content) <= 220, `route has ${wordCount(content)} words`);
 });
 
 test("skill frontmatter is portable and descriptions are discovery-focused", async () => {

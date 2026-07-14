@@ -18,7 +18,7 @@ const PACKAGE_ROOTS = [
   "plugins/codex/leanpowers",
   "plugins/claude/leanpowers",
 ];
-const SKILLS = ["adapt", "build", "debug", "review", "shape", "ship", "verify"];
+const SKILLS = ["adapt", "build", "debug", "review", "route", "shape", "ship", "verify"];
 const REFERENCES = [
   "evidence-protocol.md",
   "learning-policy.md",

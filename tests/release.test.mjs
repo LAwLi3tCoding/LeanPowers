@@ -38,6 +38,34 @@ test("repository package validation passes", async () => {
 test("standalone validation rejects malformed Claude hook wiring and output", () => {
   assert.ok(validateHookDescriptor({ hooks: {} }).length > 0);
   assert.ok(
+    validateHookDescriptor({
+      hooks: {
+        SessionStart: [{
+          matcher: "startup",
+          hooks: [{
+            type: "command",
+            command: '"${CLAUDE_PLUGIN_ROOT}/hooks/session-start"',
+            async: false,
+          }],
+        }],
+      },
+    }).some((error) => /startup.*clear.*compact/i.test(error)),
+  );
+  assert.ok(
+    validateHookDescriptor({
+      hooks: {
+        SessionStart: [{
+          matcher: "xstartupx|clearance|compaction",
+          hooks: [{
+            type: "command",
+            command: '"${CLAUDE_PLUGIN_ROOT}/hooks/session-start"',
+            async: false,
+          }],
+        }],
+      },
+    }).some((error) => /startup.*clear.*compact/i.test(error)),
+  );
+  assert.ok(
     validateHookOutput({
       hookSpecificOutput: { hookEventName: "Other", additionalContext: "" },
     }).length >= 2,

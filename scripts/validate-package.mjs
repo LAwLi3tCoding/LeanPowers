@@ -24,7 +24,7 @@ const PACKAGE_ROOTS = [
   path.join(ROOT, "plugins/codex/leanpowers"),
   path.join(ROOT, "plugins/claude/leanpowers"),
 ];
-const SKILLS = ["adapt", "build", "debug", "review", "shape", "ship", "verify"];
+const SKILLS = ["adapt", "build", "debug", "review", "route", "shape", "ship", "verify"];
 const LEARNING_HELPERS = ["learning.mjs", "learning-core.mjs", "learning-store.mjs"];
 const LEARNING_SCHEMAS = ["learning-config.schema.json", "lesson-event.schema.json"];
 const FORBIDDEN_PACKAGE_ENTRIES = [
@@ -686,11 +686,16 @@ export function validateHookDescriptor(descriptor) {
     return ["plugins/claude/leanpowers/hooks/hooks.json: requires one SessionStart entry"];
   }
   const commandHooks = entries[0]?.hooks;
+  const matcher = entries[0]?.matcher;
+  const matcherEvents = typeof matcher === "string" ? matcher.split("|") : [];
   if (
-    typeof entries[0]?.matcher !== "string" ||
-    !entries[0].matcher.includes("startup")
+    matcherEvents.length !== 3 ||
+    new Set(matcherEvents).size !== 3 ||
+    ["startup", "clear", "compact"].some((event) => !matcherEvents.includes(event))
   ) {
-    errors.push("plugins/claude/leanpowers/hooks/hooks.json: SessionStart matcher must include startup");
+    errors.push(
+      "plugins/claude/leanpowers/hooks/hooks.json: SessionStart matcher must include startup, clear, and compact",
+    );
   }
   if (!Array.isArray(commandHooks) || commandHooks.length !== 1) {
     errors.push("plugins/claude/leanpowers/hooks/hooks.json: requires one command hook");

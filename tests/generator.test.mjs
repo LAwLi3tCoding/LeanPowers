@@ -15,7 +15,7 @@ const {
   packageReadme,
 } = generator;
 
-const skillNames = ["adapt", "build", "debug", "review", "shape", "ship", "verify"];
+const skillNames = ["adapt", "build", "debug", "review", "route", "shape", "ship", "verify"];
 const engineeringSkillNames = ["build", "debug", "review", "shape", "ship", "verify"];
 const referenceNames = [
   "evidence-protocol.md",
@@ -60,7 +60,7 @@ test("adaptive learning preview identity and documentation are explicit and opt-
   assert.match(readme, /project-local `.leanpowers\/`/i);
   assert.match(security, /normalized rules and bounded evidence summaries/i);
   assert.match(security, /Node\.js 20\+.*learning is enabled/i);
-  assert.match(comparison, /six engineering workflows.*one.*control skill/i);
+  assert.match(comparison, /six engineering workflows.*two.*control skill/i);
 });
 
 test("published instruction counts match the canonical source exactly", async () => {
@@ -77,14 +77,21 @@ test("published instruction counts match the canonical source exactly", async ()
     0,
   );
   const adaptWords = skillCounts.get("adapt");
-  const totalWords = engineeringWords + adaptWords;
+  const routeWords = skillCounts.get("route");
+  const totalWords = engineeringWords + routeWords + adaptWords;
   const charterWords = wordCount(
     await readFile(new URL("adapters/claude/session-start", projectRoot), "utf8"),
   );
 
   assert.deepEqual(
-    { engineeringWords, adaptWords, totalWords, charterWords },
-    { engineeringWords: 2561, adaptWords: 329, totalWords: 2890, charterWords: 99 },
+    { engineeringWords, routeWords, adaptWords, totalWords, charterWords },
+    {
+      engineeringWords: 2561,
+      routeWords: 219,
+      adaptWords: 329,
+      totalWords: 3109,
+      charterWords: 111,
+    },
   );
   for (const relativePath of [
     "README.md",
@@ -92,7 +99,7 @@ test("published instruction counts match the canonical source exactly", async ()
     "docs/comparison-superpowers.md",
   ]) {
     const document = await readFile(new URL(relativePath, projectRoot), "utf8");
-    for (const expected of ["2,561", "329", "2,890", "86.2%", "84.4%"]) {
+    for (const expected of ["2,561", "219", "329", "3,109", "86.2%", "83.2%"]) {
       assert.ok(document.includes(expected), `${relativePath} missing ${expected}`);
     }
   }

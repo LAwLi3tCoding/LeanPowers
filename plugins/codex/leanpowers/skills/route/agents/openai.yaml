@@ -1,0 +1,4 @@
+interface:
+  display_name: "Route"
+  short_description: "Select the lightest safe engineering workflow."
+  default_prompt: "Use $route to choose the one LeanPowers workflow that should own this engineering task."

@@ -11,7 +11,7 @@ const execFileAsync = promisify(execFile);
 const root = fileURLToPath(new URL("../", import.meta.url));
 const codexRoot = path.join(root, "plugins/codex/leanpowers");
 const claudeRoot = path.join(root, "plugins/claude/leanpowers");
-const skillNames = ["adapt", "build", "debug", "review", "shape", "ship", "verify"];
+const skillNames = ["adapt", "build", "debug", "review", "route", "shape", "ship", "verify"];
 const helperNames = ["learning.mjs", "learning-core.mjs", "learning-store.mjs"];
 const schemaNames = ["learning-config.schema.json", "lesson-event.schema.json"];
 
