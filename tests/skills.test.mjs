@@ -48,7 +48,7 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
     assert.match(body, new RegExp(`\\b${workflow}\\b`, "i"), workflow);
   }
   assert.doesNotMatch(body, /1%|before any response|you do not have a choice/i);
-  assert.ok(wordCount(content) <= 470, `route has ${wordCount(content)} words`);
+  assert.ok(wordCount(content) <= 482, `route has ${wordCount(content)} words`);
 });
 
 test("direct workflow entry loads one compact runtime contract at most once", async () => {
@@ -105,9 +105,13 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(verify, /independent_review: pass \| missing \| not_required/i);
   assert.match(build, /affected integration[\s\S]{0,120}full-suite/i);
   assert.match(build, /validation gap blocks `complete`/i);
-  assert.match(route, /Clear build: execute this capsule/i);
-  assert.match(route, /Otherwise load and execute the selected installed Skill once/i);
-  assert.match(route, /never use the build capsule/i);
+  assert.match(route, /deterministic single-component failures only/i);
+  assert.match(route, /Unknown cause declares `debug`/i);
+  assert.match(route, /reproduce, locate first wrong transition/i);
+  assert.match(route, /add failure-path regression evidence/i);
+  assert.match(route, /Intermittent\/disputed\/cross-component failures load `debug`/i);
+  assert.match(route, /material ambiguity loads `shape`/i);
+  assert.match(route, /Otherwise load selected Skill/i);
   assert.match(route, /one-call stage targets/i);
   assert.match(route, /not quality ceilings/i);
   assert.match(route, /Expand only for missing, contradictory, or failed evidence/i);
@@ -141,7 +145,7 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /starting at its invocation line/i);
   assert.match(route, /omit only the runtime label/i);
   assert.match(route, /do not edit(?: or |\/)delegate/i);
-  assert.match(route, /copy (?:the )?entire original (?:user )?task byte-for-byte/i);
+  assert.match(route, /copy (?:the )?(?:entire )?original (?:user )?task byte-for-byte/i);
   assert.match(route, /including case\/punctuation/i);
   assert.match(route, /under `Original task:`/i);
   assert.match(route, /wait_agent` once with `targets:\[ID\]`/i);
@@ -178,7 +182,7 @@ test("strict route protocol rejects one-property instruction regressions", async
     "Spawn only if its result exposes both; otherwise return incomplete before any spawn. Call `multi_agent_v1.spawn_agent` once",
     "with only `message`, `fork_context:false`; save ID, then call `multi_agent_v1.wait_agent` once with `targets:[ID]`",
     "No other review-tool action.",
-    "Copy entire original task byte-for-byte—including case/punctuation—under `Original task:`.",
+    "Copy original task byte-for-byte—including case/punctuation—under `Original task:`.",
     "Spawn message MUST equal the filled template, starting at its invocation line; omit only the runtime label.",
     "Findings require repair/retest, then restart step 4 with a fresh reviewer and current Test result.",
   ];

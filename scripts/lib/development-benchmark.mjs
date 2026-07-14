@@ -682,6 +682,10 @@ export function createReviewerWorkspaceMutationTracker(snapshotWorkspace) {
   };
 }
 
+export function tracksReviewerWorkspaceMutations(workflow) {
+  return workflow === "leanpowers-0.2.0";
+}
+
 function isReviewerPrompt(prompt) {
   return /(?:\breview\b|reviewer|审查|复核)/iu.test(String(prompt ?? ""));
 }
@@ -900,53 +904,65 @@ export function evaluateWorkflowConformance(run) {
         `declared ${run.declared_workflow ?? "no"} workflow instead of ${run.expected_workflow}`,
       );
     }
+    const expectedRiskRank = riskRank(run.risk_level);
+    const declaredRiskRank = riskRank(run.declared_risk);
     if (!run.declared_risk) {
       reasons.push("risk declaration was not reported");
-    } else if (run.declared_risk !== run.risk_level) {
+    } else if (
+      expectedRiskRank === null ||
+      declaredRiskRank === null ||
+      declaredRiskRank < expectedRiskRank
+    ) {
       reasons.push(`declared ${run.declared_risk} risk instead of ${run.risk_level}`);
     }
+    const strictRequired = run.risk_level === "strict" || run.declared_risk === "strict";
     if (
-      run.risk_level === "strict" &&
+      strictRequired &&
       !run.telemetry?.workflow_trace?.independent_review_pass_observed
     ) {
       reasons.push("current passing independent review was not observed");
     } else if (
-      run.risk_level === "strict" &&
+      strictRequired &&
       !run.telemetry?.workflow_trace?.independent_review_contract_verbatim_observed
     ) {
       reasons.push("passing independent review did not receive the verbatim task contract");
     }
     if (
-      run.risk_level === "strict" &&
+      strictRequired &&
       !run.telemetry?.workflow_trace?.independent_review_skill_invoked
     ) {
       reasons.push("passing reviewer did not explicitly invoke leanpowers:review");
     }
     if (
-      run.risk_level === "strict" &&
+      strictRequired &&
       !run.telemetry?.workflow_trace?.independent_review_sole_wait_target_observed
     ) {
       reasons.push("strict wait did not target only the designated reviewer");
     }
     if (
-      run.risk_level === "strict" &&
+      strictRequired &&
       !run.telemetry?.workflow_trace?.reviewer_workspace_mutation_check_observed
     ) {
       reasons.push("reviewer workspace mutation check was not observed");
     } else if (
-      run.risk_level === "strict" &&
+      strictRequired &&
       run.telemetry?.workflow_trace?.reviewer_workspace_mutation_observed
     ) {
       reasons.push("designated reviewer mutated the workspace");
     }
     if (
-      run.risk_level === "strict" &&
+      strictRequired &&
       !run.telemetry?.workflow_trace?.strict_review_protocol_observed
     ) {
       reasons.push("strict review cycles violated the one-reviewer protocol");
     }
   }
   return { status: reasons.length === 0 ? "PASS" : "FAIL", reasons };
+}
+
+function riskRank(risk) {
+  const rank = { lean: 0, standard: 1, strict: 2 }[risk];
+  return Number.isInteger(rank) ? rank : null;
 }
 
 export function resolveDevelopmentOutputDirectory(outputDirectory) {
@@ -1248,7 +1264,7 @@ async function runSingleCase({
       workspace,
     });
     const reviewerMutationTracker =
-      workflow === "leanpowers-0.2.0" && benchmarkCase.risk_level === "strict"
+      tracksReviewerWorkspaceMutations(workflow)
         ? createReviewerWorkspaceMutationTracker(() =>
             fingerprintBenchmarkWorkspace({
               baselineHead,

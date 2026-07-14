@@ -26,6 +26,7 @@ import {
   reportsWorkflowActivation,
   runProcess,
   runVerifier,
+  tracksReviewerWorkspaceMutations,
 } from "../scripts/lib/development-benchmark.mjs";
 
 const suitePath = new URL(
@@ -507,6 +508,11 @@ test("reviewer mutation tracker correlates the designated spawn and completed wa
   assert.deepEqual(fingerprints, []);
 });
 
+test("reviewer mutation tracking covers conservative strict upgrades", () => {
+  assert.equal(tracksReviewerWorkspaceMutations("leanpowers-0.2.0"), true);
+  assert.equal(tracksReviewerWorkspaceMutations("superpowers-6.1.1"), false);
+});
+
 test("Codex trace proves independent review only after reviewer spawn and completed wait", () => {
   const contract = "Prefix sha256=; hexadecimal characters in either case.";
   const packet = strictReviewPrompt(contract);
@@ -600,6 +606,19 @@ test("Codex trace proves independent review only after reviewer spawn and comple
   assert.equal(parsed.workflow_trace.post_change_wait_calls, 1);
   assert.equal(parsed.workflow_trace.strict_review_protocol_observed, true);
   assert.equal(parsed.workflow_trace.strict_review_cycle_count, 1);
+  assert.deepEqual(
+    evaluateWorkflowConformance({
+      workflow: "leanpowers-0.2.0",
+      activation_reported: true,
+      route_ledger_reported: true,
+      expected_workflow: "build",
+      declared_workflow: "build",
+      declared_risk: "strict",
+      risk_level: "standard",
+      telemetry: parsed,
+    }),
+    { status: "PASS", reasons: [] },
+  );
   assert.equal(
     parseCodexResult([
       JSON.stringify({
@@ -1318,6 +1337,76 @@ test("workflow declaration and risk classification are separate conformance evid
       },
     }),
     { status: "PASS", reasons: [] },
+  );
+  assert.deepEqual(
+    evaluateWorkflowConformance({
+      workflow: "leanpowers-0.2.0",
+      activation_reported: true,
+      route_ledger_reported: true,
+      expected_workflow: "build",
+      declared_workflow: "build",
+      declared_risk: "lean",
+      risk_level: "standard",
+      telemetry: { workflow_trace: {} },
+    }),
+    { status: "FAIL", reasons: ["declared lean risk instead of standard"] },
+  );
+  assert.deepEqual(
+    evaluateWorkflowConformance({
+      workflow: "leanpowers-0.2.0",
+      activation_reported: true,
+      route_ledger_reported: true,
+      expected_workflow: "build",
+      declared_workflow: "build",
+      declared_risk: "strict",
+      risk_level: "standard",
+      telemetry: {
+        workflow_trace: {
+          independent_review_pass_observed: true,
+          independent_review_contract_verbatim_observed: true,
+          independent_review_skill_invoked: true,
+          independent_review_sole_wait_target_observed: true,
+          reviewer_workspace_mutation_check_observed: true,
+          strict_review_protocol_observed: true,
+        },
+      },
+    }),
+    { status: "PASS", reasons: [] },
+  );
+  assert.deepEqual(
+    evaluateWorkflowConformance({
+      workflow: "leanpowers-0.2.0",
+      activation_reported: true,
+      route_ledger_reported: true,
+      expected_workflow: "build",
+      declared_workflow: "build",
+      declared_risk: "standard",
+      risk_level: "lean",
+      telemetry: { workflow_trace: {} },
+    }),
+    { status: "PASS", reasons: [] },
+  );
+  assert.deepEqual(
+    evaluateWorkflowConformance({
+      workflow: "leanpowers-0.2.0",
+      activation_reported: true,
+      route_ledger_reported: true,
+      expected_workflow: "build",
+      declared_workflow: "build",
+      declared_risk: "strict",
+      risk_level: "standard",
+      telemetry: { workflow_trace: {} },
+    }),
+    {
+      status: "FAIL",
+      reasons: [
+        "current passing independent review was not observed",
+        "passing reviewer did not explicitly invoke leanpowers:review",
+        "strict wait did not target only the designated reviewer",
+        "reviewer workspace mutation check was not observed",
+        "strict review cycles violated the one-reviewer protocol",
+      ],
+    },
   );
   assert.deepEqual(
     evaluateWorkflowConformance({
