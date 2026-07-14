@@ -5,11 +5,11 @@ description: Use when starting engineering work without a selected LeanPowers wo
 
 # Route
 
-Choose lowest-safe owner. Route material request/scope ambiguity to `shape`. A user-evidenced known-cause defect declares `build`, but reproduce/trace/diagnose/root-cause/why/first-wrong-transition overrides `build`: MUST declare `debug` and at least `standard`. Capsule executes builds and deterministic single-component defects—read no Skill/reference. Intermittent/disputed/cross-component defects load `debug`; other requests load only selected Skill.
+Choose lowest-safe owner. Route material request/scope ambiguity to `shape`. Any request to reproduce/trace/diagnose/find-root-cause/explain-why/identify-first-wrong-transition MUST declare `debug`, risk ≥`standard`, even with a supplied repro/cause. `build` only explicit cause+repair without requested diagnosis. Capsule executes deterministic single-component defects—read no Skill/reference. Intermittent/disputed/cross-component defects load `debug`; other requests load only selected Skill.
 
 `lean`: clear, local, reversible/validated, no public boundary. `strict`: security/authentication/credentials/secrets/cryptography/signatures/authorization/payment/privacy/migration/concurrency/production/irreversible/large-refactor. Otherwise `standard`; preference cannot lower risk.
 
-`OWNER`: feedback→explicit/`adapt`, evidence→`verify`, delivery→`ship`, assessment→`review`; otherwise `shape` material request/scope ambiguity, `debug` unknown-cause defect, `build` known-cause defect/change; never a risk. `RISK`: `lean`, `standard`, or `strict`.
+`OWNER`: feedback→`adapt`, evidence→`verify`, delivery→`ship`, assessment→`review`; otherwise ambiguity→`shape`, requested diagnosis/cause discovery→`debug`, explicit cause/repair or change→`build`; never a risk. `RISK`: `lean`, `standard`, or `strict`.
 
 BEFORE prose/tool, output exactly these four resolved plain lines once. Never repeat them: final MUST omit lines beginning `entrypoint:`, `workflow:`, `risk:`, or `required_gates:`. Then one blank line and prose:
 
