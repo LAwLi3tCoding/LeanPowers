@@ -698,11 +698,8 @@ function hasExactCodexReviewContract(prompt, expectedReviewContract) {
   ) {
     return false;
   }
-  const contract = `Original task:\n${expectedReviewContract}\n\nReviewer context:\n`;
-  return [
-    `$leanpowers:review\n${contract}`,
-    `$leanpowers:review\n\n${contract}`,
-  ].some((prefix) => prompt.startsWith(prefix));
+  return codexReviewContractPrefixes(expectedReviewContract, true)
+    .some((prefix) => prompt.startsWith(prefix));
 }
 
 function parseCompleteCodexReviewPacket(
@@ -717,8 +714,9 @@ function parseCompleteCodexReviewPacket(
   ) {
     return null;
   }
-  const prefix = `$leanpowers:review\nOriginal task:\n${expectedReviewContract}\n\nReviewer context:\n`;
-  if (!prompt.startsWith(prefix)) return null;
+  const prefix = codexReviewContractPrefixes(expectedReviewContract, false)
+    .find((candidate) => prompt.startsWith(candidate));
+  if (!prefix) return null;
   const lines = prompt.slice(prefix.length).split("\n");
   if (
     lines.length !== 9 ||
@@ -751,6 +749,16 @@ function parseCompleteCodexReviewPacket(
     return null;
   }
   return validationEvidence;
+}
+
+function codexReviewContractPrefixes(expectedReviewContract, allowInvocationGap) {
+  const invocationPrefixes = allowInvocationGap
+    ? ["$leanpowers:review\n", "$leanpowers:review\n\n"]
+    : ["$leanpowers:review\n"];
+  return invocationPrefixes.flatMap((invocation) => [
+    `${invocation}Original task:\n${expectedReviewContract}\n\nReviewer context:\n`,
+    `${invocation}Original task:\n${expectedReviewContract}\nReviewer context:\n`,
+  ]);
 }
 
 function hasPopulatedPacketField(line, name) {

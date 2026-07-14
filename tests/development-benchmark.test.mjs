@@ -883,6 +883,25 @@ test("strict review protocol accepts remediated fresh cycles and rejects one-pro
 
   const valid = parse(buildTrace());
   assert.equal(valid.strict_review_protocol_observed, true);
+  const compactBoundaryPacket = prompt.replace(
+    `${contract}\n\nReviewer context:`,
+    `${contract}\nReviewer context:`,
+  );
+  assert.equal(parse([
+    event({
+      type: "file_change",
+      changes: [{ path: "src/index.mjs", kind: "update" }],
+      status: "completed",
+    }),
+    event({
+      type: "command_execution",
+      command: "npm test",
+      exit_code: 0,
+      status: "completed",
+    }),
+    ...spawnEvents("spawn-compact", "reviewer-compact", compactBoundaryPacket),
+    ...waitEvents("wait-compact", "reviewer-compact", pass),
+  ], new Map([["reviewer-compact", false]])).strict_review_protocol_observed, true);
   assert.equal(parse(buildTrace({
     initialCommand: "/bin/zsh -lc 'npm test'",
     command: "/bin/zsh -lc 'npm test'",
