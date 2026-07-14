@@ -45,7 +45,7 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
     assert.match(body, new RegExp(`\\b${workflow}\\b`, "i"), workflow);
   }
   assert.doesNotMatch(body, /1%|before any response|you do not have a choice/i);
-  assert.ok(wordCount(content) <= 450, `route has ${wordCount(content)} words`);
+  assert.ok(wordCount(content) <= 470, `route has ${wordCount(content)} words`);
 });
 
 test("direct workflow entry loads one compact runtime contract at most once", async () => {
@@ -112,18 +112,22 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /one shell command/i);
   assert.match(route, /one multi-file patch call for implementation and tests/i);
   assert.match(route, /never patch the same file twice on the green path/i);
+  assert.match(route, /output one concise clause→test ledger/i);
   assert.match(route, /Run one applicable validation command/i);
   assert.match(route, /strict \*\*MUST NOT answer\*\*/i);
   assert.match(route, /Mandatory strict gate/i);
   assert.match(route, /multi_agent_v1\.spawn_agent[\s\S]{0,220}wait_agent/i);
   assert.match(route, /fork_context:false/i);
-  assert.match(route, /verbatim task/i);
+  assert.match(route, /original user task verbatim/i);
   assert.match(route, /spawn_agent` once/i);
   assert.match(route, /with `message` only[\s\S]{0,220}Never use `items`/i);
   assert.match(route, /second\/placeholder\/`noop` reviewer/i);
   assert.match(route, /as above/i);
   assert.match(route, /\$leanpowers:review/i);
   assert.match(route, /\/leanpowers:review/i);
+  assert.match(route, /first line is exactly `\$leanpowers:review`/i);
+  assert.match(route, /copy the entire original user task verbatim and unchanged/i);
+  assert.match(route, /under `Original task:`/i);
   assert.match(route, /Codex calls wait once for only that ID/i);
   assert.match(route, /blocking runtimes do not wait again/i);
   assert.match(route, /optional suggestions without editing/i);

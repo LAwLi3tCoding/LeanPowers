@@ -333,10 +333,10 @@ export function parseCodexResult(raw, { expectedReviewContract = null } = {}) {
     ) {
       for (const agentId of item.receiver_thread_ids ?? []) {
         reviewAgentSpawns.set(agentId, {
-          contract_verbatim:
-            typeof expectedReviewContract === "string" &&
-            expectedReviewContract.length > 0 &&
-            String(item.prompt ?? "").includes(expectedReviewContract),
+          contract_verbatim: hasExactCodexReviewContract(
+            item.prompt,
+            expectedReviewContract,
+          ),
           index,
           review_skill_invoked:
             /^\$leanpowers:review\r?\n/u.test(String(item.prompt ?? "")),
@@ -436,6 +436,19 @@ export function parseCodexResult(raw, { expectedReviewContract = null } = {}) {
         }
       : null,
   };
+}
+
+function hasExactCodexReviewContract(prompt, expectedReviewContract) {
+  if (
+    typeof prompt !== "string" ||
+    typeof expectedReviewContract !== "string" ||
+    expectedReviewContract.length === 0
+  ) {
+    return false;
+  }
+  return prompt.startsWith(
+    `$leanpowers:review\nOriginal task:\n${expectedReviewContract}\n\nReviewer context:\n`,
+  );
 }
 
 export function isPassingReviewVerdict(message) {

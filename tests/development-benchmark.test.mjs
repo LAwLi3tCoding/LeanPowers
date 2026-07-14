@@ -369,7 +369,7 @@ test("Codex trace proves independent review only after reviewer spawn and comple
         type: "collab_tool_call",
         tool: "spawn_agent",
         receiver_thread_ids: [],
-        prompt: `$leanpowers:review\nReview the strict-risk diff and tests. Original task: ${contract}`,
+        prompt: `$leanpowers:review\nOriginal task:\n${contract}\n\nReviewer context:\nReview the strict-risk diff and tests.`,
         status: "in_progress",
       },
     }),
@@ -379,7 +379,7 @@ test("Codex trace proves independent review only after reviewer spawn and comple
         id: "spawn-reviewer",
         type: "collab_tool_call",
         tool: "spawn_agent",
-        prompt: `$leanpowers:review\nReview the strict-risk diff and tests. Original task: ${contract}`,
+        prompt: `$leanpowers:review\nOriginal task:\n${contract}\n\nReviewer context:\nReview the strict-risk diff and tests.`,
         receiver_thread_ids: ["reviewer"],
         agents_states: { reviewer: { status: "running" } },
         status: "completed",
@@ -459,6 +459,42 @@ test("Codex trace proves independent review only after reviewer spawn and comple
       .workflow_trace.independent_review_contract_verbatim_observed,
     false,
   );
+  for (const prompt of [
+    `$leanpowers:review\nReview first.\nOriginal task:\n${contract}\n\nReviewer context:\nContext.`,
+    `$leanpowers:review\nOriginal task: ${contract}\n\nReviewer context:\nContext.`,
+    `$leanpowers:review\nOriginal task:\n${contract} Added requirement.\n\nReviewer context:\nContext.`,
+  ]) {
+    assert.equal(
+      parseCodexResult([
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            type: "collab_tool_call",
+            tool: "spawn_agent",
+            prompt,
+            receiver_thread_ids: ["reviewer"],
+            status: "completed",
+          },
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            type: "collab_tool_call",
+            tool: "wait",
+            agents_states: {
+              reviewer: {
+                status: "completed",
+                message: "verdict: pass\nfindings: []\nunverified_areas: []",
+              },
+            },
+            status: "completed",
+          },
+        }),
+      ].join("\n"), { expectedReviewContract: contract })
+        .workflow_trace.independent_review_contract_verbatim_observed,
+      false,
+    );
+  }
 
   const extraFailedSpawn = parseCodexResult([
     JSON.stringify({
@@ -466,7 +502,7 @@ test("Codex trace proves independent review only after reviewer spawn and comple
       item: {
         type: "collab_tool_call",
         tool: "spawn_agent",
-        prompt: `$leanpowers:review\nOriginal task: ${contract}`,
+        prompt: `$leanpowers:review\nOriginal task:\n${contract}\n\nReviewer context:\nReview the strict-risk diff.`,
         receiver_thread_ids: ["reviewer"],
         status: "completed",
       },
@@ -504,7 +540,7 @@ test("Codex trace proves independent review only after reviewer spawn and comple
       item: {
         type: "collab_tool_call",
         tool: "spawn_agent",
-        prompt: `$leanpowers:review\nOriginal task: ${contract}`,
+        prompt: `$leanpowers:review\nOriginal task:\n${contract}\n\nReviewer context:\nReview the strict-risk diff.`,
         receiver_thread_ids: ["reviewer"],
         status: "completed",
       },
