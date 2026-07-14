@@ -4,6 +4,9 @@ name: LeanPowers 0.2.0
 targetType: directory
 root: plugins/codex/leanpowers
 entrypoints:
+  - id: route
+    kind: file
+    path: skills/route/SKILL.md
   - id: adapt
     kind: file
     path: skills/adapt/SKILL.md
@@ -26,6 +29,9 @@ entrypoints:
     kind: file
     path: skills/ship/SKILL.md
 roles:
+  - id: route
+    path: skills/route/SKILL.md
+    ownerScopes: [routing]
   - id: adapt
     path: skills/adapt/SKILL.md
     ownerScopes: [learning]

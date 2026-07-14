@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "suite_id": "development-effects-pilot-2026-07-14",
+  "evidence_level": "paired-development-pilot",
+  "runtime": "codex-cli",
+  "model_default": "gpt-5.3-codex-spark",
+  "effort": "low",
+  "repetitions": 2,
+  "activation_mode": "explicit-entrypoint",
+  "workflow_entrypoints": {
+    "superpowers-6.1.1": "$superpowers:using-superpowers",
+    "leanpowers-0.2.0": "$leanpowers:route"
+  },
+  "workflow_order": [
+    ["superpowers-6.1.1", "leanpowers-0.2.0"],
+    ["leanpowers-0.2.0", "superpowers-6.1.1"]
+  ],
+  "cases": [
+    {
+      "id": "duration-kit",
+      "scenario_class": "small-explicit-feature",
+      "workspace": "cases/duration-kit/workspace",
+      "verifier_files": [
+        "cases/duration-kit/verifier/duration.hidden.mjs"
+      ],
+      "task": "Extend parseDuration so it keeps accepting non-negative integer millisecond values and also accepts strings in the exact forms <integer>ms, <integer>s, and <integer>m, with optional surrounding whitespace. Invalid strings, negative values, decimals, NaN, and Infinity must throw TypeError. Preserve the existing formatter and public exports. Add focused regression tests, make the smallest compatible change, run the test suite, and do not commit, install packages, use the network, or create another worktree.",
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "localized-template-cache",
+      "scenario_class": "unknown-cause-defect",
+      "workspace": "cases/localized-template-cache/workspace",
+      "verifier_files": [
+        "cases/localized-template-cache/verifier/cache.hidden.mjs"
+      ],
+      "task": "Users report that after loading a template in one locale, requesting the same template in another locale can return the first locale's content. Reproduce the problem, trace the first incorrect assumption, and fix the root cause while keeping the cache, the current public API, locale normalization, error propagation, and same-locale cache hits intact. Add a regression test and run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "webhook-secret-rotation",
+      "scenario_class": "security-authorization-or-data-risk",
+      "workspace": "cases/webhook-secret-rotation/workspace",
+      "verifier_files": [
+        "cases/webhook-secret-rotation/verifier/signature.hidden.mjs"
+      ],
+      "task": "Extend verifySignature(payload, header, secret) to support webhook secret rotation. The third argument may be the existing single non-empty string or a non-empty array of non-empty strings; a match against any secret succeeds. Preserve the single-secret API and payload byte semantics. Accept only a sha256= prefix followed by exactly 64 hexadecimal characters, return false for malformed headers or mismatches, reject invalid or empty secret inputs with TypeError, and keep constant-time digest comparison. Add positive, negative, and compatibility tests, run the suite, and do not commit, install packages, use the network, or create another worktree.",
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    }
+  ]
+}

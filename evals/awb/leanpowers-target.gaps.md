@@ -2,11 +2,12 @@
 
 The installed AWB initializer currently discovers `AGENTS.md`, `CLAUDE.md`, Claude agents, and Codex agent TOML files, but not Agent Skills. Running it directly against `plugins/codex/leanpowers` therefore returned `No agent files found`.
 
-To preserve an actual initializer pass, the canonical reviewer and verifier TOML adapters were profiled from a temporary directory. The generated draft was then reviewed against all seven canonical `SKILL.md` entrypoints and refined in `leanpowers-target.draft.yaml`. No installed AWB files were modified.
+To preserve an actual initializer pass, the canonical reviewer and verifier TOML adapters were profiled from a temporary directory. The generated draft was then reviewed against all eight canonical `SKILL.md` entrypoints and refined in `leanpowers-target.draft.yaml`. No installed AWB files were modified.
 
 ## Confirmed in the draft
 
-- All seven canonical entrypoints are modeled: six portable engineering workflows and the separate `adapt` control Skill.
+- All eight canonical entrypoints are modeled: six portable engineering workflows plus the separate `route` and `adapt` control Skills.
+- `route` owns routing only; it selects one workflow and is not modeled as a mandatory engineering stage.
 - Owner scopes match each workflow's responsibility.
 - The learning owner is separate from engineering workflow ownership, so `adapt` is not modeled as a mandatory workflow stage.
 - Unknown-cause repair, unverified delivery, and unauthorized high-risk delivery are forbidden routes.

@@ -26,6 +26,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "benchmark:development": "node scripts/development-benchmark.mjs",
     "build": "node scripts/build-release.mjs",
     "generate": "node scripts/generate.mjs",
     "generate:check": "node scripts/generate.mjs --check",
