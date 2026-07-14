@@ -178,6 +178,8 @@ export function buildCodexArgs({ model, prompt, workspace, effort = "low" }) {
     'approval_policy="never"',
     "-c",
     `model_reasoning_effort="${effort}"`,
+    "-c",
+    "features.multi_agent=true",
     "--skip-git-repo-check",
     "--ephemeral",
     "-m",
@@ -276,14 +278,18 @@ export function parseCodexResult(raw) {
       /\/skills\/([^/\s]+)\/SKILL\.md/gu,
     )].map((match) => match[1])
   ))].sort();
+  const finalFileChangeIndex = completedItems.findLastIndex(
+    (event) => event?.item?.type === "file_change",
+  );
   const reviewAgentSpawns = new Map();
-  let independentReviewObserved = false;
+  let independentReviewPassObserved = false;
   completedItems.forEach((event, index) => {
     const item = event?.item;
     if (
       item?.type === "collab_tool_call" &&
       item.tool === "spawn_agent" &&
       item.status === "completed" &&
+      index > finalFileChangeIndex &&
       /(?:\breview\b|reviewer|审查|复核)/iu.test(item.prompt ?? "")
     ) {
       for (const agentId of item.receiver_thread_ids ?? []) {
@@ -296,9 +302,12 @@ export function parseCodexResult(raw) {
       item.tool === "wait" &&
       item.status === "completed"
     ) {
-      independentReviewObserved ||= Object.entries(item.agents_states ?? {}).some(
+      independentReviewPassObserved ||= Object.entries(item.agents_states ?? {}).some(
         ([agentId, state]) =>
           state?.status === "completed" &&
+          /(?:^|\n)\s*verdict\s*:\s*pass\s*(?:\n|$)/iu.test(
+            state?.message ?? "",
+          ) &&
           reviewAgentSpawns.has(agentId) &&
           reviewAgentSpawns.get(agentId) < index,
       );
@@ -327,7 +336,7 @@ export function parseCodexResult(raw) {
         0,
       ),
       skills_observed: skillsObserved,
-      independent_review_observed: independentReviewObserved,
+      independent_review_pass_observed: independentReviewPassObserved,
     },
     tokens: hasUsage
       ? {
@@ -385,9 +394,9 @@ export function evaluateWorkflowConformance(run) {
     }
     if (
       run.risk_level === "strict" &&
-      !run.telemetry?.workflow_trace?.independent_review_observed
+      !run.telemetry?.workflow_trace?.independent_review_pass_observed
     ) {
-      reasons.push("completed independent review was not observed");
+      reasons.push("current passing independent review was not observed");
     }
   }
   return { status: reasons.length === 0 ? "PASS" : "FAIL", reasons };

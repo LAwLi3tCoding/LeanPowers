@@ -5,9 +5,9 @@ description: Use when code, configuration, tests, plans, agent workflows, or del
 
 # Review
 
-Judge whether a change is safe and fit for its declared purpose. Review is an independent evidence-based verdict, not a summary of what the author intended.
+Judge whether the change is safe and fit. Return an evidence-based verdict, not author intent.
 
-For strict or high-risk work, the reviewer must be a different agent, fresh session, qualified human, or external review result from the implementer perspective. A self-review may find defects but does not satisfy the independent-review gate; report the gap when no independent perspective is available.
+Independence is runtime provenance, not self-report. If you implemented the change, discover/load deferred spawn/wait tools, invoke a distinct native Agent/subagent with contract, final diff/code, and evidence, then wait; otherwise return `blocked`. Only its completed result or supplied fresh-session, qualified-human, or external review may return `pass`; implementer-authored text never does.
 
 Inherit the routing ledger. If entered directly or the ledger is missing, read the [runtime contract](../../references/runtime-contract.md) once; do not reload it after transitions.
 
@@ -15,8 +15,8 @@ If project learning is enabled, use `adapt` to query once at entry under the [le
 
 ## Review procedure
 
-1. Establish the review base, declared scope, acceptance criteria, and applicable risk level.
-2. Inspect the complete relevant diff and the surrounding code that defines its contracts.
+1. Establish the review base, scope, risk, and original contract; extract every literal `must`, `only`, `exact`, `preserve`, and `reject` clause.
+2. Map each clause to the relevant diff/code and nearest positive and negative boundary evidence; keep qualifier scopes separate.
 3. Trace changed inputs, state transitions, error paths, outputs, and compatibility boundaries.
 4. Check tests for the actual risk, including negative and regression cases; do not infer correctness from a green summary alone.
 5. Verify each suspected issue against concrete code, configuration, schema, or executable evidence.
@@ -37,17 +37,16 @@ Hard failures dominate aggregate scores and deadline pressure. A known validatio
 
 ```yaml
 verdict: pass | changes_required | blocked
-perspective: independent | unavailable
 findings:
   - severity: critical | high | medium | low
     location: path:line
     evidence: observable fact
     impact: concrete failure mode
     repair: smallest safe direction
-unverified_areas: unavailable review evidence
+unverified_areas: [] | [missing evidence]
 ```
 
-Return `pass` only when no material findings remain. If a finding is uncertain, state the missing evidence instead of presenting speculation as fact.
+`pass` requires no material findings or unverified areas. State missing evidence; never speculate.
 
 For a delegated strict review, send only the task contract, risk ledger, relevant diff and code, and current evidence—not the implementation transcript.
 

@@ -78,6 +78,7 @@ test("the Codex runner is writable, non-interactive, ephemeral, and model-paired
   assert.ok(!args.includes("--ignore-user-config"));
   assert.ok(args.includes('approval_policy="never"'));
   assert.ok(args.includes('model_reasoning_effort="low"'));
+  assert.ok(args.includes("features.multi_agent=true"));
   assert.ok(!args.join(" ").includes("superpowers-6.1.1"));
   assert.ok(!args.join(" ").includes("leanpowers-0.2.0"));
 });
@@ -172,7 +173,7 @@ test("Codex JSONL usage and completion are independently parsed", () => {
       read_calls: 0,
       read_output_chars: 0,
       skills_observed: [],
-      independent_review_observed: false,
+      independent_review_pass_observed: false,
     },
   });
   assert.equal(parseCodexResult('{"type":"turn.failed"}').tokens, null);
@@ -233,7 +234,7 @@ test("Codex trace records tool types and exact workflow file reads", () => {
     read_calls: 1,
     read_output_chars: 14,
     skills_observed: ["build"],
-    independent_review_observed: false,
+    independent_review_pass_observed: false,
   });
 });
 
@@ -255,7 +256,9 @@ test("Codex trace proves independent review only after reviewer spawn and comple
       item: {
         type: "collab_tool_call",
         tool: "wait",
-        agents_states: { reviewer: { status: "completed", message: "PASS" } },
+        agents_states: {
+          reviewer: { status: "completed", message: "verdict: pass\nfindings: []" },
+        },
         status: "completed",
       },
     }),
@@ -265,7 +268,7 @@ test("Codex trace proves independent review only after reviewer spawn and comple
     }),
   ].join("\n"));
 
-  assert.equal(parsed.workflow_trace.independent_review_observed, true);
+  assert.equal(parsed.workflow_trace.independent_review_pass_observed, true);
 });
 
 test("Codex trace rejects failed, unrelated, or out-of-order review evidence", () => {
@@ -292,12 +295,52 @@ test("Codex trace rejects failed, unrelated, or out-of-order review evidence", (
     [spawn("failed"), wait(), turn],
     [spawn(), wait("other-agent"), turn],
     [wait(), spawn(), turn],
+    [event({ type: "agent_message", text: "verdict: pass\nperspective: independent" }), turn],
   ]) {
     assert.equal(
-      parseCodexResult(raw.join("\n")).workflow_trace.independent_review_observed,
+      parseCodexResult(raw.join("\n")).workflow_trace.independent_review_pass_observed,
       false,
     );
   }
+});
+
+test("Codex trace requires a passing review after the final file change", () => {
+  const event = (item) => JSON.stringify({ type: "item.completed", item });
+  const spawn = event({
+    type: "collab_tool_call",
+    tool: "spawn_agent",
+    prompt: "Run an independent review.",
+    receiver_thread_ids: ["reviewer"],
+    status: "completed",
+  });
+  const wait = (message) => event({
+    type: "collab_tool_call",
+    tool: "wait",
+    agents_states: { reviewer: { status: "completed", message } },
+    status: "completed",
+  });
+  const change = event({ type: "file_change", changes: [] });
+  const turn = JSON.stringify({
+    type: "turn.completed",
+    usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 },
+  });
+
+  for (const raw of [
+    [spawn, wait("verdict: changes_required"), turn],
+    [spawn, wait("PASS is not granted; changes are required"), turn],
+    [spawn, change, wait("verdict: pass"), turn],
+    [spawn, wait("PASS — no blockers"), change, turn],
+  ]) {
+    assert.equal(
+      parseCodexResult(raw.join("\n")).workflow_trace.independent_review_pass_observed,
+      false,
+    );
+  }
+  assert.equal(
+    parseCodexResult([change, spawn, wait("verdict: pass"), turn].join("\n"))
+      .workflow_trace.independent_review_pass_observed,
+    true,
+  );
 });
 
 test("changed-path evaluation separates product changes, workflow artifacts, and violations", () => {
@@ -362,7 +405,7 @@ test("workflow declaration and risk classification are separate conformance evid
       activation_reported: true,
       declared_risk: "strict",
       risk_level: "strict",
-      telemetry: { workflow_trace: { independent_review_observed: true } },
+      telemetry: { workflow_trace: { independent_review_pass_observed: true } },
     }),
     { status: "PASS", reasons: [] },
   );
@@ -372,7 +415,7 @@ test("workflow declaration and risk classification are separate conformance evid
       activation_reported: false,
       declared_risk: "standard",
       risk_level: "strict",
-      telemetry: { workflow_trace: { independent_review_observed: false } },
+      telemetry: { workflow_trace: { independent_review_pass_observed: false } },
     }).status,
     "FAIL",
   );
@@ -382,7 +425,7 @@ test("workflow declaration and risk classification are separate conformance evid
       activation_reported: true,
       declared_risk: null,
       risk_level: "standard",
-      telemetry: { workflow_trace: { independent_review_observed: false } },
+      telemetry: { workflow_trace: { independent_review_pass_observed: false } },
     }).status,
     "FAIL",
   );
@@ -392,7 +435,7 @@ test("workflow declaration and risk classification are separate conformance evid
       activation_reported: true,
       declared_risk: "strict",
       risk_level: "strict",
-      telemetry: { workflow_trace: { independent_review_observed: false } },
+      telemetry: { workflow_trace: { independent_review_pass_observed: false } },
     }).status,
     "FAIL",
   );

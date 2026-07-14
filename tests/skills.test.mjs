@@ -86,6 +86,9 @@ test("direct workflow entry loads one compact runtime contract at most once", as
 test("ordinary completion is inline while strict review remains mandatory", async () => {
   const build = await readFile(path.join(skillsRoot, "build", "SKILL.md"), "utf8");
   const debug = await readFile(path.join(skillsRoot, "debug", "SKILL.md"), "utf8");
+  const review = await readFile(path.join(skillsRoot, "review", "SKILL.md"), "utf8");
+  const route = await readFile(path.join(skillsRoot, "route", "SKILL.md"), "utf8");
+  const runtime = await readFile(path.join(root, "references", "runtime-contract.md"), "utf8");
   const verify = await readFile(path.join(skillsRoot, "verify", "SKILL.md"), "utf8");
 
   assert.match(build, /lean or standard[\s\S]{0,180}next: null/i);
@@ -95,6 +98,15 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(verify, /independent_review: pass \| missing \| not_required/i);
   assert.match(build, /affected integration[\s\S]{0,120}full-suite/i);
   assert.match(build, /validation gap blocks `complete`/i);
+  assert.match(route, /distinct native Agent\/subagent[\s\S]{0,160}wait/i);
+  assert.match(route, /spawn\/wait tools are invisible[\s\S]{0,100}tool discovery/i);
+  assert.match(route, /implementer-authored review text never/i);
+  assert.match(route, /without inherited transcript/i);
+  assert.match(review, /runtime provenance, not self-report/i);
+  assert.match(review, /literal `must`[\s\S]{0,100}`only`[\s\S]{0,100}`exact`/i);
+  assert.match(review, /positive and negative boundary evidence/i);
+  assert.match(runtime, /implementer-authored review text never/i);
+  assert.match(runtime, /discovers\/loads deferred spawn\/wait tools/i);
 });
 
 test("skill frontmatter is portable and descriptions are discovery-focused", async () => {

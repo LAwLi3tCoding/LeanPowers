@@ -36,4 +36,4 @@ Reuse evidence only while all relevant code, generated output, dependencies, con
 - `review -> build/debug` on findings; independent strict pass goes to `verify`.
 - `verify -> ship` only when delivery was requested and every material claim passes.
 
-Default to one agent. Delegate only when independent, verifiable work without shared-write conflict outweighs coordination cost; normally use at most two or three direct children, and the leader must inspect their diff and evidence. A strict reviewer must be a distinct agent, fresh session, qualified human, or external review; if unavailable, return incomplete and do not ship.
+Default to one agent; delegate only independent, verifiable work without write conflicts, to at most three children whose diff/evidence the leader inspects. Strict discovers/loads deferred spawn/wait tools, delegates without inherited transcript the contract, final diff/code, and evidence, then waits for a passing result. Implementer-authored review text never satisfies the gate; otherwise return incomplete and never ship.

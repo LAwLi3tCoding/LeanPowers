@@ -6,7 +6,7 @@ Increase automatic LeanPowers discovery in Codex and Claude Code without adoptin
 
 ## Decision
 
-Add a portable `route` control Skill. Its metadata broadly matches the start of software engineering work and common intents such as plan, implement, fix, review, verify, and deliver. Its body remains at most 220 words and performs only one action: select exactly one lowest-safe owning workflow.
+Add a portable `route` control Skill. Its metadata broadly matches the start of software engineering work and common intents such as plan, implement, fix, review, verify, and deliver. Its body remains at most 260 words and performs only one action: select exactly one lowest-safe owning workflow.
 
 The six engineering workflows remain unchanged. `route` and `adapt` are control-plane Skills, not additional engineering stages.
 
@@ -29,7 +29,7 @@ A workflow transition activates only the named next Skill after its observable c
 - Keep current authorization, scope, root-cause, regression, independent-review, and current-evidence gates.
 - Do not add a daemon, repository scan, network request, telemetry, or startup write.
 - Do not use Superpowers' “1% chance” rule, “before any response” mandate, or anti-rationalization table.
-- Keep `route` at no more than 220 words and the Claude startup script below 120 words.
+- Keep `route` at no more than 260 words and the Claude startup script below 120 words.
 - Preserve one-agent default and risk-triggered escalation.
 
 ## Acceptance evidence
