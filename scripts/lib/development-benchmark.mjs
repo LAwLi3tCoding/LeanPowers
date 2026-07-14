@@ -1,12 +1,16 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import {
   access,
   chmod,
   cp,
+  lstat,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
+  readlink,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -240,7 +244,13 @@ export function parseClaudeResult(raw) {
   };
 }
 
-export function parseCodexResult(raw, { expectedReviewContract = null } = {}) {
+export function parseCodexResult(
+  raw,
+  {
+    expectedReviewContract = null,
+    reviewerWorkspaceMutations = new Map(),
+  } = {},
+) {
   const events = raw
     .split(/\r?\n/u)
     .filter((line) => line.trim().startsWith("{"))
@@ -329,7 +339,7 @@ export function parseCodexResult(raw, { expectedReviewContract = null } = {}) {
       item.tool === "spawn_agent" &&
       item.status === "completed" &&
       index > finalFileChangeIndex &&
-      /(?:\breview\b|reviewer|审查|复核)/iu.test(item.prompt ?? "")
+      isReviewerPrompt(item.prompt)
     ) {
       for (const agentId of item.receiver_thread_ids ?? []) {
         reviewAgentSpawns.set(agentId, {
@@ -365,6 +375,10 @@ export function parseCodexResult(raw, { expectedReviewContract = null } = {}) {
               state?.status === "completed" &&
               isPassingReviewVerdict(state?.message),
             review_skill_invoked: spawn.review_skill_invoked,
+            workspace_mutation_check_observed:
+              reviewerWorkspaceMutations.has(agentId),
+            workspace_mutation_observed:
+              reviewerWorkspaceMutations.get(agentId) === true,
             sole_spawn_target: spawn.sole_spawn_target,
           });
         }
@@ -377,6 +391,12 @@ export function parseCodexResult(raw, { expectedReviewContract = null } = {}) {
           pass: completedReviews.every((review) => review.pass),
           review_skill_invoked: completedReviews.every(
             (review) => review.review_skill_invoked,
+          ),
+          workspace_mutation_check_observed: completedReviews.every(
+            (review) => review.workspace_mutation_check_observed,
+          ),
+          workspace_mutation_observed: completedReviews.some(
+            (review) => review.workspace_mutation_observed,
           ),
           sole_wait_target:
             Array.isArray(requestedAgentIds) &&
@@ -413,14 +433,15 @@ export function parseCodexResult(raw, { expectedReviewContract = null } = {}) {
       skills_observed: skillsObserved,
       independent_review_pass_observed: latestIndependentReview?.pass === true,
       independent_review_contract_verbatim_observed:
-        latestIndependentReview?.pass === true &&
-        latestIndependentReview.contract_verbatim === true,
+        latestIndependentReview?.contract_verbatim === true,
       independent_review_skill_invoked:
-        latestIndependentReview?.pass === true &&
-        latestIndependentReview.review_skill_invoked === true,
+        latestIndependentReview?.review_skill_invoked === true,
       independent_review_sole_wait_target_observed:
-        latestIndependentReview?.pass === true &&
-        latestIndependentReview.sole_wait_target === true,
+        latestIndependentReview?.sole_wait_target === true,
+      reviewer_workspace_mutation_check_observed:
+        latestIndependentReview?.workspace_mutation_check_observed === true,
+      reviewer_workspace_mutation_observed:
+        latestIndependentReview?.workspace_mutation_observed === true,
       post_change_spawn_calls: postChangeSpawnAttempts.size,
       post_change_wait_calls: postChangeWaitAttempts.size,
     },
@@ -436,6 +457,98 @@ export function parseCodexResult(raw, { expectedReviewContract = null } = {}) {
         }
       : null,
   };
+}
+
+export function createReviewerWorkspaceMutationTracker(snapshotWorkspace) {
+  if (typeof snapshotWorkspace !== "function") {
+    throw new TypeError("snapshotWorkspace must be a function");
+  }
+  const pendingSpawns = new Map();
+  const reviewerSpawns = new Map();
+  const startedWaitTargets = new Map();
+  const mutationByAgent = new Map();
+
+  const onStdoutLine = async (line) => {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      return;
+    }
+    const item = event?.item;
+    if (
+      event?.type === "item.started" &&
+      item?.type === "collab_tool_call" &&
+      item.tool === "spawn_agent" &&
+      typeof item.id === "string" &&
+      isReviewerPrompt(item.prompt)
+    ) {
+      pendingSpawns.set(item.id, await snapshotWorkspace());
+      return;
+    }
+    if (
+      event?.type === "item.completed" &&
+      item?.type === "collab_tool_call" &&
+      item.tool === "spawn_agent" &&
+      typeof item.id === "string"
+    ) {
+      if (!pendingSpawns.has(item.id)) return;
+      const before = pendingSpawns.get(item.id);
+      pendingSpawns.delete(item.id);
+      if (item.status !== "completed") return;
+      for (const agentId of item.receiver_thread_ids ?? []) {
+        reviewerSpawns.set(agentId, before);
+      }
+      return;
+    }
+    if (
+      event?.type === "item.started" &&
+      item?.type === "collab_tool_call" &&
+      item.tool === "wait" &&
+      typeof item.id === "string"
+    ) {
+      startedWaitTargets.set(item.id, item.receiver_thread_ids);
+      return;
+    }
+    if (
+      event?.type !== "item.completed" ||
+      item?.type !== "collab_tool_call" ||
+      item.tool !== "wait" ||
+      item.status !== "completed"
+    ) {
+      return;
+    }
+    const requestedAgentIds =
+      typeof item.id === "string"
+        ? startedWaitTargets.get(item.id)
+        : item.receiver_thread_ids;
+    const candidateAgentIds = Array.isArray(requestedAgentIds)
+      ? requestedAgentIds
+      : Object.keys(item.agents_states ?? {});
+    const completedReviewerIds = candidateAgentIds.filter((agentId) =>
+      reviewerSpawns.has(agentId) &&
+      !mutationByAgent.has(agentId) &&
+      isTerminalAgentState(item.agents_states?.[agentId]?.status)
+    );
+    if (completedReviewerIds.length === 0) return;
+    const after = await snapshotWorkspace();
+    for (const agentId of completedReviewerIds) {
+      mutationByAgent.set(agentId, reviewerSpawns.get(agentId) !== after);
+    }
+  };
+
+  return {
+    mutations: () => new Map(mutationByAgent),
+    onStdoutLine,
+  };
+}
+
+function isReviewerPrompt(prompt) {
+  return /(?:\breview\b|reviewer|审查|复核)/iu.test(String(prompt ?? ""));
+}
+
+function isTerminalAgentState(status) {
+  return ["cancelled", "completed", "errored", "failed", "shutdown"].includes(status);
 }
 
 function hasExactCodexReviewContract(prompt, expectedReviewContract) {
@@ -542,6 +655,17 @@ export function evaluateWorkflowConformance(run) {
       !run.telemetry?.workflow_trace?.independent_review_sole_wait_target_observed
     ) {
       reasons.push("strict wait did not target only the designated reviewer");
+    }
+    if (
+      run.risk_level === "strict" &&
+      !run.telemetry?.workflow_trace?.reviewer_workspace_mutation_check_observed
+    ) {
+      reasons.push("reviewer workspace mutation check was not observed");
+    } else if (
+      run.risk_level === "strict" &&
+      run.telemetry?.workflow_trace?.reviewer_workspace_mutation_observed
+    ) {
+      reasons.push("designated reviewer mutated the workspace");
     }
     if (
       run.risk_level === "strict" &&
@@ -793,7 +917,7 @@ export function renderDevelopmentReport(result) {
     "## Interpretation boundary",
     "",
     "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    "- LeanPowers conformance requires the exact four-line route-ledger prefix. Strict runs also require one post-change reviewer spawn, one wait targeting only that reviewer, explicit review Skill invocation, the verbatim task contract, and an exact empty passing verdict after the final edit.",
+    "- LeanPowers conformance requires the exact four-line route-ledger prefix. Strict runs also require one post-change reviewer spawn, one wait targeting only that reviewer, explicit review Skill invocation, the verbatim task contract, no reviewer workspace mutation, and an exact empty passing verdict after the final edit.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
     "- Paired reductions are computed within each identical case and repetition before taking the median. Each metric shows its own valid sample count; incomplete telemetry is excluded from that metric only. The task-PASS-and-conformant population is primary, so failing faster or skipping workflow gates never counts as an improvement.",
@@ -856,15 +980,28 @@ async function runSingleCase({
       prompt,
       workspace,
     });
+    const reviewerMutationTracker =
+      workflow === "leanpowers-0.2.0" && benchmarkCase.risk_level === "strict"
+        ? createReviewerWorkspaceMutationTracker(() =>
+            fingerprintBenchmarkWorkspace({
+              baselineHead,
+              environment: toolchain.environment,
+              gitExecutable: toolchain.git,
+              workspace,
+            })
+          )
+        : null;
     const startedAt = Date.now();
     const agent = await runProcess(codexExecutable, args, {
       cwd: workspace,
       env: benchmarkEnvironment(runHome, toolchain.environment),
+      onStdoutLine: reviewerMutationTracker?.onStdoutLine,
       timeoutMs: 600_000,
     });
     const wallSeconds = (Date.now() - startedAt) / 1000;
     const telemetry = parseCodexResult(agent.stdout, {
       expectedReviewContract: benchmarkCase.task,
+      reviewerWorkspaceMutations: reviewerMutationTracker?.mutations(),
     });
     const routeLedger = parseLeanRouteLedger(telemetry.first_progress_message);
     const declaredRisk = extractDeclaredRisk(telemetry.first_progress_message);
@@ -1271,6 +1408,77 @@ export async function inspectBenchmarkGitState({
   };
 }
 
+export async function fingerprintBenchmarkWorkspace({
+  baselineHead,
+  environment = {},
+  gitExecutable = "git",
+  workspace,
+}) {
+  await assertNoUnsupportedWorkspaceEntries(workspace);
+  const env = benchmarkEnvironment(workspace, environment);
+  const [diff, untracked] = await Promise.all([
+    runProcess(
+      gitExecutable,
+      ["diff", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", baselineHead, "--", "."],
+      { cwd: workspace, env, timeoutMs: 30_000 },
+    ),
+    runProcess(
+      gitExecutable,
+      ["ls-files", "--others", "--exclude-standard", "-z"],
+      { cwd: workspace, env, timeoutMs: 30_000 },
+    ),
+  ]);
+  if (diff.exitCode !== 0 || untracked.exitCode !== 0) {
+    throw new Error(`Cannot fingerprint benchmark workspace: ${diff.stderr || untracked.stderr}`);
+  }
+
+  const hash = createHash("sha256");
+  updateFingerprint(hash, "tracked-patch", diff.stdout);
+  const untrackedPaths = untracked.stdout.split("\0").filter(Boolean).sort();
+  for (const relativePath of untrackedPaths) {
+    const target = path.resolve(workspace, relativePath);
+    if (!isSameOrAncestor(workspace, target) || target === path.resolve(workspace)) {
+      throw new Error("Cannot fingerprint an unsafe untracked path");
+    }
+    const stat = await lstat(target);
+    if (!stat.isSymbolicLink() && !stat.isFile()) {
+      throw new Error("Cannot fingerprint an unsupported untracked entry");
+    }
+    const kind = stat.isSymbolicLink() ? "symlink" : "file";
+    const contents = stat.isSymbolicLink()
+      ? await readlink(target)
+      : await readFile(target);
+    updateFingerprint(
+      hash,
+      `untracked:${relativePath}:${kind}:${stat.mode.toString(8)}`,
+      contents,
+    );
+  }
+  return hash.digest("hex");
+}
+
+async function assertNoUnsupportedWorkspaceEntries(workspace, directory = workspace) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (directory === workspace && entry.name === ".git") continue;
+    const target = path.join(directory, entry.name);
+    const stat = await lstat(target);
+    if (stat.isDirectory()) {
+      await assertNoUnsupportedWorkspaceEntries(workspace, target);
+    } else if (!stat.isFile() && !stat.isSymbolicLink()) {
+      throw new Error("Cannot fingerprint an unsupported workspace entry");
+    }
+  }
+}
+
+function updateFingerprint(hash, label, contents) {
+  const labelBytes = Buffer.from(label);
+  const contentBytes = Buffer.isBuffer(contents) ? contents : Buffer.from(contents);
+  hash.update(`${labelBytes.length}:`);
+  hash.update(labelBytes);
+  hash.update(`${contentBytes.length}:`);
+  hash.update(contentBytes);
+}
+
 async function gitChangedPaths(workspace, baselineHead, toolchain) {
   const env = benchmarkEnvironment(workspace, toolchain.environment);
   const tracked = await runProcess(
@@ -1386,7 +1594,16 @@ function normalizeGitHubOrigin(origin) {
     .replace(/\.git$/u, "");
 }
 
-async function runProcess(command, args, { cwd, env = process.env, timeoutMs = 120_000 } = {}) {
+export async function runProcess(
+  command,
+  args,
+  {
+    cwd,
+    env = process.env,
+    onStdoutLine,
+    timeoutMs = 120_000,
+  } = {},
+) {
   return new Promise((resolve, reject) => {
     const detached = process.platform !== "win32";
     const child = spawn(command, args, {
@@ -1396,9 +1613,21 @@ async function runProcess(command, args, { cwd, env = process.env, timeoutMs = 1
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
+    let stdoutLineBuffer = "";
     let stderr = "";
     let timedOut = false;
     let forceKillTimer;
+    let callbackError = null;
+    let callbackSequence = Promise.resolve();
+    let settled = false;
+    const queueStdoutLine = (line) => {
+      if (typeof onStdoutLine !== "function") return;
+      callbackSequence = callbackSequence
+        .then(() => callbackError === null ? onStdoutLine(line) : undefined)
+        .catch((error) => {
+          callbackError ??= error;
+        });
+    };
     const timer = setTimeout(() => {
       timedOut = true;
       killProcessTree(child, "SIGTERM");
@@ -1408,18 +1637,42 @@ async function runProcess(command, args, { cwd, env = process.env, timeoutMs = 1
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
+      if (typeof onStdoutLine !== "function") return;
+      stdoutLineBuffer += chunk;
+      let newlineIndex;
+      while ((newlineIndex = stdoutLineBuffer.indexOf("\n")) !== -1) {
+        const rawLine = stdoutLineBuffer.slice(0, newlineIndex);
+        stdoutLineBuffer = stdoutLineBuffer.slice(newlineIndex + 1);
+        queueStdoutLine(rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine);
+      }
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
     });
     child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       clearTimeout(forceKillTimer);
       reject(error);
     });
-    child.on("close", (code, signal) => {
+    child.on("close", async (code, signal) => {
+      if (settled) return;
       clearTimeout(timer);
       clearTimeout(forceKillTimer);
+      if (stdoutLineBuffer.length > 0) {
+        queueStdoutLine(
+          stdoutLineBuffer.endsWith("\r")
+            ? stdoutLineBuffer.slice(0, -1)
+            : stdoutLineBuffer,
+        );
+      }
+      await callbackSequence;
+      settled = true;
+      if (callbackError) {
+        reject(callbackError);
+        return;
+      }
       resolve({
         exitCode: code ?? (signal ? 128 : 1),
         signal,

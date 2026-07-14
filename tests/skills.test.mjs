@@ -36,9 +36,9 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
   assert.match(body, /lowest-safe|lowest safe/i);
   assert.match(body, /security.*authorization.*payment.*privacy/is);
   assert.match(body, /risk: RISK/i);
-  assert.match(body, /`lean` means clear, local/i);
-  assert.match(body, /`strict` means security/i);
-  assert.match(body, /otherwise use `standard`/i);
+  assert.match(body, /`lean`(?::| means) clear, local/i);
+  assert.match(body, /`strict`(?::| means) security/i);
+  assert.match(body, /otherwise(?: use)? `standard`/i);
   assert.match(body, /required_gates/i);
   assert.match(body, /entrypoint: leanpowers:route/i);
   for (const workflow of ["shape", "build", "debug", "review", "verify", "ship", "adapt"]) {
@@ -102,10 +102,10 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(verify, /independent_review: pass \| missing \| not_required/i);
   assert.match(build, /affected integration[\s\S]{0,120}full-suite/i);
   assert.match(build, /validation gap blocks `complete`/i);
-  assert.match(route, /For a clear build, execute the capsule below/i);
+  assert.match(route, /Clear build: execute this capsule/i);
   assert.match(route, /Otherwise load and execute the selected installed Skill once/i);
-  assert.match(route, /do not use the build capsule/i);
-  assert.match(route, /stages 1–3 target one call each on the green path/i);
+  assert.match(route, /never use the build capsule/i);
+  assert.match(route, /stages 1–3 target one call each/i);
   assert.match(route, /not a quality ceiling/i);
   assert.match(route, /Expand only for missing, contradictory, or failed evidence/i);
   assert.match(route, /one green-path inspection tool call/i);
@@ -125,7 +125,10 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /as above/i);
   assert.match(route, /\$leanpowers:review/i);
   assert.match(route, /\/leanpowers:review/i);
-  assert.match(route, /first line is exactly `\$leanpowers:review`/i);
+  assert.match(route, /Codex message:\s*\$leanpowers:review\s*Original task:/i);
+  assert.match(route, /Claude message:\s*\/leanpowers:review\s*Original task:/i);
+  assert.match(route, /replace every `\{\.\.\.\}`[\s\S]{0,100}never improvise, omit lines/i);
+  assert.match(route, /do not edit(?: or |\/)delegate/i);
   assert.match(route, /copy the entire original user task verbatim and unchanged/i);
   assert.match(route, /under `Original task:`/i);
   assert.match(route, /Codex calls wait once for only that ID/i);

@@ -10,10 +10,12 @@ import {
   benchmarkEnvironment,
   buildClaudeArgs,
   buildCodexArgs,
+  createReviewerWorkspaceMutationTracker,
   evaluateChangedPaths,
   evaluateRunOutcome,
   evaluateWorkflowConformance,
   extractDeclaredRisk,
+  fingerprintBenchmarkWorkspace,
   inspectBenchmarkGitState,
   loadDevelopmentSuite,
   makePilotResult,
@@ -22,6 +24,7 @@ import {
   parseLeanRouteLedger,
   resolveDevelopmentOutputDirectory,
   reportsWorkflowActivation,
+  runProcess,
   runVerifier,
 } from "../scripts/lib/development-benchmark.mjs";
 
@@ -308,6 +311,8 @@ test("Codex JSONL usage and completion are independently parsed", () => {
       independent_review_contract_verbatim_observed: false,
       independent_review_skill_invoked: false,
       independent_review_sole_wait_target_observed: false,
+      reviewer_workspace_mutation_check_observed: false,
+      reviewer_workspace_mutation_observed: false,
       post_change_spawn_calls: 0,
       post_change_wait_calls: 0,
     },
@@ -374,9 +379,93 @@ test("Codex trace records tool types and exact workflow file reads", () => {
     independent_review_contract_verbatim_observed: false,
     independent_review_skill_invoked: false,
     independent_review_sole_wait_target_observed: false,
+    reviewer_workspace_mutation_check_observed: false,
+    reviewer_workspace_mutation_observed: false,
     post_change_spawn_calls: 0,
     post_change_wait_calls: 0,
   });
+});
+
+test("process stdout callbacks preserve complete line order across chunks", async () => {
+  const lines = [];
+  const result = await runProcess(process.execPath, [
+    "-e",
+    [
+      "process.stdout.write('first\\nsec');",
+      "setTimeout(() => process.stdout.write('ond\\r\\nthird'), 10);",
+    ].join(""),
+  ], {
+    onStdoutLine: async (line) => {
+      if (line === "first") await new Promise((resolve) => setTimeout(resolve, 20));
+      lines.push(line);
+    },
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(lines, ["first", "second", "third"]);
+});
+
+test("process stdout callback failures reject the process result", async () => {
+  await assert.rejects(
+    runProcess(process.execPath, ["-e", "console.log('line')"], {
+      onStdoutLine() {
+        throw new Error("stdout callback failed");
+      },
+    }),
+    /stdout callback failed/u,
+  );
+});
+
+test("reviewer mutation tracker correlates the designated spawn and completed wait", async () => {
+  const fingerprints = ["before", "after"];
+  const tracker = createReviewerWorkspaceMutationTracker(async () => fingerprints.shift());
+  const events = [
+    {
+      type: "item.started",
+      item: {
+        id: "spawn-reviewer",
+        type: "collab_tool_call",
+        tool: "spawn_agent",
+        prompt: "$leanpowers:review\nReview the strict-risk diff.",
+      },
+    },
+    {
+      type: "item.completed",
+      item: {
+        id: "spawn-reviewer",
+        type: "collab_tool_call",
+        tool: "spawn_agent",
+        receiver_thread_ids: ["reviewer"],
+        status: "completed",
+      },
+    },
+    {
+      type: "item.started",
+      item: {
+        id: "wait-reviewer",
+        type: "collab_tool_call",
+        tool: "wait",
+        receiver_thread_ids: ["reviewer"],
+      },
+    },
+    {
+      type: "item.completed",
+      item: {
+        id: "wait-reviewer",
+        type: "collab_tool_call",
+        tool: "wait",
+        agents_states: {
+          reviewer: { status: "completed", message: "not the required schema" },
+        },
+        status: "completed",
+      },
+    },
+  ];
+
+  for (const event of events) await tracker.onStdoutLine(JSON.stringify(event));
+
+  assert.deepEqual([...tracker.mutations()], [["reviewer", true]]);
+  assert.deepEqual(fingerprints, []);
 });
 
 test("Codex trace proves independent review only after reviewer spawn and completed wait", () => {
@@ -630,6 +719,64 @@ test("Codex trace proves independent review only after reviewer spawn and comple
   );
 });
 
+test("non-schema review keeps structural telemetry independent from its verdict", () => {
+  const contract = "Preserve the exact authorization boundary.";
+  const raw = [
+    {
+      type: "item.started",
+      item: {
+        id: "spawn-reviewer",
+        type: "collab_tool_call",
+        tool: "spawn_agent",
+        prompt: `$leanpowers:review\nOriginal task:\n${contract}\n\nReviewer context:\nReview it.`,
+      },
+    },
+    {
+      type: "item.completed",
+      item: {
+        id: "spawn-reviewer",
+        type: "collab_tool_call",
+        tool: "spawn_agent",
+        prompt: `$leanpowers:review\nOriginal task:\n${contract}\n\nReviewer context:\nReview it.`,
+        receiver_thread_ids: ["reviewer"],
+        status: "completed",
+      },
+    },
+    {
+      type: "item.started",
+      item: {
+        id: "wait-reviewer",
+        type: "collab_tool_call",
+        tool: "wait",
+        receiver_thread_ids: ["reviewer"],
+      },
+    },
+    {
+      type: "item.completed",
+      item: {
+        id: "wait-reviewer",
+        type: "collab_tool_call",
+        tool: "wait",
+        agents_states: {
+          reviewer: { status: "completed", message: "I changed the implementation." },
+        },
+        status: "completed",
+      },
+    },
+  ].map(JSON.stringify).join("\n");
+  const trace = parseCodexResult(raw, {
+    expectedReviewContract: contract,
+    reviewerWorkspaceMutations: new Map([["reviewer", true]]),
+  }).workflow_trace;
+
+  assert.equal(trace.independent_review_pass_observed, false);
+  assert.equal(trace.independent_review_contract_verbatim_observed, true);
+  assert.equal(trace.independent_review_skill_invoked, true);
+  assert.equal(trace.independent_review_sole_wait_target_observed, true);
+  assert.equal(trace.reviewer_workspace_mutation_check_observed, true);
+  assert.equal(trace.reviewer_workspace_mutation_observed, true);
+});
+
 test("Codex trace rejects failed, unrelated, or out-of-order review evidence", () => {
   const event = (item) => JSON.stringify({ type: "item.completed", item });
   const turn = JSON.stringify({
@@ -820,6 +967,7 @@ test("workflow declaration and risk classification are separate conformance evid
           independent_review_contract_verbatim_observed: true,
           independent_review_skill_invoked: true,
           independent_review_sole_wait_target_observed: true,
+          reviewer_workspace_mutation_check_observed: true,
           post_change_spawn_calls: 1,
           post_change_wait_calls: 1,
         },
@@ -842,6 +990,7 @@ test("workflow declaration and risk classification are separate conformance evid
           independent_review_contract_verbatim_observed: true,
           independent_review_skill_invoked: true,
           independent_review_sole_wait_target_observed: true,
+          reviewer_workspace_mutation_check_observed: true,
           post_change_spawn_calls: 1,
           post_change_wait_calls: 1,
         },
@@ -891,6 +1040,7 @@ test("workflow declaration and risk classification are separate conformance evid
           independent_review_contract_verbatim_observed: false,
           independent_review_skill_invoked: true,
           independent_review_sole_wait_target_observed: true,
+          reviewer_workspace_mutation_check_observed: true,
           post_change_spawn_calls: 1,
           post_change_wait_calls: 1,
         },
@@ -904,6 +1054,7 @@ test("workflow declaration and risk classification are separate conformance evid
       independent_review_contract_verbatim_observed: true,
       independent_review_skill_invoked: false,
       independent_review_sole_wait_target_observed: true,
+      reviewer_workspace_mutation_check_observed: true,
       post_change_spawn_calls: 1,
       post_change_wait_calls: 1,
     }, "passing reviewer did not explicitly invoke leanpowers:review"],
@@ -912,6 +1063,7 @@ test("workflow declaration and risk classification are separate conformance evid
       independent_review_contract_verbatim_observed: true,
       independent_review_skill_invoked: true,
       independent_review_sole_wait_target_observed: true,
+      reviewer_workspace_mutation_check_observed: true,
       post_change_spawn_calls: 2,
       post_change_wait_calls: 1,
     }, "strict final review did not use exactly one spawn call"],
@@ -920,6 +1072,7 @@ test("workflow declaration and risk classification are separate conformance evid
       independent_review_contract_verbatim_observed: true,
       independent_review_skill_invoked: true,
       independent_review_sole_wait_target_observed: true,
+      reviewer_workspace_mutation_check_observed: true,
       post_change_spawn_calls: 1,
       post_change_wait_calls: 2,
     }, "strict final review did not use exactly one wait call"],
@@ -928,9 +1081,29 @@ test("workflow declaration and risk classification are separate conformance evid
       independent_review_contract_verbatim_observed: true,
       independent_review_skill_invoked: true,
       independent_review_sole_wait_target_observed: false,
+      reviewer_workspace_mutation_check_observed: true,
       post_change_spawn_calls: 1,
       post_change_wait_calls: 1,
     }, "strict wait did not target only the designated reviewer"],
+    [{
+      independent_review_pass_observed: true,
+      independent_review_contract_verbatim_observed: true,
+      independent_review_skill_invoked: true,
+      independent_review_sole_wait_target_observed: true,
+      reviewer_workspace_mutation_check_observed: false,
+      post_change_spawn_calls: 1,
+      post_change_wait_calls: 1,
+    }, "reviewer workspace mutation check was not observed"],
+    [{
+      independent_review_pass_observed: true,
+      independent_review_contract_verbatim_observed: true,
+      independent_review_skill_invoked: true,
+      independent_review_sole_wait_target_observed: true,
+      reviewer_workspace_mutation_check_observed: true,
+      reviewer_workspace_mutation_observed: true,
+      post_change_spawn_calls: 1,
+      post_change_wait_calls: 1,
+    }, "designated reviewer mutated the workspace"],
   ]) {
     const conformance = evaluateWorkflowConformance({
       workflow: "leanpowers-0.2.0",
@@ -1079,8 +1252,31 @@ test("Git scope inspection stays anchored to the immutable baseline commit", asy
     git("add", ".");
     git("commit", "--quiet", "--no-gpg-sign", "-m", "baseline");
     const baselineHead = git("rev-parse", "HEAD");
+    const pristineFingerprint = await fingerprintBenchmarkWorkspace({
+      baselineHead,
+      workspace,
+    });
+    assert.equal(
+      await fingerprintBenchmarkWorkspace({ baselineHead, workspace }),
+      pristineFingerprint,
+    );
+
+    if (process.platform !== "win32") {
+      const fifo = path.join(workspace, "unsupported.fifo");
+      const created = await runProcess("mkfifo", [fifo]);
+      assert.equal(created.exitCode, 0);
+      await assert.rejects(
+        fingerprintBenchmarkWorkspace({ baselineHead, workspace }),
+        /unsupported workspace entry/u,
+      );
+      await rm(fifo, { force: true });
+    }
 
     await writeFile(path.join(workspace, "outside.txt"), "committed by agent\n");
+    assert.notEqual(
+      await fingerprintBenchmarkWorkspace({ baselineHead, workspace }),
+      pristineFingerprint,
+    );
     git("add", ".");
     git("commit", "--quiet", "--no-gpg-sign", "-m", "agent commit");
     const state = await inspectBenchmarkGitState({ baselineHead, workspace });
