@@ -20,7 +20,7 @@ Do not treat command namespaces alone as isolation; automatic skill discovery ca
 
 | Superpowers 6.1.1 | LeanPowers | Migration note |
 | --- | --- | --- |
-| `using-superpowers` | `route` or direct automatic workflow selection | Uses a 512-word entry Skill to run one lowest-safe workflow instead of enforcing a full chain |
+| `using-superpowers` | `route` or direct automatic workflow selection | Uses a 588-word entry Skill to run one lowest-safe workflow instead of enforcing a full chain |
 | `brainstorming` | `shape mode=standard|strict` | Use only for material ambiguity or risk; clear tasks may skip it |
 | `writing-plans` | `shape` delivery slices | Slices are outcomes with evidence, not 2–5 minute micro-steps |
 | `executing-plans` | `build` | Execute one independently useful slice at a time |

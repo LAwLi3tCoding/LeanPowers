@@ -20,11 +20,11 @@ required_gates: GATES
 
 Strict `GATES` is `[independent_review, current_evidence]`; otherwise `[current_evidence]`.
 
-One-call stage targets are not quality ceilings. Expand only for missing, contradictory, or failed evidence; restart affected gates.
+Stage counts are green-path tool budgets, not quality ceilings: `build` = INSPECT(1)→PATCH(1)→VALIDATE(1); `debug` = INSPECT(1)→REPRODUCE/TRACE(1)→PATCH(1)→VALIDATE(1). Expand only when a call returns concrete failed, missing, or contradictory evidence; wanting more context is not evidence. Expand only that stage and restart invalidated gates.
 
-1. Green path: ONE shell call locates and prints full implementation, tests, validation metadata; never split reads.
-2. Before editing, output a clause→test ledger for every literal `must`/`only`/`exact`/`preserve`/`reject`; each rejection mutates one property of an asserted-passing case. Use one repository-relative multi-file patch for code/tests; never repatch on the green path.
-3. Run one applicable validation command. Failure enters `debug`; never claim completion. Green lean/standard may finish; strict **MUST NOT answer**; continue below.
+1. INSPECT is ONE combined shell call that both locates and prints full affected implementation, tests, and validation metadata; no search-only/probe call or later green-path read. DEBUG then, before any edit, uses ONE focused command to execute the real failing path and show both its failure and first wrong transition; inspection or inference is not reproduction.
+2. Before editing, output a clause→test ledger for every literal `must`/`only`/`exact`/`preserve`/`reject`; each rejection mutates one property of an asserted-passing case. PATCH is ONE repository-relative multi-file call containing all code and regression-test changes; never split edits or repatch on green evidence.
+3. VALIDATE is ONE applicable command; debug reruns the reproduction/regression and affected checks. Failure enters `debug`; never claim completion. Green lean/standard may finish; strict **MUST NOT answer**; continue below.
 
 **Mandatory strict gate — final answer forbidden until exact pass**
 
