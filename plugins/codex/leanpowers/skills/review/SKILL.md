@@ -48,6 +48,8 @@ unverified_areas: [] | [missing evidence]
 
 `pass` requires no material findings or unverified areas. State missing evidence; never speculate.
 
+Return raw YAML only—no JSON, fences, headings, or prose. `pass` is exactly the three lines shown.
+
 For a delegated strict review, send the verbatim task, risk ledger, changed paths, concise final-diff evidence, and the exact output schema—not a paraphrase, pasted diff/log, or implementation transcript. Read current diff/code from the shared workspace. Contract conflicts remain `changes_required`; the designated reviewer never re-delegates, and the implementer cannot overrule.
 
 ## Boundaries

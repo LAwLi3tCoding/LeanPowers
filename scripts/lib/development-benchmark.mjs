@@ -297,13 +297,48 @@ export function parseCodexResult(
     (event) =>
       event?.type === "item.completed" && event?.item?.type === "file_change",
   );
+  const firstFileChangeIndex = events.findIndex(
+    (event) =>
+      event?.type === "item.completed" && event?.item?.type === "file_change",
+  );
   const startedCollabCalls = new Map();
+  const collabCallLifecycles = new Map();
+  const observedChangedPaths = new Set();
   const reviewAgentSpawns = new Map();
+  const reviewCycles = [];
+  const strictCycleSpawnAttempts = new Set();
+  const strictCycleWaitAttempts = new Set();
   const postChangeSpawnAttempts = new Set();
   const postChangeWaitAttempts = new Set();
+  let duplicateStrictCollabCallIdObserved = false;
+  let unexpectedStrictCollabToolObserved = false;
   let latestIndependentReview = null;
   events.forEach((event, index) => {
     const item = event?.item;
+    if (event?.type === "item.completed" && item?.type === "file_change") {
+      for (const change of item.changes ?? []) {
+        const changedPath = benchmarkObservedPath(change?.path);
+        if (changedPath) observedChangedPaths.add(changedPath);
+      }
+    }
+    if (
+      item?.type === "collab_tool_call" &&
+      typeof item.id === "string" &&
+      (event?.type === "item.started" || event?.type === "item.completed")
+    ) {
+      const lifecycle = collabCallLifecycles.get(item.id) ?? {
+        completed: false,
+        started: false,
+      };
+      const duplicate = event.type === "item.started"
+        ? lifecycle.started || lifecycle.completed
+        : lifecycle.completed;
+      if (duplicate && index > firstFileChangeIndex) {
+        duplicateStrictCollabCallIdObserved = true;
+      }
+      lifecycle[event.type === "item.started" ? "started" : "completed"] = true;
+      collabCallLifecycles.set(item.id, lifecycle);
+    }
     if (
       event?.type === "item.started" &&
       item?.type === "collab_tool_call" &&
@@ -315,6 +350,31 @@ export function parseCodexResult(
       typeof item?.id === "string" ? startedCollabCalls.get(item.id) : null;
     const attemptKey =
       typeof item?.id === "string" ? item.id : `${item?.tool ?? "unknown"}:${index}`;
+    if (
+      item?.type === "collab_tool_call" &&
+      index > firstFileChangeIndex &&
+      !["spawn_agent", "wait"].includes(item.tool)
+    ) {
+      unexpectedStrictCollabToolObserved = true;
+    }
+    if (
+      item?.type === "collab_tool_call" &&
+      item.tool === "spawn_agent" &&
+      index > firstFileChangeIndex &&
+      (event?.type === "item.started" ||
+        (event?.type === "item.completed" && !startedCall))
+    ) {
+      strictCycleSpawnAttempts.add(attemptKey);
+    }
+    if (
+      item?.type === "collab_tool_call" &&
+      item.tool === "wait" &&
+      index > firstFileChangeIndex &&
+      (event?.type === "item.started" ||
+        (event?.type === "item.completed" && !startedCall))
+    ) {
+      strictCycleWaitAttempts.add(attemptKey);
+    }
     if (
       item?.type === "collab_tool_call" &&
       item.tool === "spawn_agent" &&
@@ -338,7 +398,7 @@ export function parseCodexResult(
       item?.type === "collab_tool_call" &&
       item.tool === "spawn_agent" &&
       item.status === "completed" &&
-      index > finalFileChangeIndex &&
+      index > firstFileChangeIndex &&
       isReviewerPrompt(item.prompt)
     ) {
       for (const agentId of item.receiver_thread_ids ?? []) {
@@ -346,6 +406,11 @@ export function parseCodexResult(
           contract_verbatim: hasExactCodexReviewContract(
             item.prompt,
             expectedReviewContract,
+          ),
+          packet: parseCompleteCodexReviewPacket(
+            item.prompt,
+            expectedReviewContract,
+            observedChangedPaths,
           ),
           index,
           review_skill_invoked:
@@ -371,43 +436,111 @@ export function parseCodexResult(
           completedReviews.push({
             agent_id: agentId,
             contract_verbatim: spawn.contract_verbatim,
-            pass:
-              state?.status === "completed" &&
-              isPassingReviewVerdict(state?.message),
+            packet_complete: spawn.packet !== null,
+            test_command: spawn.packet?.test_command ?? null,
+            verdict:
+              state?.status === "completed"
+                ? classifyReviewVerdict(state?.message)
+                : null,
             review_skill_invoked: spawn.review_skill_invoked,
             workspace_mutation_check_observed:
               reviewerWorkspaceMutations.has(agentId),
             workspace_mutation_observed:
               reviewerWorkspaceMutations.get(agentId) === true,
             sole_spawn_target: spawn.sole_spawn_target,
+            spawn_index: spawn.index,
           });
         }
       }
       if (completedReviews.length > 0) {
-        latestIndependentReview = {
-          contract_verbatim: completedReviews.every(
-            (review) => review.contract_verbatim,
-          ),
-          pass: completedReviews.every((review) => review.pass),
-          review_skill_invoked: completedReviews.every(
-            (review) => review.review_skill_invoked,
-          ),
-          workspace_mutation_check_observed: completedReviews.every(
-            (review) => review.workspace_mutation_check_observed,
-          ),
-          workspace_mutation_observed: completedReviews.some(
-            (review) => review.workspace_mutation_observed,
-          ),
-          sole_wait_target:
-            Array.isArray(requestedAgentIds) &&
-            requestedAgentIds.length === 1 &&
-            completedReviews.length === 1 &&
-            requestedAgentIds[0] === completedReviews[0].agent_id &&
-            completedReviews[0].sole_spawn_target,
-        };
+        const soleWaitTarget =
+          Array.isArray(requestedAgentIds) &&
+          requestedAgentIds.length === 1 &&
+          completedReviews.length === 1 &&
+          requestedAgentIds[0] === completedReviews[0].agent_id &&
+          completedReviews[0].sole_spawn_target;
+        reviewCycles.push({
+          reviews: completedReviews,
+          sole_wait_target: soleWaitTarget,
+          wait_index: index,
+        });
+        if (completedReviews.every((review) => review.spawn_index > finalFileChangeIndex)) {
+          latestIndependentReview = {
+            contract_verbatim: completedReviews.every(
+              (review) => review.contract_verbatim,
+            ),
+            pass: completedReviews.every((review) => review.verdict === "pass"),
+            review_skill_invoked: completedReviews.every(
+              (review) => review.review_skill_invoked,
+            ),
+            workspace_mutation_check_observed: completedReviews.every(
+              (review) => review.workspace_mutation_check_observed,
+            ),
+            workspace_mutation_observed: completedReviews.some(
+              (review) => review.workspace_mutation_observed,
+            ),
+            sole_wait_target: soleWaitTarget,
+          };
+        }
       }
     }
   });
+  const reviewerIds = new Set();
+  const strictReviewProtocolObserved =
+    reviewCycles.length > 0 &&
+    !duplicateStrictCollabCallIdObserved &&
+    !unexpectedStrictCollabToolObserved &&
+    strictCycleSpawnAttempts.size === reviewCycles.length &&
+    strictCycleWaitAttempts.size === reviewCycles.length &&
+    reviewCycles.every((cycle, cycleIndex) => {
+      if (cycle.reviews.length !== 1 || !cycle.sole_wait_target) return false;
+      const review = cycle.reviews[0];
+      if (
+        !review.contract_verbatim ||
+        !review.packet_complete ||
+        !review.review_skill_invoked ||
+        !review.workspace_mutation_check_observed ||
+        review.workspace_mutation_observed ||
+        reviewerIds.has(review.agent_id)
+      ) {
+        return false;
+      }
+      reviewerIds.add(review.agent_id);
+      const previousWaitIndex = cycleIndex === 0
+        ? -1
+        : reviewCycles[cycleIndex - 1].wait_index;
+      const lastChangeIndex = events.findLastIndex(
+        (event, eventIndex) =>
+          eventIndex > previousWaitIndex &&
+          eventIndex < review.spawn_index &&
+          event?.type === "item.completed" &&
+          event?.item?.type === "file_change" &&
+          event?.item?.status === "completed" &&
+          Array.isArray(event?.item?.changes) &&
+          event.item.changes.length > 0,
+      );
+      if (lastChangeIndex < 0) return false;
+      const currentValidationObserved = events.some((event, eventIndex) => {
+        if (
+          eventIndex <= lastChangeIndex ||
+          eventIndex >= review.spawn_index ||
+          event?.type !== "item.completed" ||
+          event?.item?.type !== "command_execution" ||
+          event?.item?.status !== "completed" ||
+          event?.item?.exit_code !== 0
+        ) {
+          return false;
+        }
+        const command = canonicalValidationCommand(event.item.command);
+        return command !== null && command === review.test_command;
+      });
+      if (!currentValidationObserved) return false;
+      const isFinalCycle = cycleIndex === reviewCycles.length - 1;
+      if (isFinalCycle) {
+        return review.spawn_index > finalFileChangeIndex && review.verdict === "pass";
+      }
+      return review.verdict === "changes_required";
+    });
   const finalMessage = [...events].reverse().find(
     (event) => event?.type === "item.completed" && event?.item?.type === "agent_message",
   );
@@ -442,6 +575,12 @@ export function parseCodexResult(
         latestIndependentReview?.workspace_mutation_check_observed === true,
       reviewer_workspace_mutation_observed:
         latestIndependentReview?.workspace_mutation_observed === true,
+      strict_review_protocol_observed: strictReviewProtocolObserved,
+      strict_review_cycle_count: reviewCycles.length,
+      duplicate_strict_collab_call_id_observed:
+        duplicateStrictCollabCallIdObserved,
+      unexpected_strict_collab_tool_observed:
+        unexpectedStrictCollabToolObserved,
       post_change_spawn_calls: postChangeSpawnAttempts.size,
       post_change_wait_calls: postChangeWaitAttempts.size,
     },
@@ -566,20 +705,145 @@ function hasExactCodexReviewContract(prompt, expectedReviewContract) {
   ].some((prefix) => prompt.startsWith(prefix));
 }
 
-export function isPassingReviewVerdict(message) {
-  let text = String(message ?? "").trim();
-  const fenced = text.match(/^```(?:ya?ml)?\s*\n([\s\S]*?)\n```\s*$/iu);
-  if (fenced) text = fenced[1].trim();
-  const lines = text
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  return (
-    lines.length === 3 &&
-    /^verdict\s*:\s*pass$/iu.test(lines[0]) &&
-    /^findings\s*:\s*\[\s*\]$/iu.test(lines[1]) &&
-    /^unverified_areas\s*:\s*\[\s*\]$/iu.test(lines[2])
+function parseCompleteCodexReviewPacket(
+  prompt,
+  expectedReviewContract,
+  observedChangedPaths = new Set(),
+) {
+  if (
+    typeof prompt !== "string" ||
+    typeof expectedReviewContract !== "string" ||
+    expectedReviewContract.length === 0
+  ) {
+    return null;
+  }
+  const prefix = `$leanpowers:review\nOriginal task:\n${expectedReviewContract}\n\nReviewer context:\n`;
+  if (!prompt.startsWith(prefix)) return null;
+  const lines = prompt.slice(prefix.length).split("\n");
+  if (
+    lines.length !== 9 ||
+    lines[0] !== "Sole reviewer; read diff/code; do not edit/delegate." ||
+    !hasPopulatedPacketField(lines[1], "Ledger") ||
+    !hasPopulatedPacketField(lines[2], "Paths") ||
+    !hasPopulatedPacketField(lines[3], "Test") ||
+    lines[4] !== "Return Review YAML raw—no JSON/fence/heading/prose. Pass: exactly these three lines:" ||
+    lines[5] !== "" ||
+    lines[6] !== "verdict: pass" ||
+    lines[7] !== "findings: []" ||
+    lines[8] !== "unverified_areas: []"
+  ) {
+    return null;
+  }
+  const testEvidence = lines[3].slice("Test: ".length);
+  const validationEvidence = parseValidationEvidence(testEvidence);
+  const ledger = lines[1].slice("Ledger: ".length).trim();
+  const declaredPaths = new Set(
+    lines[2]
+      .slice("Paths: ".length)
+      .match(/[A-Za-z0-9._/-]+/gu) ?? [],
   );
+  if (
+    isSemanticallyEmptyPacketValue(ledger) ||
+    declaredPaths.size === 0 ||
+    [...observedChangedPaths].some((changedPath) => !declaredPaths.has(changedPath)) ||
+    validationEvidence === null
+  ) {
+    return null;
+  }
+  return validationEvidence;
+}
+
+function hasPopulatedPacketField(line, name) {
+  const prefix = `${name}: `;
+  if (typeof line !== "string" || !line.startsWith(prefix)) return false;
+  const value = line.slice(prefix.length).trim();
+  return value.length > 0 && !/[{}]/u.test(value);
+}
+
+function isSemanticallyEmptyPacketValue(value) {
+  return /^(?:\[\]|n\/a|none|null|tbd)$/iu.test(String(value ?? "").trim());
+}
+
+function benchmarkObservedPath(value) {
+  const normalized = String(value ?? "").replace(/\\/gu, "/");
+  if (!normalized) return null;
+  const workspaceMarker = "/workspace/";
+  const markerIndex = normalized.lastIndexOf(workspaceMarker);
+  return markerIndex >= 0
+    ? normalized.slice(markerIndex + workspaceMarker.length)
+    : normalized.replace(/^\.\//u, "");
+}
+
+function parseValidationEvidence(evidence) {
+  const match = String(evidence ?? "").match(/^(.+); exit 0$/u);
+  if (!match) return null;
+  const testCommand = canonicalValidationCommand(match[1]);
+  return testCommand === null ? null : { test_command: testCommand };
+}
+
+function canonicalValidationCommand(command) {
+  let text = String(command ?? "");
+  const shellPrefix = /^(?:(?:\/(?:usr\/)?bin\/)?(?:bash|sh|zsh))\s+-lc\s+/u;
+  if (shellPrefix.test(text)) {
+    const wrapped = text.match(
+      /^(?:(?:\/(?:usr\/)?bin\/)?(?:bash|sh|zsh))\s+-lc\s+(['"])([\s\S]*)\1$/u,
+    );
+    if (!wrapped) return null;
+    text = wrapped[2];
+  }
+  if (
+    text.length === 0 ||
+    text !== text.trim() ||
+    /[\r\n;&|`!<>#$]/u.test(text) ||
+    !/^(?:bun|cargo|go|gradle|make|mvn|node|npm|pnpm|pytest|yarn)\b/iu.test(text) ||
+    validationCommandFragment(text) === null
+  ) {
+    return null;
+  }
+  return text;
+}
+
+function validationCommandFragment(command) {
+  const text = String(command ?? "");
+  const match = text.match(
+    /\b(?:bun|cargo|go|gradle|make|mvn|node|npm|pnpm|yarn)\b[^;&|\r\n]{0,80}\b(?:build|check|lint|test|typecheck)\b|\bpytest\b/iu,
+  );
+  return match ? match[0].replace(/\s+/gu, " ").trim().toLowerCase() : null;
+}
+
+export function isPassingReviewVerdict(message) {
+  return String(message ?? "").replace(/\r\n/gu, "\n") ===
+    "verdict: pass\nfindings: []\nunverified_areas: []";
+}
+
+export function classifyReviewVerdict(message) {
+  if (isPassingReviewVerdict(message)) return "pass";
+  const lines = String(message ?? "").replace(/\r\n/gu, "\n").split("\n");
+  if (lines[0] !== "verdict: changes_required" || lines[1] !== "findings:") {
+    return null;
+  }
+  let index = 2;
+  let findings = 0;
+  while (/^  - severity: (?:critical|high|medium|low)$/u.test(lines[index] ?? "")) {
+    if (
+      !/^    location: \S(?:.*\S)?$/u.test(lines[index + 1] ?? "") ||
+      !/^    evidence: \S(?:.*\S)?$/u.test(lines[index + 2] ?? "") ||
+      !/^    impact: \S(?:.*\S)?$/u.test(lines[index + 3] ?? "") ||
+      !/^    repair: \S(?:.*\S)?$/u.test(lines[index + 4] ?? "")
+    ) {
+      return null;
+    }
+    findings += 1;
+    index += 5;
+  }
+  if (
+    findings === 0 ||
+    index !== lines.length - 1 ||
+    !/^unverified_areas: (?:\[\]|\[\S(?:[^\]\r\n]*\S)?\])$/u.test(lines[index] ?? "")
+  ) {
+    return null;
+  }
+  return "changes_required";
 }
 
 export function evaluateChangedPaths(changedPaths, policy) {
@@ -669,15 +933,9 @@ export function evaluateWorkflowConformance(run) {
     }
     if (
       run.risk_level === "strict" &&
-      run.telemetry?.workflow_trace?.post_change_spawn_calls !== 1
+      !run.telemetry?.workflow_trace?.strict_review_protocol_observed
     ) {
-      reasons.push("strict final review did not use exactly one spawn call");
-    }
-    if (
-      run.risk_level === "strict" &&
-      run.telemetry?.workflow_trace?.post_change_wait_calls !== 1
-    ) {
-      reasons.push("strict final review did not use exactly one wait call");
+      reasons.push("strict review cycles violated the one-reviewer protocol");
     }
   }
   return { status: reasons.length === 0 ? "PASS" : "FAIL", reasons };
@@ -917,7 +1175,8 @@ export function renderDevelopmentReport(result) {
     "## Interpretation boundary",
     "",
     "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    "- LeanPowers conformance requires the exact four-line route-ledger prefix. Strict runs also require one post-change reviewer spawn, one wait targeting only that reviewer, explicit review Skill invocation, the verbatim task contract, no reviewer workspace mutation, and an exact empty passing verdict after the final edit.",
+    "- LeanPowers conformance requires the exact four-line route-ledger prefix. Each strict review cycle requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
+    "- Codex JSONL does not expose raw spawn arguments such as `fork_context`; observable spawn/wait behavior is checked dynamically, while exact argument shape is covered by static workflow tests and remains a runtime telemetry gap.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
     "- Paired reductions are computed within each identical case and repetition before taking the median. Each metric shows its own valid sample count; incomplete telemetry is excluded from that metric only. The task-PASS-and-conformant population is primary, so failing faster or skipping workflow gates never counts as an improvement.",

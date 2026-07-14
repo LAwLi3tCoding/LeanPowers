@@ -87,10 +87,10 @@ test("published instruction counts match the canonical source exactly", async ()
   assert.deepEqual(
     { engineeringWords, routeWords, adaptWords, totalWords, charterWords },
     {
-      engineeringWords: 2866,
-      routeWords: 462,
+      engineeringWords: 2882,
+      routeWords: 468,
       adaptWords: 329,
-      totalWords: 3657,
+      totalWords: 3679,
       charterWords: 111,
     },
   );
@@ -100,7 +100,7 @@ test("published instruction counts match the canonical source exactly", async ()
     "docs/comparison-superpowers.md",
   ]) {
     const document = await readFile(new URL(relativePath, projectRoot), "utf8");
-    for (const expected of ["2,866", "462", "329", "3,657", "84.5%", "80.2%"]) {
+    for (const expected of ["2,882", "468", "329", "3,679", "84.4%", "80.1%"]) {
       assert.ok(document.includes(expected), `${relativePath} missing ${expected}`);
     }
   }

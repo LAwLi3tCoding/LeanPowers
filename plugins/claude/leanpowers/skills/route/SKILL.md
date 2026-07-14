@@ -20,15 +20,15 @@ required_gates: GATES
 
 Strict `GATES` is `[independent_review, current_evidence]`; otherwise `[current_evidence]`.
 
-Stages 1–3 target one call each, not a quality ceiling. Expand only for missing, contradictory, or failed evidence; restart affected gates.
+One-call stage targets are not quality ceilings. Expand only for missing, contradictory, or failed evidence; restart affected gates.
 
 1. Use one green-path inspection tool call; one shell command locates/prints implementation/tests and all validation metadata.
-2. Before editing, output one concise clause→test ledger for every literal `must`/`only`/`exact`/`preserve`/`reject`; each rejection mutates one property of an asserted-passing case. Use one multi-file patch for code/tests; never repatch on the green path.
+2. Before editing, output a clause→test ledger for every literal `must`/`only`/`exact`/`preserve`/`reject`; each rejection mutates one property of an asserted-passing case. Use one repository-relative multi-file patch for code/tests; never repatch on the green path.
 3. Run one applicable validation command. Failure enters `debug`; never claim completion. Green lean/standard may finish; strict **MUST NOT answer**; continue below.
 
 **Mandatory strict gate — final answer forbidden until exact pass**
 
-4. Freeze diff. Codex: if either V1/native tool is hidden, call exactly `tool_search(query="wait_agent targets spawn_agent fork_context", limit=2)`. Spawn only if its result exposes both; otherwise return incomplete before any spawn. Call `multi_agent_v1.spawn_agent` once with only `message`, `fork_context:false`; save ID, then call `multi_agent_v1.wait_agent` once with `targets:[ID]`. No other review-tool action. Claude calls one blocking Agent. Never use `items`, retry, fallback, second/placeholder/`noop`, or “as above”. Copy entire original task byte-for-byte—including case/punctuation—under `Original task:`. Replace every `{...}` in the matching template; never improvise, omit lines, or copy its heading.
+4. Freeze diff. Codex: if either V1/native tool is hidden, call exactly `tool_search(query="wait_agent targets spawn_agent fork_context", limit=2)`. Spawn only if its result exposes both; otherwise return incomplete before any spawn. Call `multi_agent_v1.spawn_agent` once with only `message`, `fork_context:false`; save ID, then call `multi_agent_v1.wait_agent` once with `targets:[ID]`. No other review-tool action. Claude calls one blocking Agent. Never use `items`, retry, fallback, second/placeholder/`noop`, or “as above”. Copy entire original task byte-for-byte—including case/punctuation—under `Original task:`. Spawn message MUST equal the filled template, starting at its invocation line; omit only the runtime label.
 
 Codex message:
 
@@ -38,10 +38,10 @@ Original task:
 
 Reviewer context:
 Sole reviewer; read diff/code; do not edit/delegate.
-Ledger: {strict ledger, exact clauses, positive/negative boundaries}
-Paths: {changed paths}
-Test: {command and result}
-Use Review schema on findings or uncertainty. Only a true pass returns:
+Ledger: {one-line clause→boundary evidence; no task restatement}
+Paths: {one-line changed paths}
+Test: {exact validation command}; exit 0
+Return Review YAML raw—no JSON/fence/heading/prose. Pass: exactly these three lines:
 
 verdict: pass
 findings: []
@@ -55,13 +55,13 @@ Original task:
 
 Reviewer context:
 Sole reviewer; read diff/code; do not edit/delegate.
-Ledger: {strict ledger, exact clauses, positive/negative boundaries}
-Paths: {changed paths}
-Test: {command and result}
-Use Review schema on findings or uncertainty. Only a true pass returns:
+Ledger: {one-line clause→boundary evidence; no task restatement}
+Paths: {one-line changed paths}
+Test: {exact validation command}; exit 0
+Return Review YAML raw—no JSON/fence/heading/prose. Pass: exactly these three lines:
 
 verdict: pass
 findings: []
 unverified_areas: []
 
-5. Read result. Exact pass freezes files; finish. Findings require repair/retest, then new strict cycle with fresh reviewer. Blocked/unavailable returns incomplete. Never rewait/retry a reviewer, add reviewers within a cycle, or overrule findings.
+5. Read result. Exact pass freezes files; finish. Findings require repair/retest, then restart step 4 with a fresh reviewer and current Test result. Blocked/unavailable returns incomplete. Never rewait/retry a reviewer, add reviewers within a cycle, or overrule findings.

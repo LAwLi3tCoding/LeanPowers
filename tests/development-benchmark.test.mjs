@@ -33,6 +33,29 @@ const suitePath = new URL(
   import.meta.url,
 );
 
+function strictReviewPrompt(contract, {
+  ledger = "exact clauses -> positive and negative evidence",
+  paths = "src/index.mjs, test/index.test.mjs",
+  testEvidence = "npm test; exit 0",
+} = {}) {
+  return [
+    "$leanpowers:review",
+    "Original task:",
+    contract,
+    "",
+    "Reviewer context:",
+    "Sole reviewer; read diff/code; do not edit/delegate.",
+    `Ledger: ${ledger}`,
+    `Paths: ${paths}`,
+    `Test: ${testEvidence}`,
+    "Return Review YAML raw—no JSON/fence/heading/prose. Pass: exactly these three lines:",
+    "",
+    "verdict: pass",
+    "findings: []",
+    "unverified_areas: []",
+  ].join("\n");
+}
+
 test("development pilot declares three executable risk-calibrated scenario classes", async () => {
   const suite = await loadDevelopmentSuite(suitePath);
 
@@ -313,6 +336,10 @@ test("Codex JSONL usage and completion are independently parsed", () => {
       independent_review_sole_wait_target_observed: false,
       reviewer_workspace_mutation_check_observed: false,
       reviewer_workspace_mutation_observed: false,
+      strict_review_protocol_observed: false,
+      strict_review_cycle_count: 0,
+      duplicate_strict_collab_call_id_observed: false,
+      unexpected_strict_collab_tool_observed: false,
       post_change_spawn_calls: 0,
       post_change_wait_calls: 0,
     },
@@ -381,6 +408,10 @@ test("Codex trace records tool types and exact workflow file reads", () => {
     independent_review_sole_wait_target_observed: false,
     reviewer_workspace_mutation_check_observed: false,
     reviewer_workspace_mutation_observed: false,
+    strict_review_protocol_observed: false,
+    strict_review_cycle_count: 0,
+    duplicate_strict_collab_call_id_observed: false,
+    unexpected_strict_collab_tool_observed: false,
     post_change_spawn_calls: 0,
     post_change_wait_calls: 0,
   });
@@ -470,7 +501,25 @@ test("reviewer mutation tracker correlates the designated spawn and completed wa
 
 test("Codex trace proves independent review only after reviewer spawn and completed wait", () => {
   const contract = "Prefix sha256=; hexadecimal characters in either case.";
+  const packet = strictReviewPrompt(contract);
   const parsed = parseCodexResult([
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "file_change",
+        changes: [{ path: "src/index.mjs", kind: "update" }],
+        status: "completed",
+      },
+    }),
+    JSON.stringify({
+      type: "item.completed",
+      item: {
+        type: "command_execution",
+        command: "npm test",
+        exit_code: 0,
+        status: "completed",
+      },
+    }),
     JSON.stringify({
       type: "item.started",
       item: {
@@ -478,7 +527,7 @@ test("Codex trace proves independent review only after reviewer spawn and comple
         type: "collab_tool_call",
         tool: "spawn_agent",
         receiver_thread_ids: [],
-        prompt: `$leanpowers:review\nOriginal task:\n${contract}\n\nReviewer context:\nReview the strict-risk diff and tests.`,
+        prompt: packet,
         status: "in_progress",
       },
     }),
@@ -488,7 +537,7 @@ test("Codex trace proves independent review only after reviewer spawn and comple
         id: "spawn-reviewer",
         type: "collab_tool_call",
         tool: "spawn_agent",
-        prompt: `$leanpowers:review\nOriginal task:\n${contract}\n\nReviewer context:\nReview the strict-risk diff and tests.`,
+        prompt: packet,
         receiver_thread_ids: ["reviewer"],
         agents_states: { reviewer: { status: "running" } },
         status: "completed",
@@ -524,7 +573,10 @@ test("Codex trace proves independent review only after reviewer spawn and comple
       type: "turn.completed",
       usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 },
     }),
-  ].join("\n"), { expectedReviewContract: contract });
+  ].join("\n"), {
+    expectedReviewContract: contract,
+    reviewerWorkspaceMutations: new Map([["reviewer", false]]),
+  });
 
   assert.equal(parsed.workflow_trace.independent_review_pass_observed, true);
   assert.equal(
@@ -538,6 +590,8 @@ test("Codex trace proves independent review only after reviewer spawn and comple
   );
   assert.equal(parsed.workflow_trace.post_change_spawn_calls, 1);
   assert.equal(parsed.workflow_trace.post_change_wait_calls, 1);
+  assert.equal(parsed.workflow_trace.strict_review_protocol_observed, true);
+  assert.equal(parsed.workflow_trace.strict_review_cycle_count, 1);
   assert.equal(
     parseCodexResult([
       JSON.stringify({
@@ -673,6 +727,7 @@ test("Codex trace proves independent review only after reviewer spawn and comple
   ].join("\n"), { expectedReviewContract: contract });
   assert.equal(extraFailedSpawn.workflow_trace.independent_review_pass_observed, true);
   assert.equal(extraFailedSpawn.workflow_trace.post_change_spawn_calls, 2);
+  assert.equal(extraFailedSpawn.workflow_trace.strict_review_protocol_observed, false);
 
   const unrelatedWaitTarget = parseCodexResult([
     JSON.stringify({
@@ -717,6 +772,264 @@ test("Codex trace proves independent review only after reviewer spawn and comple
     unrelatedWaitTarget.workflow_trace.independent_review_sole_wait_target_observed,
     false,
   );
+});
+
+test("strict review protocol accepts remediated fresh cycles and rejects one-property regressions", () => {
+  const contract = "Preserve the exact authorization boundary.";
+  const prompt = strictReviewPrompt(contract);
+  const event = (item) => ({ type: "item.completed", item });
+  const spawnEvents = (id, reviewer, reviewPrompt = prompt) => [
+    {
+      type: "item.started",
+      item: {
+        id,
+        type: "collab_tool_call",
+        tool: "spawn_agent",
+        prompt: reviewPrompt,
+        receiver_thread_ids: [],
+        status: "in_progress",
+      },
+    },
+    event({
+      id,
+      type: "collab_tool_call",
+      tool: "spawn_agent",
+      prompt: reviewPrompt,
+      receiver_thread_ids: [reviewer],
+      status: "completed",
+    }),
+  ];
+  const waitEvents = (id, reviewer, message) => [
+    {
+      type: "item.started",
+      item: {
+        id,
+        type: "collab_tool_call",
+        tool: "wait",
+        receiver_thread_ids: [reviewer],
+        status: "in_progress",
+      },
+    },
+    event({
+      id,
+      type: "collab_tool_call",
+      tool: "wait",
+      agents_states: { [reviewer]: { status: "completed", message } },
+      status: "completed",
+    }),
+  ];
+  const finding = [
+    "verdict: changes_required",
+    "findings:",
+    "  - severity: medium",
+    "    location: src/index.mjs:1",
+    "    evidence: boundary is missing",
+    "    impact: invalid input passes",
+    "    repair: enforce the boundary",
+    "unverified_areas: []",
+  ].join("\n");
+  const pass = "verdict: pass\nfindings: []\nunverified_areas: []";
+  const buildTrace = ({
+    initialCommand = "npm test",
+    initialCommandExit = 0,
+    command = "npm test",
+    commandExit = 0,
+    firstVerdict = finding,
+    secondReviewer = "reviewer-2",
+  } = {}) => [
+    event({
+      type: "file_change",
+      changes: [{ path: "test/index.test.mjs", kind: "update" }],
+      status: "completed",
+    }),
+    event({
+      type: "command_execution",
+      command: initialCommand,
+      exit_code: initialCommandExit,
+      status: "completed",
+    }),
+    ...spawnEvents("spawn-1", "reviewer-1"),
+    ...waitEvents("wait-1", "reviewer-1", firstVerdict),
+    event({
+      type: "file_change",
+      changes: [{ path: "src/index.mjs", kind: "update" }],
+      status: "completed",
+    }),
+    event({
+      type: "command_execution",
+      command,
+      exit_code: commandExit,
+      status: "completed",
+    }),
+    ...spawnEvents("spawn-2", secondReviewer),
+    ...waitEvents("wait-2", secondReviewer, pass),
+  ];
+  const parse = (events, reviewerWorkspaceMutations = new Map([
+    ["reviewer-1", false],
+    ["reviewer-2", false],
+    ["reviewer-extra", false],
+  ])) => parseCodexResult(events.map(JSON.stringify).join("\n"), {
+    expectedReviewContract: contract,
+    reviewerWorkspaceMutations,
+  }).workflow_trace;
+
+  const valid = parse(buildTrace());
+  assert.equal(valid.strict_review_protocol_observed, true);
+  assert.equal(parse(buildTrace({
+    initialCommand: "/bin/zsh -lc 'npm test'",
+    command: "/bin/zsh -lc 'npm test'",
+  })).strict_review_protocol_observed, true);
+  assert.equal(valid.duplicate_strict_collab_call_id_observed, false);
+  assert.equal(valid.unexpected_strict_collab_tool_observed, false);
+  assert.equal(valid.strict_review_cycle_count, 2);
+  assert.equal(valid.post_change_spawn_calls, 1);
+  assert.equal(valid.post_change_wait_calls, 1);
+
+  for (const invalid of [
+    buildTrace({ initialCommandExit: 1 }),
+    buildTrace({ initialCommand: "pwd" }),
+    buildTrace({ initialCommand: "npm test || true" }),
+    buildTrace({ initialCommand: "npm test\ntrue" }),
+    buildTrace({ initialCommand: "npm test & true" }),
+    buildTrace({ initialCommand: "! npm test" }),
+    buildTrace({ initialCommand: "/bin/zsh -lc ' npm test '" }),
+    buildTrace({ commandExit: 1 }),
+    buildTrace({ command: "pwd" }),
+    buildTrace({ command: "npm test || true" }),
+    buildTrace({ command: "npm test\ntrue" }),
+    buildTrace({ command: "npm test & true" }),
+    buildTrace({ command: "! npm test" }),
+    buildTrace({ command: "/bin/zsh -lc ' npm test '" }),
+    buildTrace({ command: "npm test -- --test-name-pattern different" }),
+    buildTrace({ firstVerdict: "verdict: blocked\nfindings: []\nunverified_areas: [tests]" }),
+    buildTrace({ firstVerdict: "verdict: changes_required\nfindings:\n  - nonsense\nunverified_areas: []" }),
+    buildTrace({ firstVerdict: "verdict: changes_required\nfindings:\n  - severity: medium\n    location:   \n    evidence: boundary missing\n    impact: invalid input passes\n    repair: enforce boundary\nunverified_areas: []" }),
+    buildTrace({ firstVerdict: finding.replace("unverified_areas: []", "unverified_areas: [   ]") }),
+    buildTrace({ secondReviewer: "reviewer-1" }),
+    buildTrace().filter((event) => event.item?.type !== "command_execution"),
+    buildTrace().filter((event) => event.item?.type !== "file_change" || event.item.changes.length === 0),
+    [...buildTrace(), ...spawnEvents("spawn-extra", "reviewer-extra")],
+    [...buildTrace(), ...spawnEvents("spawn-2", "reviewer-extra")],
+    [...buildTrace(), event({
+      id: "message-reviewer",
+      type: "collab_tool_call",
+      tool: "send_message",
+      status: "completed",
+    })],
+    (() => {
+      const trace = buildTrace();
+      trace.splice(8, 0, event({
+        type: "file_change",
+        changes: [{ path: "src/after-test.mjs", kind: "update" }],
+        status: "completed",
+      }));
+      const expandedPacket = strictReviewPrompt(contract, {
+        paths: "src/index.mjs, test/index.test.mjs, src/after-test.mjs",
+      });
+      trace[9].item.prompt = expandedPacket;
+      trace[10].item.prompt = expandedPacket;
+      return trace;
+    })(),
+  ]) {
+    assert.equal(parse(invalid).strict_review_protocol_observed, false);
+  }
+  assert.equal(
+    parse(buildTrace(), new Map([
+      ["reviewer-1", true],
+      ["reviewer-2", false],
+    ])).strict_review_protocol_observed,
+    false,
+  );
+  for (const invalidPacket of [
+    prompt.replace("Ledger: exact clauses -> positive and negative evidence", "Ledger:"),
+    prompt.replace("Ledger: exact clauses -> positive and negative evidence", "Ledger:   "),
+    prompt.replace("Ledger: exact clauses -> positive and negative evidence", "Ledger: []"),
+    prompt.replace("Paths: src/index.mjs, test/index.test.mjs\n", ""),
+    prompt.replace("Paths: src/index.mjs, test/index.test.mjs", "Paths:   "),
+    prompt.replace("Paths: src/index.mjs, test/index.test.mjs", "Paths: []"),
+    prompt.replace("Paths: src/index.mjs, test/index.test.mjs", "Paths: test/index.test.mjs"),
+    prompt.replace("Test: npm test; exit 0", "Test: {exact validation command}; exit 0"),
+    prompt.replace("Test: npm test; exit 0", "Test: npm test; exit 1"),
+    prompt.replace("Test: npm test; exit 0", "Test: npm test; exit 0; 47/47 passed"),
+    `summary first\n${prompt}`,
+  ]) {
+    const trace = parse([
+      event({
+        type: "file_change",
+        changes: [{ path: "src/index.mjs", kind: "update" }],
+        status: "completed",
+      }),
+      event({
+        type: "command_execution",
+        command: "npm test",
+        exit_code: 0,
+        status: "completed",
+      }),
+      ...spawnEvents("spawn-only", "reviewer-only", invalidPacket),
+      ...waitEvents("wait-only", "reviewer-only", pass),
+    ], new Map([["reviewer-only", false]]));
+    assert.equal(trace.strict_review_protocol_observed, false);
+  }
+  const mismatchedCommandPacket = strictReviewPrompt(contract, {
+    testEvidence: "node --test tests/claimed.mjs; exit 0",
+  });
+  assert.equal(parse([
+    event({
+      type: "file_change",
+      changes: [{ path: "src/index.mjs", kind: "update" }],
+      status: "completed",
+    }),
+    event({
+      type: "command_execution",
+      command: "node --test tests/actual.mjs",
+      aggregated_output: "1 test passed",
+      exit_code: 0,
+      status: "completed",
+    }),
+    ...spawnEvents("spawn-mismatch", "reviewer-mismatch", mismatchedCommandPacket),
+    ...waitEvents("wait-mismatch", "reviewer-mismatch", pass),
+  ], new Map([["reviewer-mismatch", false]])).strict_review_protocol_observed, false);
+  const quotedWhitespacePacket = strictReviewPrompt(contract, {
+    testEvidence: "node --test --test-name-pattern='foo bar'; exit 0",
+  });
+  assert.equal(parse([
+    event({
+      type: "file_change",
+      changes: [{ path: "src/index.mjs", kind: "update" }],
+      status: "completed",
+    }),
+    event({
+      type: "command_execution",
+      command: "node --test --test-name-pattern='foo  bar'",
+      aggregated_output: "1 test passed",
+      exit_code: 0,
+      status: "completed",
+    }),
+    ...spawnEvents("spawn-whitespace", "reviewer-whitespace", quotedWhitespacePacket),
+    ...waitEvents("wait-whitespace", "reviewer-whitespace", pass),
+  ], new Map([["reviewer-whitespace", false]])).strict_review_protocol_observed, false);
+  for (const [id, testEvidence, command] of [
+    ["leading", " npm test; exit 0", "/bin/zsh -lc ' npm test'"],
+    ["trailing", "npm test ; exit 0", "/bin/zsh -lc \"npm test \""],
+  ]) {
+    const edgeWhitespacePacket = strictReviewPrompt(contract, { testEvidence });
+    assert.equal(parse([
+      event({
+        type: "file_change",
+        changes: [{ path: "src/index.mjs", kind: "update" }],
+        status: "completed",
+      }),
+      event({
+        type: "command_execution",
+        command,
+        aggregated_output: "1 test passed",
+        exit_code: 0,
+        status: "completed",
+      }),
+      ...spawnEvents(`spawn-${id}`, `reviewer-${id}`, edgeWhitespacePacket),
+      ...waitEvents(`wait-${id}`, `reviewer-${id}`, pass),
+    ], new Map([[`reviewer-${id}`, false]])).strict_review_protocol_observed, false);
+  }
 });
 
 test("non-schema review keeps structural telemetry independent from its verdict", () => {
@@ -869,6 +1182,9 @@ test("Codex trace requires a passing review after the final file change", () => 
     [spawn, wait("verdict: pass\nfindings:\n  - severity: critical\nunverified_areas: []"), turn],
     [spawn, wait("verdict: pass\nfindings: []\nunverified_areas: [tests]"), turn],
     [spawn, wait("verdict: pass\nfindings: []"), turn],
+    [spawn, wait("```yaml\nverdict: pass\nfindings: []\nunverified_areas: []\n```"), turn],
+    [spawn, wait("VERDICT: PASS\nfindings: []\nunverified_areas: []"), turn],
+    [spawn, wait("verdict: pass\nfindings: []\nunverified_areas: []\n"), turn],
     [spawn, wait("verdict: pass\nfindings: []\nunverified_areas: []\nverdict: changes_required"), turn],
     [spawn, secondSpawn, mixedWait("running"), turn],
     [spawn, secondSpawn, mixedWait("failed"), turn],
@@ -968,6 +1284,7 @@ test("workflow declaration and risk classification are separate conformance evid
           independent_review_skill_invoked: true,
           independent_review_sole_wait_target_observed: true,
           reviewer_workspace_mutation_check_observed: true,
+          strict_review_protocol_observed: true,
           post_change_spawn_calls: 1,
           post_change_wait_calls: 1,
         },
@@ -991,6 +1308,7 @@ test("workflow declaration and risk classification are separate conformance evid
           independent_review_skill_invoked: true,
           independent_review_sole_wait_target_observed: true,
           reviewer_workspace_mutation_check_observed: true,
+          strict_review_protocol_observed: true,
           post_change_spawn_calls: 1,
           post_change_wait_calls: 1,
         },
@@ -1041,6 +1359,7 @@ test("workflow declaration and risk classification are separate conformance evid
           independent_review_skill_invoked: true,
           independent_review_sole_wait_target_observed: true,
           reviewer_workspace_mutation_check_observed: true,
+          strict_review_protocol_observed: true,
           post_change_spawn_calls: 1,
           post_change_wait_calls: 1,
         },
@@ -1055,6 +1374,7 @@ test("workflow declaration and risk classification are separate conformance evid
       independent_review_skill_invoked: false,
       independent_review_sole_wait_target_observed: true,
       reviewer_workspace_mutation_check_observed: true,
+      strict_review_protocol_observed: true,
       post_change_spawn_calls: 1,
       post_change_wait_calls: 1,
     }, "passing reviewer did not explicitly invoke leanpowers:review"],
@@ -1064,24 +1384,17 @@ test("workflow declaration and risk classification are separate conformance evid
       independent_review_skill_invoked: true,
       independent_review_sole_wait_target_observed: true,
       reviewer_workspace_mutation_check_observed: true,
+      strict_review_protocol_observed: false,
       post_change_spawn_calls: 2,
       post_change_wait_calls: 1,
-    }, "strict final review did not use exactly one spawn call"],
-    [{
-      independent_review_pass_observed: true,
-      independent_review_contract_verbatim_observed: true,
-      independent_review_skill_invoked: true,
-      independent_review_sole_wait_target_observed: true,
-      reviewer_workspace_mutation_check_observed: true,
-      post_change_spawn_calls: 1,
-      post_change_wait_calls: 2,
-    }, "strict final review did not use exactly one wait call"],
+    }, "strict review cycles violated the one-reviewer protocol"],
     [{
       independent_review_pass_observed: true,
       independent_review_contract_verbatim_observed: true,
       independent_review_skill_invoked: true,
       independent_review_sole_wait_target_observed: false,
       reviewer_workspace_mutation_check_observed: true,
+      strict_review_protocol_observed: true,
       post_change_spawn_calls: 1,
       post_change_wait_calls: 1,
     }, "strict wait did not target only the designated reviewer"],
@@ -1091,6 +1404,7 @@ test("workflow declaration and risk classification are separate conformance evid
       independent_review_skill_invoked: true,
       independent_review_sole_wait_target_observed: true,
       reviewer_workspace_mutation_check_observed: false,
+      strict_review_protocol_observed: true,
       post_change_spawn_calls: 1,
       post_change_wait_calls: 1,
     }, "reviewer workspace mutation check was not observed"],
@@ -1101,6 +1415,7 @@ test("workflow declaration and risk classification are separate conformance evid
       independent_review_sole_wait_target_observed: true,
       reviewer_workspace_mutation_check_observed: true,
       reviewer_workspace_mutation_observed: true,
+      strict_review_protocol_observed: true,
       post_change_spawn_calls: 1,
       post_change_wait_calls: 1,
     }, "designated reviewer mutated the workspace"],

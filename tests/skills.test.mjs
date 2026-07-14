@@ -108,15 +108,15 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /Clear build: execute this capsule/i);
   assert.match(route, /Otherwise load and execute the selected installed Skill once/i);
   assert.match(route, /never use the build capsule/i);
-  assert.match(route, /stages 1–3 target one call each/i);
-  assert.match(route, /not a quality ceiling/i);
+  assert.match(route, /one-call stage targets/i);
+  assert.match(route, /not quality ceilings/i);
   assert.match(route, /Expand only for missing, contradictory, or failed evidence/i);
   assert.match(route, /one green-path inspection tool call/i);
   assert.match(route, /each rejection mutates one property of an asserted-passing case/i);
   assert.match(route, /one shell command/i);
-  assert.match(route, /one multi-file patch(?: call)? for (?:implementation and tests|code\/tests)/i);
+  assert.match(route, /one repository-relative multi-file patch(?: call)? for (?:implementation and tests|code\/tests)/i);
   assert.match(route, /never (?:patch the same file twice|repatch) on the green path/i);
-  assert.match(route, /output one concise clause→test ledger/i);
+  assert.match(route, /output a clause→test ledger/i);
   assert.match(route, /Run one applicable validation command/i);
   assert.match(route, /strict \*\*MUST NOT answer\*\*/i);
   assert.match(route, /Mandatory strict gate/i);
@@ -135,17 +135,24 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /\/leanpowers:review/i);
   assert.match(route, /Codex message:\s*\$leanpowers:review\s*Original task:/i);
   assert.match(route, /Claude message:\s*\/leanpowers:review\s*Original task:/i);
-  assert.match(route, /replace every `\{\.\.\.\}`[\s\S]{0,100}never improvise, omit lines/i);
+  assert.match(route, /Spawn message MUST equal the filled template/i);
+  assert.match(route, /starting at its invocation line/i);
+  assert.match(route, /omit only the runtime label/i);
   assert.match(route, /do not edit(?: or |\/)delegate/i);
   assert.match(route, /copy (?:the )?entire original (?:user )?task byte-for-byte/i);
   assert.match(route, /including case\/punctuation/i);
   assert.match(route, /under `Original task:`/i);
   assert.match(route, /wait_agent` once with `targets:\[ID\]`/i);
-  assert.match(route, /Findings require repair\/retest, then new strict cycle with fresh reviewer/i);
+  assert.match(route, /Test: \{exact validation command\}; exit 0/i);
+  assert.match(route, /one-line clause→boundary evidence; no task restatement/i);
+  assert.match(route, /one-line changed paths/i);
+  assert.match(route, /exact validation command.*exit 0/i);
+  assert.match(route, /Findings require repair\/retest, then restart step 4 with a fresh reviewer and current Test result/i);
   assert.match(route, /Blocked\/unavailable returns incomplete/i);
   assert.match(route, /Never rewait\/retry a reviewer, add reviewers within a cycle, or overrule findings/i);
-  assert.match(route, /Review schema on findings or uncertainty/i);
-  assert.match(route, /only a true pass returns/i);
+  assert.match(route, /Return Review YAML raw/i);
+  assert.match(route, /Pass: exactly these three lines/i);
+  assert.match(route, /no JSON\/fence\/heading\/prose/i);
   assert.match(route, /verdict: pass[\s\S]{0,80}findings: \[\][\s\S]{0,80}unverified_areas: \[\]/i);
   assert.match(review, /runtime provenance—not prompt self-report/i);
   assert.match(
@@ -154,6 +161,8 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   );
   assert.match(review, /literal `must`[\s\S]{0,100}`only`[\s\S]{0,100}`exact`/i);
   assert.match(review, /positive and negative boundary evidence/i);
+  assert.match(review, /Return raw YAML only/i);
+  assert.match(review, /`pass` is exactly the three lines shown/i);
   assert.match(runtime, /implementer text never satisfies or overrules review/i);
   assert.match(runtime, /multi_agent_v1\.spawn_agent[\s\S]{0,100}wait_agent/i);
   assert.match(runtime, /fork_context:false/i);
@@ -168,7 +177,8 @@ test("strict route protocol rejects one-property instruction regressions", async
     "with only `message`, `fork_context:false`; save ID, then call `multi_agent_v1.wait_agent` once with `targets:[ID]`",
     "No other review-tool action.",
     "Copy entire original task byte-for-byte—including case/punctuation—under `Original task:`.",
-    "Findings require repair/retest, then new strict cycle with fresh reviewer.",
+    "Spawn message MUST equal the filled template, starting at its invocation line; omit only the runtime label.",
+    "Findings require repair/retest, then restart step 4 with a fresh reviewer and current Test result.",
   ];
   const preservesStrictProtocol = (candidate) =>
     clauses.every((clause) => candidate.includes(clause));
