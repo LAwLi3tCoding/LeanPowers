@@ -26,6 +26,8 @@ v3 质量优先矩阵冻结了 3 个新类别。Superpowers 的 Task PASS 为 1/
 
 v4 质量优先矩阵冻结了 weighted-interleave BUILD、严格 structured-redaction BUILD 和 bidirectional-index DEBUG。Superpowers 的 Task PASS 为 5/6，LeanPowers 为 3/6，LeanPowers 冻结流程一致性为 0/6。LeanPowers 使用 1,874,386 个模型 Token，Superpowers 为 2,370,010，综合占比 79.0877%，总量少 20.9123%，但仍未达到 `<=60%`；配对 Token 与耗时降幅中位数分别为 26.0% 和 2.0%。冻结门禁的准确失败原因为 `task-outcome`、`lean-conformance` 和 `token-target`。完整数据见 [v4 结果](benchmarks/development-effects-performance-confirmatory-v4-2026-07-16.md)、[运行后审计](benchmarks/development-effects-performance-confirmatory-v4-audit-2026-07-16.md)和[预注册](benchmarks/development-effects-performance-confirmatory-v4-preregistration-2026-07-16.md)。
 
+v5 质量优先矩阵冻结了 HTTP 协商 BUILD、严格安全跳转 BUILD 和 keyset cursor DEBUG。两套工作流的 Task PASS 都是 0/6，LeanPowers 冻结流程一致性为 0/6。一条 Superpowers 运行没有完整结束事件和 Token 遥测，因此预注册的六组综合 Token 目标不具备判定条件；五组有效配对中的 LeanPowers 占比 102.3742% 只能作为诊断，不能替代冻结决策。全体失败是有效的压力证据，但存在相对比较的地板效应，不能据此证明等效、非劣或胜负。完整数据见 [v5 结果](benchmarks/development-effects-performance-confirmatory-v5-2026-07-16.md)、[运行后审计](benchmarks/development-effects-performance-confirmatory-v5-audit-2026-07-16.md)和[预注册](benchmarks/development-effects-performance-confirmatory-v5-preregistration-2026-07-16.md)。
+
 这意味着当前可以说：
 
 - LeanPowers 的指令面在结构上更小；
@@ -38,11 +40,12 @@ v4 质量优先矩阵冻结了 weighted-interleave BUILD、严格 structured-red
 - 在第一轮质量优先矩阵中，Superpowers 为 2/6，LeanPowers 为 3/6；LeanPowers 综合 Token 占比为 90.4%。冻结 0/6 一致性受到两次评估器假阴性影响，但修正后的诊断回放仍只有 2/6，任务结果与 Token 门槛也独立失败。
 - 在 v3 质量优先矩阵中，Superpowers 为 1/6，LeanPowers 为 2/6；LeanPowers 综合 Token 占比为 111.9%，质量流程一致性为 0/6。摘要往返缺陷不改变三个独立失败原因。
 - 在 v4 质量优先矩阵中，Superpowers 为 5/6，LeanPowers 为 3/6；LeanPowers 综合 Token 占比为 79.0877%，质量流程一致性为 0/6。两次更早的执行在任何模型调用前就因隔离预检失败并保持空输出，因此不属于基准运行；发布的 12-run 矩阵保持冻结。
+- 在 v5 质量优先矩阵中，两套工作流都为 0/6，LeanPowers 流程一致性为 0/6。一条 Superpowers 运行缺少完整结束事件和 Token 遥测，六组综合目标因此不具备判定条件；五组有效配对的 102.3742% 仅作诊断。该结果按地板受限的压力证据保留，不重调或重跑 v5 任务。
 
 当前还不能说：
 
 - LeanPowers 已经在更广泛真实任务中达到与 Superpowers 相同的成功率；
-- LeanPowers 已经达到正式发布要求的完整综合 40% token、40% 耗时和 60% Agent 调用降幅；只有首轮确认性对比通过了范围更小的综合 token 规则，之后四轮都没有复现，且五轮工程效果门槛都失败；
+- LeanPowers 已经达到正式发布要求的完整综合 40% token、40% 耗时和 60% Agent 调用降幅；只有首轮确认性对比通过了范围更小的综合 token 规则，之后五轮都没有得到通过的 Token 决策，且六轮工程效果门槛都失败；
 - LeanPowers 在所有任务类型上都与 Superpowers 等效。
 
 ## 结构对比
@@ -104,7 +107,7 @@ Superpowers 选择一致、完整的流程，LeanPowers 选择按风险收放。
 
 1. **LeanPowers 在结构上更轻。**它使用单一工作流负责人和共享策略，减少重复指令与固定流程链。
 2. **影响结果的关键保障在设计上被保留。**范围、回归、根因、独立高风险审查、当前验证、授权和远端交付回读都仍是明确约束。
-3. **五轮有界矩阵尚未证明稳定等效或稳定节省。**首轮双方同为 5/6，LeanPowers 通过综合 Token 目标但工程效果失败；follow-up 双方同为 4/6，两项决策都失败；第一轮质量优先矩阵为 2/6 和 3/6、Token 占比 90.4%；v3 为 1/6 和 2/6、Token 占比 111.9%；v4 改善到 5/6 和 3/6、Token 占比 79.0877%，但 Task 结果、流程一致性和 Token 目标仍全部失败。任务数量少、共同失败、评估器限制和运行波动都不允许据此得出普遍等效或正式发布结论。
+3. **六轮有界矩阵尚未证明稳定等效或稳定节省。**首轮双方同为 5/6，LeanPowers 通过综合 Token 目标但工程效果失败；follow-up 双方同为 4/6，两项决策都失败；第一轮质量优先矩阵为 2/6 和 3/6、Token 占比 90.4%；v3 为 1/6 和 2/6、Token 占比 111.9%；v4 为 5/6 和 3/6、Token 占比 79.0877%，但三项门槛仍失败；v5 双方都是 0/6，LeanPowers 一致性为 0/6，并因一条参考运行缺少遥测而无法判定六组综合 Token 目标，五组有效配对的 102.3742% 只能作诊断。任务数量少、共同失败、地板效应、评估器限制和运行波动都不允许据此得出普遍等效或正式发布结论。
 
 LeanPowers 的很多基本原则来自 Superpowers。更准确的关系是：
 
@@ -112,4 +115,4 @@ LeanPowers 的很多基本原则来自 Superpowers。更准确的关系是：
 - **LeanPowers** 延续这些工程原则，并探索更轻、按风险自适应的实现方式。
 - **基准测试**要判断的是 LeanPowers 能否在预先声明的非劣边界内保持效果并减少资源，而不是排出谁胜谁负。
 
-当前试验、单例 held-out 检查和五轮多任务确认性对比只支持各自测试的模型、任务、权限和预算条件。未来即使新的完整基准通过，也只能形成有明确范围的结论，不能概括为一个项目在所有场景都优于另一个项目。完整方法和当前证据缺口见 [benchmark.md](benchmark.md)。
+当前试验、单例 held-out 检查和六轮多任务确认性对比只支持各自测试的模型、任务、权限和预算条件。未来即使新的完整基准通过，也只能形成有明确范围的结论，不能概括为一个项目在所有场景都优于另一个项目。完整方法和当前证据缺口见 [benchmark.md](benchmark.md)。
