@@ -1,0 +1,400 @@
+{
+  "schema_version": 2,
+  "suite_id": "development-effects-performance-confirmatory-v4-2026-07-16",
+  "evidence_level": "paired-development-heldout",
+  "runtime": "codex-cli",
+  "model_default": "gpt-5.3-codex-spark",
+  "effort": "low",
+  "repetitions": 2,
+  "activation_mode": "explicit-entrypoint",
+  "report_contract": "categorized-exact-render-v1",
+  "token_target": {
+    "metric": "aggregate-model-token-share",
+    "population": "all-matched-pairs",
+    "max_share_pct": 60
+  },
+  "workflow_entrypoints": {
+    "superpowers-6.1.1": "$superpowers:using-superpowers",
+    "leanpowers-0.2.0": "$leanpowers:route"
+  },
+  "workflow_order": [
+    ["superpowers-6.1.1", "leanpowers-0.2.0"],
+    ["leanpowers-0.2.0", "superpowers-6.1.1"]
+  ],
+  "freeze_contract": {
+    "status": "frozen-before-live-run",
+    "model_default": "gpt-5.3-codex-spark",
+    "effort": "low",
+    "repetitions": 2,
+    "workflow_order": [
+      ["superpowers-6.1.1", "leanpowers-0.2.0"],
+      ["leanpowers-0.2.0", "superpowers-6.1.1"]
+    ],
+    "agent_read_isolation": "codex-minimal-workspace-plugin-toolchain-read-v1",
+    "superpowers_revision": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+    "leanpowers_revision": "25170785dcab7b776dcd79e8eec1b75c8591cf8d",
+    "evaluator_revision": "25170785dcab7b776dcd79e8eec1b75c8591cf8d",
+    "runner_revision": "25170785dcab7b776dcd79e8eec1b75c8591cf8d",
+    "case_snapshots": {
+      "weighted-round-robin-interleave": {
+        "mutants_sha256": "1eeb54b2e6b3bdba51c227b227aacb7460422a73d5e28c46d9a586c395311b5c",
+        "verifier_sha256": "f6e668130d1e7e08ffd40adcb45b3d9d2953acfcc277d77db83e7b78675144eb",
+        "workspace_sha256": "173fcb5e076debd15132861ff58f1eaec75609f45c4595c1ce2e6b8cb3c835fc"
+      },
+      "structured-log-redaction": {
+        "mutants_sha256": "54706d1603d5d0401ca841d50b293a3f8dc559a8cbc4578275a0671c27804c6a",
+        "verifier_sha256": "be33ed47215db6eb31827a7bff0b1ba21af8af29cac11bcf3b79fff020791fa8",
+        "workspace_sha256": "82855490663f9146bcaf7b2d382b9710c405b2c0dca52ab2672142eef2528bc1"
+      },
+      "bidirectional-tag-index": {
+        "mutants_sha256": "1bb9178cf07f01f05f5c10b759e49866704fcf2a93b972d213c385021140d4f7",
+        "verifier_sha256": "ec09bd39e8b10a2ca4f2c61eaf9714f43aa3f8f67f6e6b2ed792389a2105559b",
+        "workspace_sha256": "2a95c76ccc09d4186f00d0286b738ab3e52ff2fa804751f85b315b3d7a461ac8"
+      }
+    },
+    "token_target": {
+      "metric": "aggregate-model-token-share",
+      "population": "all-matched-pairs",
+      "max_share_pct": 60
+    }
+  },
+  "cases": [
+    {
+      "id": "weighted-round-robin-interleave",
+      "scenario_class": "small-explicit-feature",
+      "task_family": "weighted-round-robin-interleaving",
+      "reporting_category": "weighted interleave build",
+      "risk_level": "standard",
+      "expected_workflow": "build",
+      "workspace": "cases/weighted-round-robin-interleave/workspace",
+      "verifier_files": [
+        "cases/weighted-round-robin-interleave/verifier/weighted-round-robin-interleave.hidden.mjs"
+      ],
+      "task": "Implement interleaveWeightedLanes(lanes) as a weighted round-robin interleaver. lanes must be a dense array with no extra own keys and only own enumerable data elements. Every lane must be an exact ordinary Object.prototype record with exactly the own enumerable data properties { weight, items }; weight must be a positive safe integer, and items must be a dense array with no extra own keys and only own enumerable data elements whose values may be arbitrary. In each round, visit lanes in outer-array order and append up to that lane's weight remaining items, preserving each lane's item order; continue until every lane is exhausted, including after earlier or empty lanes finish. Return a dense fresh array, preserve each item value reference, and never mutate any input array or record. Reject every invalid structure with TypeError without invoking accessors. Preserve the exact direct and public named export surfaces, with interleaveWeightedLanes remaining the only direct named export. Add focused regressions that independently prove weighted rounds, lane-order stability, exhaustion behavior, strict validation, arbitrary-value identity, input immutability, fresh output, and export compatibility. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {
+          "id": "weighted-round-sequencing",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "interleaveWeightedLanes",
+              "target": "src/weighted-round-robin-interleave.mjs",
+              "source": "cases/weighted-round-robin-interleave/verifier/mutants/weighted-interleave.concatenate.mjs"
+            }
+          ]
+        },
+        {
+          "id": "weight-sized-slices",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "interleaveWeightedLanes",
+              "target": "src/weighted-round-robin-interleave.mjs",
+              "source": "cases/weighted-round-robin-interleave/verifier/mutants/weighted-interleave.ignore-weight.mjs"
+            }
+          ]
+        },
+        {
+          "id": "outer-lane-order",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "interleaveWeightedLanes",
+              "target": "src/weighted-round-robin-interleave.mjs",
+              "source": "cases/weighted-round-robin-interleave/verifier/mutants/weighted-interleave.reverse-lanes.mjs"
+            }
+          ]
+        },
+        {
+          "id": "exhausted-lane-continuation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "interleaveWeightedLanes",
+              "target": "src/weighted-round-robin-interleave.mjs",
+              "source": "cases/weighted-round-robin-interleave/verifier/mutants/weighted-interleave.stop-with-first-lane.mjs"
+            }
+          ]
+        },
+        {
+          "id": "input-immutability",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "interleaveWeightedLanes",
+              "target": "src/weighted-round-robin-interleave.mjs",
+              "source": "cases/weighted-round-robin-interleave/verifier/mutants/weighted-interleave.mutate-input.mjs"
+            }
+          ]
+        },
+        {
+          "id": "dense-exact-validation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "interleaveWeightedLanes",
+              "target": "src/weighted-round-robin-interleave.mjs",
+              "source": "cases/weighted-round-robin-interleave/verifier/mutants/weighted-interleave.loose-validation.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "structured-log-redaction",
+      "scenario_class": "small-explicit-feature",
+      "task_family": "deep-structured-redaction",
+      "reporting_category": "structured redaction build",
+      "risk_level": "strict",
+      "expected_workflow": "build",
+      "workspace": "cases/structured-log-redaction/workspace",
+      "verifier_files": [
+        "cases/structured-log-redaction/verifier/structured-log-redaction.hidden.mjs"
+      ],
+      "task": "Extend redactStructuredLog(record, sensitiveKeys) into a safe deep redactor for an acyclic JSON-like value tree. record must be an ordinary Object.prototype object. sensitiveKeys must be a nonempty dense array with no extra own keys, only own enumerable data elements, unique nonempty primitive strings, and exact case-sensitive matching. On every ordinary object, replace a matching property's value with the exact string [REDACTED] and do not inspect or traverse that original data-property value. Array indices are positions, not property names to redact. Recursively clone every non-sensitive branch: allowed leaves are null, booleans, primitive strings, and finite numbers; arrays must be dense with no extra own keys and own enumerable data elements; objects must be ordinary and contain only own enumerable string data properties. Reject cycles, accessors, symbols, non-enumerable properties, sparse or extended arrays, non-finite numbers, bigint, functions, and non-ordinary objects with TypeError without invoking getters. Return a completely fresh deep copy, preserve object-key and array order, item values such as negative zero, and an own __proto__ data property, while leaving all inputs unchanged. Preserve the exact direct and public named export surfaces, with redactStructuredLog remaining the only direct named export. Add focused regressions for deep object and array redaction, case sensitivity, short-circuiting sensitive values, fresh cloning, validation, cycles, immutability, and export compatibility. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {
+          "id": "deep-object-redaction",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "redactStructuredLog",
+              "target": "src/structured-log-redaction.mjs",
+              "source": "cases/structured-log-redaction/verifier/mutants/structured-log-redaction.shallow-only.mjs"
+            }
+          ]
+        },
+        {
+          "id": "exact-case-matching",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "redactStructuredLog",
+              "target": "src/structured-log-redaction.mjs",
+              "source": "cases/structured-log-redaction/verifier/mutants/structured-log-redaction.case-insensitive.mjs"
+            }
+          ]
+        },
+        {
+          "id": "input-immutability",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "redactStructuredLog",
+              "target": "src/structured-log-redaction.mjs",
+              "source": "cases/structured-log-redaction/verifier/mutants/structured-log-redaction.mutates-input.mjs"
+            }
+          ]
+        },
+        {
+          "id": "fresh-deep-copy",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "redactStructuredLog",
+              "target": "src/structured-log-redaction.mjs",
+              "source": "cases/structured-log-redaction/verifier/mutants/structured-log-redaction.reuses-nested-refs.mjs"
+            }
+          ]
+        },
+        {
+          "id": "array-nested-redaction",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "redactStructuredLog",
+              "target": "src/structured-log-redaction.mjs",
+              "source": "cases/structured-log-redaction/verifier/mutants/structured-log-redaction.misses-array-nesting.mjs"
+            }
+          ]
+        },
+        {
+          "id": "sensitive-value-short-circuit",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "redactStructuredLog",
+              "target": "src/structured-log-redaction.mjs",
+              "source": "cases/structured-log-redaction/verifier/mutants/structured-log-redaction.traverses-redacted-accessor.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "bidirectional-tag-index",
+      "scenario_class": "unknown-cause-defect",
+      "task_family": "bidirectional-association-replacement",
+      "reporting_category": "bidirectional index debug",
+      "risk_level": "standard",
+      "expected_workflow": "debug",
+      "workspace": "cases/bidirectional-tag-index/workspace",
+      "verifier_files": [
+        "cases/bidirectional-tag-index/verifier/tag-index.hidden.mjs"
+      ],
+      "task": "Users report that replacing an id's complete tag set can leave removed tags visible through reverse lookup. Before editing, run the included node repro/bidirectional-tag-index.mjs and use its structured output to identify the first incorrect transition. Fix createTagIndex() with the exact method surface { set, remove, getTags, getIds }. Every id and tag must be a nonempty primitive string. set(id, tags) must validate tags as a dense array with no extra own keys, only own enumerable data elements, and unique tag strings before changing state; it atomically replaces the id's entire current tag set, updates both forward and reverse links, preserves existing current associations' insertion positions, appends newly created associations in input order, returns true exactly when the stored association set changes or the id is first created, and returns false for the same set regardless of supplied order. remove(id) must clear both directions and return whether the id existed, including an id stored with no tags. getTags(id) and getIds(tag) must return fresh arrays in first-current-association insertion order, so removing and later re-adding an association moves it to the end; caller mutations must not affect state. Preserve all inputs, reject invalid input with TypeError without invoking array accessors, preserve the exact direct and public named export surfaces, and keep createTagIndex as the only direct named export. Add focused regressions for replacement cleanup, new reverse links, removal, stable and re-add ordering, atomic validation, fresh getter arrays, empty sets, and API compatibility. Run the full test suite and rerun the same included repro, whose first nonblank JSON object must match the resolved behavior. Do not commit, install packages, use the network, or create another worktree.",
+      "reproduction_contract": {
+        "command": "node repro/bidirectional-tag-index.mjs",
+        "expected_output": {
+          "scenario": "bidirectional-tag-index",
+          "observations": [
+            {
+              "action": "set",
+              "id": "item-1",
+              "tags": ["blue", "sale"],
+              "changed": true
+            },
+            {
+              "action": "replace",
+              "id": "item-1",
+              "tags": ["new"],
+              "changed": true
+            },
+            {
+              "action": "get-ids-after-replace",
+              "tag": "blue",
+              "expected_ids": [],
+              "observed_ids": ["item-1"]
+            }
+          ],
+          "first_incorrect_transition": {
+            "stage": "replace-old-reverse-links",
+            "expected": "removed associations disappear from reverse lookup",
+            "stale_reverse_association": true
+          },
+          "resolution": null
+        },
+        "resolved_output": {
+          "scenario": "bidirectional-tag-index",
+          "observations": [
+            {
+              "action": "set",
+              "id": "item-1",
+              "tags": ["blue", "sale"],
+              "changed": true
+            },
+            {
+              "action": "replace",
+              "id": "item-1",
+              "tags": ["new"],
+              "changed": true
+            },
+            {
+              "action": "get-ids-after-replace",
+              "tag": "blue",
+              "expected_ids": [],
+              "observed_ids": []
+            }
+          ],
+          "first_incorrect_transition": null,
+          "resolution": {
+            "stage": "replace-old-reverse-links",
+            "observed": "removed associations disappeared from reverse lookup",
+            "stale_reverse_association": false
+          }
+        }
+      },
+      "artifact_regression_gates": [
+        {
+          "id": "replacement-removes-reverse-links",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createTagIndex",
+              "target": "src/tag-index.mjs",
+              "source": "cases/bidirectional-tag-index/verifier/mutants/tag-index.stale-reverse.mjs"
+            }
+          ]
+        },
+        {
+          "id": "replacement-adds-reverse-links",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createTagIndex",
+              "target": "src/tag-index.mjs",
+              "source": "cases/bidirectional-tag-index/verifier/mutants/tag-index.missing-new-reverse.mjs"
+            }
+          ]
+        },
+        {
+          "id": "remove-clears-both-directions",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createTagIndex",
+              "target": "src/tag-index.mjs",
+              "source": "cases/bidirectional-tag-index/verifier/mutants/tag-index.one-sided-remove.mjs"
+            }
+          ]
+        },
+        {
+          "id": "association-insertion-order",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createTagIndex",
+              "target": "src/tag-index.mjs",
+              "source": "cases/bidirectional-tag-index/verifier/mutants/tag-index.sorted-reverse-order.mjs"
+            }
+          ]
+        },
+        {
+          "id": "fresh-mutation-safe-getters",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createTagIndex",
+              "target": "src/tag-index.mjs",
+              "source": "cases/bidirectional-tag-index/verifier/mutants/tag-index.shared-getter-arrays.mjs"
+            }
+          ]
+        },
+        {
+          "id": "atomic-exact-validation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createTagIndex",
+              "target": "src/tag-index.mjs",
+              "source": "cases/bidirectional-tag-index/verifier/mutants/tag-index.loose-partial-validation.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    }
+  ]
+}
