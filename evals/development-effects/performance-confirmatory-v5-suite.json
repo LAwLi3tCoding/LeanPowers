@@ -1,0 +1,191 @@
+{
+  "schema_version": 2,
+  "suite_id": "development-effects-performance-confirmatory-v5-2026-07-16",
+  "evidence_level": "paired-development-heldout",
+  "runtime": "codex-cli",
+  "model_default": "gpt-5.3-codex-spark",
+  "effort": "low",
+  "repetitions": 2,
+  "activation_mode": "explicit-entrypoint",
+  "report_contract": "categorized-exact-render-v1",
+  "token_target": {
+    "metric": "aggregate-model-token-share",
+    "population": "all-matched-pairs",
+    "max_share_pct": 60
+  },
+  "workflow_entrypoints": {
+    "superpowers-6.1.1": "$superpowers:using-superpowers",
+    "leanpowers-0.2.0": "$leanpowers:route"
+  },
+  "workflow_order": [
+    ["superpowers-6.1.1", "leanpowers-0.2.0"],
+    ["leanpowers-0.2.0", "superpowers-6.1.1"]
+  ],
+  "freeze_contract": {
+    "status": "frozen-before-live-run",
+    "model_default": "gpt-5.3-codex-spark",
+    "effort": "low",
+    "repetitions": 2,
+    "workflow_order": [
+      ["superpowers-6.1.1", "leanpowers-0.2.0"],
+      ["leanpowers-0.2.0", "superpowers-6.1.1"]
+    ],
+    "agent_read_isolation": "codex-minimal-workspace-plugin-toolchain-read-v1",
+    "superpowers_revision": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+    "leanpowers_revision": "5716ee0efd27079c317d398e725c95f763f5f376",
+    "evaluator_revision": "5716ee0efd27079c317d398e725c95f763f5f376",
+    "runner_revision": "5716ee0efd27079c317d398e725c95f763f5f376",
+    "case_snapshots": {
+      "http-accept-negotiation": {
+        "mutants_sha256": "bf4dc9608dff66878f5bdce32e0e6d2bc43c88fc9faf28b7440f2938eae19d58",
+        "verifier_sha256": "a877f9aca988299af4ab894751991050221d2eb6c7a1bfbac2d9ef04840eea7e",
+        "workspace_sha256": "bf33257e741993c67f07488511421514fb47396a4876b6550e6e04d51d4c46a6"
+      },
+      "safe-redirect-policy": {
+        "mutants_sha256": "bbc0b4fa186168c83ef33ee7bfe7bf7f1a004c01dc6b93f9e54eb04ea51b8642",
+        "verifier_sha256": "b8f34155d73843c293201539b7f064151477afb2a8d2c17f3cd79f02837a7bc0",
+        "workspace_sha256": "5d9fa07362620e00a9b2e003b842ebbd9d4af9e010df0ac59e412269305ae79d"
+      },
+      "keyset-cursor-page": {
+        "mutants_sha256": "0fd8718643f3ddeef00dd20e838d441564d040385c31575cb2c790bef1900448",
+        "verifier_sha256": "5213039d904bb4c84a7e3b4761c26a3ad76dbac28bed4597237f6133eda6ac09",
+        "workspace_sha256": "ad5d1c7f9d4d822c452ec4b96e98bb13396cfeba1fadf267f9dea78a62feb5ce"
+      }
+    },
+    "token_target": {
+      "metric": "aggregate-model-token-share",
+      "population": "all-matched-pairs",
+      "max_share_pct": 60
+    }
+  },
+  "cases": [
+    {
+      "id": "http-accept-negotiation",
+      "scenario_class": "small-explicit-feature",
+      "task_family": "http-content-negotiation",
+      "reporting_category": "HTTP negotiation build",
+      "risk_level": "standard",
+      "expected_workflow": "build",
+      "workspace": "cases/http-accept-negotiation/workspace",
+      "verifier_files": [
+        "cases/http-accept-negotiation/verifier/http-accept-negotiation.hidden.mjs"
+      ],
+      "task": "Implement negotiateMediaType(accept, supported) for a closed HTTP Accept subset. accept must be a nonempty primitive string containing one or more comma-separated exact type/subtype, type/*, or */* ranges; allow HTTP optional whitespace around ranges and parameters, and at most one case-insensitive q parameter per range. q must use the RFC qvalue shape from 0 through 1 with at most three fractional digits; reject empty ranges, invalid tokens or wildcard placement, unknown or malformed parameters, duplicate q, and invalid q with TypeError. supported must be a nonempty dense array with no extra own keys and only own enumerable data elements. Every element must be a primitive exact type/subtype token string without wildcards, unique case-insensitively; reject invalid structure with TypeError without invoking accessors. Match case-insensitively but return the original supported string. For each supported candidate, the most specific matching range governs its q; equally specific matches use the earliest header range. Choose the winner by highest governing q, then highest governing specificity, then earliest governing header range, then the last supported input position. A governing q of zero excludes the candidate; return null when no candidate remains. Preserve supported and all descriptors, preserve the exact direct and public named export surfaces, and keep negotiateMediaType as the only direct named export. Add focused regressions that independently prove q weighting, candidate specificity, wildcard behavior, q=0 exclusion, both winner tie-break layers, last-supported ties, syntax and exact collection validation, accessor safety, immutability, original spelling, and export compatibility. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {"id":"case-insensitive-matching","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"negotiateMediaType","target":"src/http-accept-negotiation.mjs","source":"cases/http-accept-negotiation/verifier/mutants/http-accept-negotiation.case-sensitive.mjs"}]},
+        {"id":"complete-own-key-validation","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"negotiateMediaType","target":"src/http-accept-negotiation.mjs","source":"cases/http-accept-negotiation/verifier/mutants/http-accept-negotiation.enumerable-keys-only.mjs"}]},
+        {"id":"wildcard-matching","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"negotiateMediaType","target":"src/http-accept-negotiation.mjs","source":"cases/http-accept-negotiation/verifier/mutants/http-accept-negotiation.exact-only.mjs"}]},
+        {"id":"last-supported-tie","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"negotiateMediaType","target":"src/http-accept-negotiation.mjs","source":"cases/http-accept-negotiation/verifier/mutants/http-accept-negotiation.first-supported-tie.mjs"}]},
+        {"id":"governing-range-specificity","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"negotiateMediaType","target":"src/http-accept-negotiation.mjs","source":"cases/http-accept-negotiation/verifier/mutants/http-accept-negotiation.highest-q-range.mjs"}]},
+        {"id":"quality-weighting","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"negotiateMediaType","target":"src/http-accept-negotiation.mjs","source":"cases/http-accept-negotiation/verifier/mutants/http-accept-negotiation.ignore-q.mjs"}]},
+        {"id":"winner-header-order","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"negotiateMediaType","target":"src/http-accept-negotiation.mjs","source":"cases/http-accept-negotiation/verifier/mutants/http-accept-negotiation.ignore-winner-header-order.mjs"}]},
+        {"id":"winner-specificity","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"negotiateMediaType","target":"src/http-accept-negotiation.mjs","source":"cases/http-accept-negotiation/verifier/mutants/http-accept-negotiation.ignore-winner-specificity.mjs"}]},
+        {"id":"governing-range-header-order","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"negotiateMediaType","target":"src/http-accept-negotiation.mjs","source":"cases/http-accept-negotiation/verifier/mutants/http-accept-negotiation.later-header-range.mjs"}]},
+        {"id":"descriptor-safe-collection-validation","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"negotiateMediaType","target":"src/http-accept-negotiation.mjs","source":"cases/http-accept-negotiation/verifier/mutants/http-accept-negotiation.loose-collection-validation.mjs"}]},
+        {"id":"supported-immutability","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"negotiateMediaType","target":"src/http-accept-negotiation.mjs","source":"cases/http-accept-negotiation/verifier/mutants/http-accept-negotiation.mutate-supported.mjs"}]},
+        {"id":"zero-quality-exclusion","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"negotiateMediaType","target":"src/http-accept-negotiation.mjs","source":"cases/http-accept-negotiation/verifier/mutants/http-accept-negotiation.q-zero-eligible.mjs"}]}
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "safe-redirect-policy",
+      "scenario_class": "small-explicit-feature",
+      "task_family": "safe-redirect-origin-policy",
+      "reporting_category": "safe redirect build",
+      "risk_level": "strict",
+      "expected_workflow": "build",
+      "workspace": "cases/safe-redirect-policy/workspace",
+      "verifier_files": [
+        "cases/safe-redirect-policy/verifier/safe-redirect.hidden.mjs"
+      ],
+      "task": "Implement the security-sensitive resolveSafeRedirect(target, baseOrigin, allowedOrigins). target and baseOrigin must be nonempty primitive strings. A canonical origin is an HTTP or HTTPS URL with no credentials, query, or fragment, pathname exactly /, and parsed URL.origin exactly equal to the supplied string; this permits canonical non-default ports but rejects explicit default-port spellings and trailing-slash spellings. allowedOrigins must be a nonempty dense array with no extra own keys and only own enumerable data elements. Its values must be unique primitive canonical origins and must include baseOrigin; reject structural or origin-contract violations with TypeError without invoking accessors. Resolve relative, absolute, and scheme-relative targets against baseOrigin. Before URL normalization, return null for a target containing any raw C0 control code unit, DEL, or backslash. Return null for an invalid URL, any non-HTTP(S) protocol, any username or password, or any resolved origin not exactly in allowedOrigins. Otherwise return the normalized absolute href, preserving normalized path, query, and fragment. Origin authorization is exact across scheme, hostname, and effective port; never use prefix, suffix, or substring host checks. Preserve all inputs and descriptors, preserve the exact direct and public named export surfaces, and keep resolveSafeRedirect as the only direct named export. Add focused regressions for relative and scheme-relative resolution, exact scheme/host/port isolation, canonical HTTP and HTTPS origins including a non-default port, default-port normalization, dot segments, credentials in every form, raw confusables and controls, protocol restriction, descriptor-safe allowlist validation, immutability, and export compatibility. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {"id":"default-port-canonical-origin","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"resolveSafeRedirect","target":"src/safe-redirect.mjs","source":"cases/safe-redirect-policy/verifier/mutants/safe-redirect.accept-default-port-origin.mjs"}]},
+        {"id":"credential-rejection","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"resolveSafeRedirect","target":"src/safe-redirect.mjs","source":"cases/safe-redirect-policy/verifier/mutants/safe-redirect.allow-credentials.mjs"}]},
+        {"id":"web-protocol-only","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"resolveSafeRedirect","target":"src/safe-redirect.mjs","source":"cases/safe-redirect-policy/verifier/mutants/safe-redirect.allow-ftp-origin.mjs"}]},
+        {"id":"host-boundary-isolation","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"resolveSafeRedirect","target":"src/safe-redirect.mjs","source":"cases/safe-redirect-policy/verifier/mutants/safe-redirect.host-prefix.mjs"}]},
+        {"id":"exact-origin-isolation","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"resolveSafeRedirect","target":"src/safe-redirect.mjs","source":"cases/safe-redirect-policy/verifier/mutants/safe-redirect.hostname-only.mjs"}]},
+        {"id":"raw-confusable-rejection","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"resolveSafeRedirect","target":"src/safe-redirect.mjs","source":"cases/safe-redirect-policy/verifier/mutants/safe-redirect.normalize-confusables.mjs"}]},
+        {"id":"accessor-safe-allowlist","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"resolveSafeRedirect","target":"src/safe-redirect.mjs","source":"cases/safe-redirect-policy/verifier/mutants/safe-redirect.read-accessor-elements.mjs"}]},
+        {"id":"dot-segment-normalization","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"resolveSafeRedirect","target":"src/safe-redirect.mjs","source":"cases/safe-redirect-policy/verifier/mutants/safe-redirect.reject-dot-segments.mjs"}]},
+        {"id":"scheme-relative-resolution","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"resolveSafeRedirect","target":"src/safe-redirect.mjs","source":"cases/safe-redirect-policy/verifier/mutants/safe-redirect.reject-scheme-relative.mjs"}]}
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "keyset-cursor-page",
+      "scenario_class": "unknown-cause-defect",
+      "task_family": "keyset-cursor-pagination",
+      "reporting_category": "keyset cursor debug",
+      "risk_level": "standard",
+      "expected_workflow": "debug",
+      "workspace": "cases/keyset-cursor-page/workspace",
+      "verifier_files": [
+        "cases/keyset-cursor-page/verifier/keyset-cursor-page.hidden.mjs"
+      ],
+      "task": "Users report that keyset pagination can skip records sharing the cursor timestamp. Before editing, run the included node repro/keyset-cursor-page.mjs and use its structured output to identify the first incorrect transition. Fix pageAfterCursor(records, cursor, limit). records must be a dense array with no extra own keys and only own enumerable data elements. Every element must be an exact ordinary Object.prototype record with exactly the own enumerable data properties { id, updatedAt }; id values must be unique nonempty primitive strings and updatedAt values safe integers. cursor must be null or an independent exact ordinary { id, updatedAt } tuple under the same value and descriptor rules, but it need not identify a record that still exists. Reject invalid structures with TypeError without invoking accessors. Establish keyset order by updatedAt descending and id ascending, without mutating records. Return records strictly after the cursor tuple, up to the positive safe-integer limit. Return a fresh exact ordinary { items, nextCursor }: items must be a fresh dense array preserving the original record references; nextCursor must be a fresh exact tuple for the last returned item only when another ordered record remains after the page, otherwise null. An empty page has nextCursor null. Preserve the exact direct and public named export surfaces, and keep pageAfterCursor as the only direct named export. Add focused regressions for same-timestamp continuation, strict cursor exclusion, removed cursors, tie ordering, terminal and empty cursor behavior, fresh containers, record identity, input immutability, exact descriptor-safe validation, and API compatibility. Run the full test suite, then rerun the same included repro as a separate final command; its final nonblank JSON object must match the resolved behavior. Do not commit, install packages, use the network, or create another worktree.",
+      "reproduction_contract": {
+        "command": "node repro/keyset-cursor-page.mjs",
+        "expected_output": {
+          "scenario": "keyset-cursor-pagination",
+          "observations": [
+            {
+              "action": "page-after-cursor",
+              "cursor": {"id":"item-b","updatedAt":200},
+              "limit": 2,
+              "expected_ids": ["item-c", "item-d"],
+              "observed_ids": ["item-d"]
+            }
+          ],
+          "first_incorrect_transition": {
+            "stage": "cursor-boundary-filter",
+            "expected": "same-timestamp records continue by ascending id",
+            "skipped_id": "item-c"
+          },
+          "resolution": null
+        },
+        "resolved_output": {
+          "scenario": "keyset-cursor-pagination",
+          "observations": [
+            {
+              "action": "page-after-cursor",
+              "cursor": {"id":"item-b","updatedAt":200},
+              "limit": 2,
+              "expected_ids": ["item-c", "item-d"],
+              "observed_ids": ["item-c", "item-d"]
+            }
+          ],
+          "first_incorrect_transition": null,
+          "resolution": {
+            "stage": "cursor-boundary-filter",
+            "observed": "same-timestamp successor retained",
+            "skipped_id": null
+          }
+        }
+      },
+      "artifact_regression_gates": [
+        {"id":"exact-array-keys","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"pageAfterCursor","target":"src/keyset-cursor-page.mjs","source":"cases/keyset-cursor-page/verifier/mutants/keyset-cursor-page.accepts-extra-array-keys.mjs"}]},
+        {"id":"original-record-references","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"pageAfterCursor","target":"src/keyset-cursor-page.mjs","source":"cases/keyset-cursor-page/verifier/mutants/keyset-cursor-page.clones-items.mjs"}]},
+        {"id":"exact-tuple-keys","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"pageAfterCursor","target":"src/keyset-cursor-page.mjs","source":"cases/keyset-cursor-page/verifier/mutants/keyset-cursor-page.loose-tuple-keys.mjs"}]},
+        {"id":"removed-cursor-boundary","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"pageAfterCursor","target":"src/keyset-cursor-page.mjs","source":"cases/keyset-cursor-page/verifier/mutants/keyset-cursor-page.requires-existing-cursor.mjs"}]},
+        {"id":"fresh-terminal-items","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"pageAfterCursor","target":"src/keyset-cursor-page.mjs","source":"cases/keyset-cursor-page/verifier/mutants/keyset-cursor-page.reuses-full-page-items.mjs"}]},
+        {"id":"fresh-next-cursor","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"pageAfterCursor","target":"src/keyset-cursor-page.mjs","source":"cases/keyset-cursor-page/verifier/mutants/keyset-cursor-page.reuses-record-as-next-cursor.mjs"}]},
+        {"id":"same-timestamp-continuation","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"pageAfterCursor","target":"src/keyset-cursor-page.mjs","source":"cases/keyset-cursor-page/verifier/mutants/keyset-cursor-page.timestamp-only.mjs"}]},
+        {"id":"ascending-id-tie-order","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"pageAfterCursor","target":"src/keyset-cursor-page.mjs","source":"cases/keyset-cursor-page/verifier/mutants/keyset-cursor-page.wrong-tie-order.mjs"}]}
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    }
+  ]
+}
