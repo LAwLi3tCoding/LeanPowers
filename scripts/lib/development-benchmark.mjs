@@ -5577,16 +5577,16 @@ export function parseLeanRouteLedger(message) {
     return null;
   }
   const workflowMatches = [...routeAndFields.matchAll(
-    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|\b(?:and|based|per)\b|$))/giu,
+    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|\b(?:and|based|per)\b|\bwas\s+used\b|$))/giu,
   )];
   const riskMatches = [...routeAndFields.matchAll(
-    /\brisk\s*(?:[:=]|\bis\b)\s*`?(lean|standard|strict)`?(?=\s*(?:[|;,.]|\b(?:and|based|per)\b|$))/giu,
+    /\brisk\s*(?:[:=]|\bis\b)\s*`?(lean|standard|strict)`?(?=\s*(?:[|;,.]|\b(?:and|based|per)\b|\bwas\s+used\b|$))/giu,
   )];
   const workflowPresentations = [...routeAndFields.matchAll(
-    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(?!not\b|never\b)([\p{L}][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|\b(?:and|based|per)\b|$))/giu,
+    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(?!not\b|never\b)([\p{L}][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|\b(?:and|based|per)\b|\bwas\s+used\b|$))/giu,
   )];
   const riskPresentations = [...routeAndFields.matchAll(
-    /\brisk\s*(?:[:=]|\bis\b)\s*`?(?!not\b|never\b)([\p{L}][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|\b(?:and|based|per)\b|$))/giu,
+    /\brisk\s*(?:[:=]|\bis\b)\s*`?(?!not\b|never\b)([\p{L}][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|\b(?:and|based|per)\b|\bwas\s+used\b|$))/giu,
   )];
   const workflows = new Set(workflowMatches.map(
     (match) => match[1].toLocaleLowerCase("en-US"),
@@ -5595,10 +5595,10 @@ export function parseLeanRouteLedger(message) {
     (match) => match[1].toLocaleLowerCase("en-US"),
   ));
   const structuredWorkflowMatches = [...routeFieldText.matchAll(
-    /\b(?:workflow|owner)\s*[:=]\s*`?(?:shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|\b(?:and|based|per)\b|$))/giu,
+    /\b(?:workflow|owner)\s*[:=]\s*`?(?:shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|\b(?:and|based|per)\b|\bwas\s+used\b|$))/giu,
   )];
   const structuredRiskMatches = [...routeFieldText.matchAll(
-    /\brisk\s*[:=]\s*`?(?:lean|standard|strict)`?(?=\s*(?:[|;,.]|\b(?:and|based|per)\b|$))/giu,
+    /\brisk\s*[:=]\s*`?(?:lean|standard|strict)`?(?=\s*(?:[|;,.]|\b(?:and|based|per)\b|\bwas\s+used\b|$))/giu,
   )];
   const structuredWorkflowFields = structuredFields.filter((field) =>
     field === "workflow" || field === "owner"
@@ -5735,6 +5735,7 @@ function leanRouteMessageDeniesActivation(message) {
     /\b(?:not|never|without|skip(?:ping)?|declin(?:e|ing))\s+(?:(?:use|using|select|selecting|activate|activating|invoke|invoking)\s+)?`?leanpowers:route`?\b/iu.test(text) ||
     /\b(?:(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(?:OWNER|WORKFLOW)\b|risk\s*(?:[:=]|\bis\b)\s*`?RISK\b)/u.test(text) ||
     /\bleanpowers:route\b[^\r\n.]{0,48}\b(?:not|never)\s+activat(?:e|ed|ing)\b/iu.test(text) ||
+    /\bleanpowers:route\b[^\r\n.]{0,160}\bwas\s+not\s+used\b/iu.test(text) ||
     /\b(?:(?:do|does|did|am|is|are|was|were|will|would|have|has)\s+not|(?:don['’]t|doesn['’]t|didn['’]t|isn['’]t|aren['’]t|wasn['’]t|weren['’]t|won['’]t|wouldn['’]t|haven['’]t|hasn['’]t))\s+(?:(?:intend|mean|plan)\s+to\s+)?(?:use|used|using|activate|activated|activating|select|selected|selecting|invoke|invoked|invoking|follow|followed|following)\s+(?:it|this\s+(?:route|workflow)|that\s+(?:route|workflow)|the\s+(?:route(?:\s+workflow)?|workflow)|leanpowers:route)\b/iu.test(text) ||
     /\b(?:this|that|the)\s+(?:route|workflow)\s+(?:(?:is|was)\s+not|(?:isn['’]t|wasn['’]t))\s+active\b/iu.test(text)
   );

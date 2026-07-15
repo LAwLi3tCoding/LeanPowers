@@ -1406,10 +1406,21 @@ test("LeanPowers route declaration accepts compact semantic and legacy forms", (
       required_gates: "[current_evidence]",
     },
   );
+  assert.deepEqual(
+    parseLeanRouteLedger(
+      "`leanpowers:route | workflow=debug | risk=standard` was used for this task.",
+    ),
+    {
+      workflow: "debug",
+      risk: "standard",
+      required_gates: "[current_evidence]",
+    },
+  );
   for (const nonActivation of [
     "Running in the `leanpowers:route` documentation with `OWNER=debug` and `RISK=standard` per the example.",
     "Running in the `leanpowers:route` example with `OWNER=debug` and `RISK=standard` per the documentation.",
     "Workflow decision example: `leanpowers:route` with `OWNER=debug` and `RISK=standard` based on documentation.",
+    "`leanpowers:route | workflow=debug | risk=standard` was not used for this task.",
   ]) {
     assert.equal(parseLeanRouteLedger(nonActivation), null, nonActivation);
   }
@@ -3118,6 +3129,10 @@ test("debug capsule stage protocol rejects one-property trace regressions", () =
   for (const mutation of [
     { duplicateLedger: true },
     { finalMessage: trailingWhitespaceLedger },
+    {
+      finalMessage:
+        "`leanpowers:route | workflow=debug | risk=standard` was used for this task.",
+    },
   ]) {
     const repeatedRoute = parseCodexResult(
       capsuleTraceEvents(mutation).map(JSON.stringify).join("\n"),
