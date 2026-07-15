@@ -2275,7 +2275,7 @@ function isStageRetryAuthorized(item) {
 function isExpectedBuildRed(item) {
   return (
     item?.type === "command_execution" &&
-    item?.status === "completed" &&
+    ["completed", "failed"].includes(item?.status) &&
     item?.timed_out !== true &&
     Number.isInteger(item?.exit_code) &&
     item.exit_code >= 1 &&

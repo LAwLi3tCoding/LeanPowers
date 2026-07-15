@@ -542,7 +542,7 @@ function capsuleTraceEvents({
   redCommand = "node --test test/index.test.mjs",
   redExitCode = 1,
   redOutput = "expected failure: behavior is not implemented",
-  redStatus = "completed",
+  redStatus = "failed",
   redTimedOut = false,
   repeatRedTestInCodePatch = false,
   retryBuildRedCycle = false,
@@ -4118,7 +4118,6 @@ test("build capsule requires one focused failing RED between test and product pa
     { redCommand: "npm run build" },
     { redOutput: "" },
     { redOutput: "   " },
-    { redStatus: "failed" },
     { redStatus: "in_progress" },
     { redTimedOut: true },
     { redExitCode: 256 },
@@ -4139,6 +4138,17 @@ test("build capsule requires one focused failing RED between test and product pa
     assert.equal(stage.patch_protocol_observed, false);
     assert.equal(stage.protocol_observed, false);
   }
+
+  const liveCodexRed = parseCodexResult(
+    capsuleTraceEvents({
+      expectedWorkflow: "build",
+      redStatus: "failed",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("build"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(liveCodexRed.build_red_observed, true);
+  assert.equal(liveCodexRed.quality_pre_change_evidence_observed, true);
+  assert.equal(liveCodexRed.patch_protocol_observed, true);
 
   const mixedTestBatch = parseCodexResult(
     capsuleTraceEvents({
