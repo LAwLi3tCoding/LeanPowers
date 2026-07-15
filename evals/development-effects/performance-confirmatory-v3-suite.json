@@ -1,0 +1,409 @@
+{
+  "schema_version": 2,
+  "suite_id": "development-effects-performance-confirmatory-v3-2026-07-15",
+  "evidence_level": "paired-development-heldout",
+  "runtime": "codex-cli",
+  "model_default": "gpt-5.3-codex-spark",
+  "effort": "low",
+  "repetitions": 2,
+  "activation_mode": "explicit-entrypoint",
+  "report_contract": "categorized-exact-render-v1",
+  "token_target": {
+    "metric": "aggregate-model-token-share",
+    "population": "all-matched-pairs",
+    "max_share_pct": 60
+  },
+  "workflow_entrypoints": {
+    "superpowers-6.1.1": "$superpowers:using-superpowers",
+    "leanpowers-0.2.0": "$leanpowers:route"
+  },
+  "workflow_order": [
+    ["superpowers-6.1.1", "leanpowers-0.2.0"],
+    ["leanpowers-0.2.0", "superpowers-6.1.1"]
+  ],
+  "freeze_contract": {
+    "status": "frozen-before-live-run",
+    "model_default": "gpt-5.3-codex-spark",
+    "effort": "low",
+    "repetitions": 2,
+    "workflow_order": [
+      ["superpowers-6.1.1", "leanpowers-0.2.0"],
+      ["leanpowers-0.2.0", "superpowers-6.1.1"]
+    ],
+    "agent_read_isolation": "codex-minimal-workspace-plugin-toolchain-read-v1",
+    "superpowers_revision": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+    "leanpowers_revision": "94c491a14e61c931dfa1261fb75c92d42ac66a49",
+    "evaluator_revision": "94c491a14e61c931dfa1261fb75c92d42ac66a49",
+    "runner_revision": "94c491a14e61c931dfa1261fb75c92d42ac66a49",
+    "case_snapshots": {
+      "atomic-config-migrations": {
+        "mutants_sha256": "0e025be841e27f1b3ea06ba8fec22aadd03cf891439a023e80e9e42e6a301290",
+        "verifier_sha256": "e8692c047e76a2e18d96dd35a83515114ad489bb1b9feda733ba8440384ae3c4",
+        "workspace_sha256": "5ab5b8cc16323b52147caaca0fecfc909b4f1aa39b4b85d50023a00eebe90ef6"
+      },
+      "stable-priority-merge": {
+        "mutants_sha256": "749a43751d9647f56d24bb7f180c67bb1009ff1ac090ac3471b4e65975767305",
+        "verifier_sha256": "5441beb649c0f228c120aa5beb502bbb734a51bc36397f0ca9da673d54a91560",
+        "workspace_sha256": "eb1de002fe723014e929aae1c3bcb03472cba7da573b025dc8b23f13dde7e35d"
+      },
+      "generation-guarded-refresh-cache": {
+        "mutants_sha256": "e45f1d2409e385f9154fceafb637716ede1d5dbce063976a69de70a29183c097",
+        "verifier_sha256": "89b585b23ac5161c576ced949a968fbe6a316f35bf38a51a6aa3d712c7680791",
+        "workspace_sha256": "b99490d67bd3b496da034bbb8821fd4951923cb94b4e163081dc05ff5b3b0fb4"
+      }
+    },
+    "token_target": {
+      "metric": "aggregate-model-token-share",
+      "population": "all-matched-pairs",
+      "max_share_pct": 60
+    }
+  },
+  "cases": [
+    {
+      "id": "atomic-config-migrations",
+      "scenario_class": "small-explicit-feature",
+      "reporting_category": "atomic migration build",
+      "risk_level": "strict",
+      "expected_workflow": "build",
+      "workspace": "cases/atomic-config-migrations/workspace",
+      "verifier_files": [
+        "cases/atomic-config-migrations/verifier/config-migrations.hidden.mjs"
+      ],
+      "task": "Extend createMigratingConfig(initial, migrations) into an atomic versioned-configuration migrator. initial must be an exact ordinary { version, values } record: version is a non-negative safe integer, and values is an ordinary Object.prototype object containing only own enumerable string data properties whose values are flat primitives or null, never nested objects or functions. migrations must be a dense array with no extra own keys; every entry must be an exact ordinary { from, to, apply } record with a unique non-negative safe-integer from, to exactly from + 1, and a function apply. Migration entries may be supplied out of order. snapshot() must always return a fresh { version, values } record with a fresh values copy. migrateTo(target) must reject invalid targets with TypeError, reject a target below the current version with RangeError, require every contiguous step from the current version to target, and apply those steps in version order. Give each apply a fresh copy of the staged values, require every returned value to satisfy the same flat-values contract, and commit the new version and values only after the entire requested chain succeeds. If a step is missing, returns invalid values, or throws, propagate the applicable error unchanged and leave both committed state and all caller inputs unchanged. migrateTo must return a fresh snapshot, including when target equals the current version. Preserve the exact snapshot/migrateTo method surface and the exact direct and public named export surfaces, with createMigratingConfig remaining a direct named export. Add focused regressions that independently prove shuffled contiguous ordering, missing-step rejection, all-or-nothing rollback, migration-output validation, input isolation, fresh snapshots and results, downgrade rejection, exact construction validation, and API compatibility. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {
+          "id": "ordered-contiguous-migration-chain",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createMigratingConfig",
+              "target": "src/config-migrations.mjs",
+              "source": "cases/atomic-config-migrations/verifier/mutants/config-migrations.wrong-order-gap-skipping.mjs"
+            }
+          ]
+        },
+        {
+          "id": "atomic-failure-rollback",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createMigratingConfig",
+              "target": "src/config-migrations.mjs",
+              "source": "cases/atomic-config-migrations/verifier/mutants/config-migrations.partial-commit-on-throw.mjs"
+            }
+          ]
+        },
+        {
+          "id": "migration-output-validation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createMigratingConfig",
+              "target": "src/config-migrations.mjs",
+              "source": "cases/atomic-config-migrations/verifier/mutants/config-migrations.accept-invalid-output.mjs"
+            }
+          ]
+        },
+        {
+          "id": "extended-flat-primitive-acceptance",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createMigratingConfig",
+              "target": "src/config-migrations.mjs",
+              "source": "cases/atomic-config-migrations/verifier/mutants/config-migrations.reject-extended-primitives.mjs"
+            }
+          ]
+        },
+        {
+          "id": "input-state-isolation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createMigratingConfig",
+              "target": "src/config-migrations.mjs",
+              "source": "cases/atomic-config-migrations/verifier/mutants/config-migrations.mutate-input.mjs"
+            }
+          ]
+        },
+        {
+          "id": "fresh-snapshot-results",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createMigratingConfig",
+              "target": "src/config-migrations.mjs",
+              "source": "cases/atomic-config-migrations/verifier/mutants/config-migrations.reuse-snapshots.mjs"
+            }
+          ]
+        },
+        {
+          "id": "downgrade-rejection",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createMigratingConfig",
+              "target": "src/config-migrations.mjs",
+              "source": "cases/atomic-config-migrations/verifier/mutants/config-migrations.accept-downgrade.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "stable-priority-merge",
+      "scenario_class": "small-explicit-feature",
+      "reporting_category": "stable priority build",
+      "risk_level": "lean",
+      "expected_workflow": "build",
+      "workspace": "cases/stable-priority-merge/workspace",
+      "verifier_files": [
+        "cases/stable-priority-merge/verifier/stable-priority-merge.hidden.mjs"
+      ],
+      "task": "Extend mergeStablePriorityItems(lanes) so lanes is a dense array of dense arrays of exact ordinary records with exactly the own data properties { id, priority, value }. id must be a non-empty primitive string, priority must be any safe integer, and value may be any value. Treat the outer lane order and then each lane's item order as the global encounter order. Return one winner per id: the record with the highest priority wins, and equal-priority duplicates keep the earliest encounter. Sort winners by descending priority and preserve the winning records' encounter order when priorities tie, including when a later encounter promoted an id over an earlier lower-priority record. Never mutate the outer array, lanes, or input records. Return a dense array of fresh exact { id, priority, value } records while preserving each winning value reference. Reject sparse arrays, inherited or extra fields, accessors, symbol keys, non-ordinary records, invalid ids, and non-safe-integer priorities with TypeError. Preserve the exact direct and public named export surfaces, and keep mergeStablePriorityItems as a direct named export. Add focused regressions that independently prove global descending priority, stable winner ordering, highest-priority duplicate selection, earliest equal-priority duplicate selection, dense exact-record validation, input immutability, fresh output records, safe-integer boundaries, arbitrary values, and export compatibility. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {
+          "id": "descending-priority-order",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "mergeStablePriorityItems",
+              "target": "src/stable-priority-merge.mjs",
+              "source": "cases/stable-priority-merge/verifier/mutants/stable-priority-merge.reverse-priority.mjs"
+            }
+          ]
+        },
+        {
+          "id": "stable-winner-order",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "mergeStablePriorityItems",
+              "target": "src/stable-priority-merge.mjs",
+              "source": "cases/stable-priority-merge/verifier/mutants/stable-priority-merge.unstable-ties.mjs"
+            }
+          ]
+        },
+        {
+          "id": "highest-priority-duplicate-wins",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "mergeStablePriorityItems",
+              "target": "src/stable-priority-merge.mjs",
+              "source": "cases/stable-priority-merge/verifier/mutants/stable-priority-merge.first-duplicate.mjs"
+            }
+          ]
+        },
+        {
+          "id": "earliest-equal-priority-duplicate-wins",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "mergeStablePriorityItems",
+              "target": "src/stable-priority-merge.mjs",
+              "source": "cases/stable-priority-merge/verifier/mutants/stable-priority-merge.last-duplicate.mjs"
+            }
+          ]
+        },
+        {
+          "id": "input-immutability",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "mergeStablePriorityItems",
+              "target": "src/stable-priority-merge.mjs",
+              "source": "cases/stable-priority-merge/verifier/mutants/stable-priority-merge.input-mutation.mjs"
+            }
+          ]
+        },
+        {
+          "id": "fresh-output-records",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "mergeStablePriorityItems",
+              "target": "src/stable-priority-merge.mjs",
+              "source": "cases/stable-priority-merge/verifier/mutants/stable-priority-merge.reused-records.mjs"
+            }
+          ]
+        },
+        {
+          "id": "dense-exact-record-validation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "mergeStablePriorityItems",
+              "target": "src/stable-priority-merge.mjs",
+              "source": "cases/stable-priority-merge/verifier/mutants/stable-priority-merge.loose-validation.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "generation-guarded-refresh-cache",
+      "scenario_class": "unknown-cause-defect",
+      "reporting_category": "generation-guarded cache debug",
+      "risk_level": "strict",
+      "expected_workflow": "debug",
+      "workspace": "cases/generation-guarded-refresh-cache/workspace",
+      "verifier_files": [
+        "cases/generation-guarded-refresh-cache/verifier/refresh-cache.hidden.mjs"
+      ],
+      "task": "Users report that concurrent, overlapping same-key generations can settle out of order, and an older in-flight refresh settling late can discard a newer cached generation. Before editing, run the included node repro/generation-guarded-refresh-cache.mjs and use its structured output to identify the first incorrect transition. Fix createRefreshCache(loadValue) so get(key) coalesces and returns the exact current same-key promise, refresh(key) always starts and installs a newer same-key generation, and generations remain isolated per key. A stale success must still fulfill its own waiter but must never overwrite a newer current generation. A stale rejection must propagate the same error to its own waiter but must never clear a newer current generation. A rejection from the current generation removes only that entry so a later same-key get retries without evicting other keys. invalidate(key) must advance only that key's generation, delete its current entry, return whether an entry existed, and prevent any invalidated in-flight settlement from repopulating the cache. Keep different keys' loads, refreshes, failures, and invalidations independent. Validate loadValue as a function and every method key as a non-empty primitive string. Preserve the exact get/refresh/invalidate method surface and the exact direct and public named export surfaces, with createRefreshCache remaining a direct named export. Add focused regressions that independently prove stale-success and stale-rejection guards, same-key in-flight coalescing, newer-success visibility while an older load remains pending, per-key isolation, invalidation against stale repopulation, current-rejection retry, validation, API compatibility, and operation without timers or network access. Run the full test suite and rerun the same included repro, whose first nonblank JSON object must match the resolved behavior. Do not commit, install packages, use the network, or create another worktree.",
+      "reproduction_contract": {
+        "command": "node repro/generation-guarded-refresh-cache.mjs",
+        "expected_output": {
+          "scenario": "generation-guarded-refresh-cache",
+          "observations": [
+            { "action": "get", "generation": 1 },
+            { "action": "refresh", "generation": 2 },
+            {
+              "action": "resolve",
+              "generation": 2,
+              "value": { "id": "profile-7", "version": 2 }
+            },
+            {
+              "action": "reject",
+              "generation": 1,
+              "reason": "older generation failed late"
+            },
+            {
+              "action": "get-after-stale-rejection",
+              "expected_version": 2,
+              "observed_version": 3,
+              "loader_calls": 3
+            }
+          ],
+          "first_incorrect_transition": {
+            "stage": "stale-rejection-settlement",
+            "expected": "generation 2 remains cached",
+            "stale_rejection_cleared_newer_generation": true
+          },
+          "resolution": null
+        },
+        "resolved_output": {
+          "scenario": "generation-guarded-refresh-cache",
+          "observations": [
+            { "action": "get", "generation": 1 },
+            { "action": "refresh", "generation": 2 },
+            {
+              "action": "resolve",
+              "generation": 2,
+              "value": { "id": "profile-7", "version": 2 }
+            },
+            {
+              "action": "reject",
+              "generation": 1,
+              "reason": "older generation failed late"
+            },
+            {
+              "action": "get-after-stale-rejection",
+              "expected_version": 2,
+              "observed_version": 2,
+              "loader_calls": 2
+            }
+          ],
+          "first_incorrect_transition": null,
+          "resolution": {
+            "stage": "stale-rejection-settlement",
+            "observed": "generation 2 remains cached",
+            "stale_rejection_cleared_newer_generation": false
+          }
+        }
+      },
+      "artifact_regression_gates": [
+        {
+          "id": "stale-success-generation-guard",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createRefreshCache",
+              "target": "src/refresh-cache.mjs",
+              "source": "cases/generation-guarded-refresh-cache/verifier/mutants/refresh-cache.stale-success-overwrites-current.mjs"
+            }
+          ]
+        },
+        {
+          "id": "stale-rejection-generation-guard",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createRefreshCache",
+              "target": "src/refresh-cache.mjs",
+              "source": "cases/generation-guarded-refresh-cache/verifier/mutants/refresh-cache.stale-rejection-clears-current.mjs"
+            }
+          ]
+        },
+        {
+          "id": "per-key-generation-isolation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createRefreshCache",
+              "target": "src/refresh-cache.mjs",
+              "source": "cases/generation-guarded-refresh-cache/verifier/mutants/refresh-cache.global-generation.mjs"
+            }
+          ]
+        },
+        {
+          "id": "per-key-inflight-isolation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createRefreshCache",
+              "target": "src/refresh-cache.mjs",
+              "source": "cases/generation-guarded-refresh-cache/verifier/mutants/refresh-cache.shared-inflight-across-keys.mjs"
+            }
+          ]
+        },
+        {
+          "id": "full-settlement-generation-guard",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createRefreshCache",
+              "target": "src/refresh-cache.mjs",
+              "source": "cases/generation-guarded-refresh-cache/verifier/mutants/refresh-cache.no-generation-guard.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    }
+  ]
+}
