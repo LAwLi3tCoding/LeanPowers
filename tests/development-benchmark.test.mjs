@@ -3127,6 +3127,25 @@ test("capsule READ accepts one boundary-preserving tail batch and requires groun
   assert.equal(portableBatch.protocol_observed, true);
   assert.equal(portableBatch.validation_metadata_read_observed, true);
 
+  const nonFailClosedSegmentedBatch = parseCodexResult(
+    capsuleTraceEvents({
+      readCommand: [
+        "tail -n +1 -- src/index.mjs",
+        "tail -n +1 -- test/index.test.mjs",
+        "tail -n +1 -- package.json",
+      ].join("; "),
+      readOutput: [
+        "tail: src/index.mjs: Permission denied",
+        "test contents",
+        "package contents",
+      ].join("\n"),
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(nonFailClosedSegmentedBatch.read_observed, false);
+  assert.equal(nonFailClosedSegmentedBatch.quality_read_observed, false);
+  assert.equal(nonFailClosedSegmentedBatch.protocol_observed, false);
+
   const diagnosticWordsInSource = parseCodexResult(
     capsuleTraceEvents({
       discoverOutput: [
@@ -3228,6 +3247,15 @@ test("capsule READ accepts one boundary-preserving tail batch and requires groun
     "tail -n +1 -- ~/secret src/index.mjs package.json",
     "tail -n +1 -- src/index.mjs package.json # test/index.test.mjs",
     "/bin/zsh -lc \"tail -n +1 -- src\\index.mjs test\\index.test.mjs package.json\"",
+    "tail -n +1 -- src/index.mjs; cat test/index.test.mjs; tail -n +1 -- package.json",
+    "cd .; tail -n +1 -- src/index.mjs test/index.test.mjs package.json",
+    "tail -n +1 -- src/index.mjs && tail -n +1 -- test/index.test.mjs package.json",
+    "tail -n +1 -- src/index.mjs | tail -n +1 -- test/index.test.mjs package.json",
+    "tail -n +1 -- src/index.mjs > read.txt; tail -n +1 -- test/index.test.mjs package.json",
+    "tail -n +1 -- src/*.mjs test/index.test.mjs package.json",
+    "tail -n +1 -- $(printf src/index.mjs) test/index.test.mjs package.json",
+    "tail -n +1 -- /tmp/src/index.mjs test/index.test.mjs package.json",
+    "tail -n +1 -- src/index.mjs; tail -n +1 -- test/index.test.mjs; tail -n +1 -- package.json",
   ]) {
     const unsafe = parseCodexResult(
       capsuleTraceEvents({ readCommand }).map(JSON.stringify).join("\n"),

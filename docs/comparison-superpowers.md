@@ -14,11 +14,13 @@ A 12-run paired development pilot has now tested three small task shapes. Both w
 
 A separate preregistered, one-case frozen held-out check found 2/2 executable task passes for both workflows. LeanPowers workflow conformance was 1/2, however, so the engineering-effect gate failed. Its paired token shares were 83.3% and 75.9% of Superpowers, a 79.6% median, so 0/2 pairs met the `<=60%` target. See the [held-out report](benchmarks/development-effects-heldout-2026-07-14.md). This result is retained as recorded rather than post-hoc reclassified.
 
+The latest preregistered multi-task comparison used three newly frozen standard-risk cases with two counterbalanced repetitions. Both workflows passed 5/6 executable runs and failed the same repetition of the `layered-build-options` mutation gate. LeanPowers used 50.03% of Superpowers' summed model tokens, passing the frozen aggregate token target, but LeanPowers quality-bearing conformance was 0/6. The engineering-effect decision and combined target therefore failed. See the [confirmatory result](benchmarks/development-effects-confirmatory-2026-07-15.md) and [preregistration](benchmarks/development-effects-confirmatory-preregistration-2026-07-15.md). The result is not post-hoc reclassified.
+
 The comparison set contains all 14 Superpowers 6.1.1 Skills. LeanPowers consolidates the 13 engineering-workflow concerns into six engineering workflows; `writing-skills` remains an external specialist concern. Two compact control Skills sit outside the engineering chain: `route` improves entry discovery, while `adapt` adds project-local feedback learning.
 
 ## Evidence basis
 
-Snapshot date: 2026-07-14.
+Snapshot date: 2026-07-15.
 
 - Baseline: [Superpowers v6.1.1 skill tree](https://github.com/obra/superpowers/tree/v6.1.1/skills).
 - Mandatory global routing: [`using-superpowers`](https://github.com/obra/superpowers/blob/v6.1.1/skills/using-superpowers/SKILL.md).
@@ -38,22 +40,22 @@ find skills -mindepth 2 -maxdepth 2 -name SKILL.md -exec wc -w {} +
 # Inside LeanPowers 0.2.0
 find skills -mindepth 2 -maxdepth 2 -name SKILL.md -exec wc -w {} +
 # six engineering workflows: 2,882 words
-# route control Skill: 495 words
+# route control Skill: 500 words
 # adapt control Skill: 329 words
-# all eight Skill files: 3,706 words
+# all eight Skill files: 3,711 words
 
 wc -w adapters/claude/session-start
 # 111 words
 ```
 
-The six-workflow engineering `SKILL.md` text is 84.4% smaller than the 18,516-word, 14-file Superpowers comparison set. Including the 495-word `route` and 329-word `adapt` control Skills, the eight LeanPowers `SKILL.md` files total 3,706 words, 80.0% less than the baseline set. The baseline total deliberately includes `writing-skills`, even though LeanPowers keeps that concern external. These figures measure primary `SKILL.md` words, not conditionally referenced policies, supporting files, actual model tokens, latency, or task quality.
+The six-workflow engineering `SKILL.md` text is 84.4% smaller than the 18,516-word, 14-file Superpowers comparison set. Including the 500-word `route` and 329-word `adapt` control Skills, the eight LeanPowers `SKILL.md` files total 3,711 words, 80.0% less than the baseline set. The baseline total deliberately includes `writing-skills`, even though LeanPowers keeps that concern external. These figures measure primary `SKILL.md` words, not conditionally referenced policies, supporting files, actual model tokens, latency, or task quality.
 
 ## Side-by-side design choices
 
 | Dimension | Superpowers 6.1.1 | LeanPowers 0.2.0 | What remains protected |
 | --- | --- | --- | --- |
 | User-facing core | 14 skills | 6 engineering workflows + 2 control Skills | Full path from requirements to delivery; routing and learning stay outside the chain |
-| Primary skill text | 18,516 words | 2,882 engineering words; 3,706 total | Strict-only review policy loads after strict validation |
+| Primary skill text | 18,516 words | 2,882 engineering words; 3,711 total | Strict-only review policy loads after strict validation |
 | Workflow selection | Check relevant skills before any response or action | `route` selects and runs exactly one lowest-safe workflow when no owner is already clear | Explicit routing still upgrades on risk |
 | Creative work | `brainstorming` hard-gates implementation until design approval | `shape` only for material ambiguity or risk | Acceptance, scope, constraints, architecture decisions |
 | Planning | Detailed 2–5 minute steps, often including code | 1–5 outcome-based delivery slices | Interfaces and proof are still explicit |
@@ -65,7 +67,7 @@ The six-workflow engineering `SKILL.md` text is 84.4% smaller than the 18,516-wo
 | Worktrees | Dedicated workflow and common execution precondition | Isolation only when branch, dirtiness, or conflict risk requires it | User changes and branch safety are preserved |
 | Completion | Structured branch integration menu | Execute explicit delivery intent through `ship` | Destructive actions still require authority; remote state is read back |
 | Claude startup | `using-superpowers` bootstrap, 481 source words | 111-word read-only routing hint, restored after startup/clear/compact | Skill discovery, escalation, and explicit-feedback routing |
-| Codex startup | Native skill discovery in 6.1.1 | Native discovery of the 495-word `route` entry Skill | No injected startup prompt |
+| Codex startup | Native skill discovery in 6.1.1 | Native discovery of the 500-word `route` entry Skill | No injected startup prompt |
 | Skill authoring | `writing-skills` is part of core | Not a core engineering workflow | Product engineering workflow stays smaller; skill authoring remains an external specialist task |
 | Feedback learning | No equivalent in the compared 14 core Skills | Optional `adapt` control Skill, disabled by default | Project-local scope, explicit feedback, precedence, privacy, and three-lesson cap |
 
@@ -75,7 +77,7 @@ The first eight rows below account for 13 Superpowers engineering-workflow Skill
 
 | Superpowers skill or concern | LeanPowers location |
 | --- | --- |
-| `using-superpowers` | 495-word `route` with a compact semantic risk declaration and bounded clear-build/debug capsules; strict review policy loads only after green strict validation |
+| `using-superpowers` | 500-word `route` with a compact semantic risk declaration and bounded clear-build/debug capsules; strict review policy loads only after green strict validation |
 | `brainstorming`, `writing-plans` | `shape` |
 | `test-driven-development`, `executing-plans` | `build` |
 | `systematic-debugging` | `debug` |
@@ -127,7 +129,7 @@ These choices are not universal recommendations. Superpowers' more explicit and 
 Verified now:
 
 - Six engineering workflows, `route` and `adapt` control Skills, and six shared policy documents exist.
-- Source budgets are exactly 2,882 engineering words, 495 `route` words, 329 `adapt` words, 3,706 total Skill words, and a 111-word Claude startup script.
+- Source budgets are exactly 2,882 engineering words, 500 `route` words, 329 `adapt` words, 3,711 total Skill words, and a 111-word Claude startup script.
 - Codex has zero startup injection; Claude has one static, read-only command hook.
 - Learning is disabled by default; when enabled it stores normalized rules and bounded evidence summaries in project-local `.leanpowers/`, excluded through local Git metadata.
 - The learning helper has no background activity, network access, telemetry, global profile, or cross-project sharing, and requires Node.js 20+ only while learning is enabled.
@@ -135,16 +137,17 @@ Verified now:
 - Checked-in scorer fixtures declare simulated provenance; simulated or incomplete inputs cannot produce a release-eligible result.
 - The 2026-07-14 live pilot produced equal 5/6 run success, zero activation failures, zero scope violations, and lower median tokens and wall time for LeanPowers across three task classes.
 - The separate frozen held-out task produced equal 2/2 executable success and zero scope violations. Its preregistered engineering-effect gate still failed because LeanPowers conformance was 1/2; its `<=60%` pairwise token target failed 0/2, with a 79.6% median share.
+- The 2026-07-15 multi-task confirmatory matrix completed all 12 frozen runs. Both workflows passed 5/6 executable runs and failed the same `layered-build-options` repetition. The aggregate LeanPowers token share was 50.03%, so the token decision passed; LeanPowers quality-bearing conformance was 0/6, so the engineering-effect and combined decisions failed.
 
 Still not verified:
 
 - Task-success non-inferiority across the full 11-scenario release catalog with a formal uncertainty interval.
-- The current full-suite 40% aggregate token, 40% wall-time, and 60% agent-call reduction gates. The pilot observed smaller token and wall-time differences and did not measure agent calls; the one-case held-out check also failed its older, stricter frozen `<=60%` every-pair token target in both pairs.
+- The current full-suite 40% aggregate token, 40% wall-time, and 60% agent-call reduction gates. The multi-task confirmatory run passed its narrower aggregate token rule, but it is not the full release suite and its engineering-effect decision failed. The pilot did not measure agent calls, and the one-case held-out check retains its older, stricter failed every-pair rule.
 - Seeded-defect escape rates across live agents and repositories.
 - Cross-runtime behavior under identical live model and evaluator conditions.
 - Related-task improvement, zero unrelated-task contamination, zero safety bypass, and bounded retrieval in a paired live four-turn learning run.
 
-Until the full paired suite in [benchmark.md](benchmark.md) passes, describe LeanPowers as structurally lighter with mixed, bounded live evidence, not as generally equal or faster.
+Until the full paired suite in [benchmark.md](benchmark.md) passes, describe LeanPowers as structurally lighter with mixed, bounded live evidence: the latest small matrix matched executable pass count and met its aggregate token target, but did not meet the engineering-effect gate. Do not describe it as generally equal or faster.
 
 ## Balanced conclusion
 
@@ -152,7 +155,7 @@ The source comparison supports three conclusions:
 
 1. **LeanPowers is structurally lighter.** The checked source surface is materially smaller and uses one-owner routing plus shared policies instead of a broadly mandatory sequence.
 2. **The critical safeguards are retained by design.** Scope, regression evidence, root-cause diagnosis, independent high-risk review, current verification, authorization, and remote delivery readback remain explicit invariants.
-3. **Executable outcomes matched in the bounded live checks, but the declared targets remain open.** The pilot had equal success and fewer median LeanPowers tokens. The frozen held-out task also had equal executable success, but failed the LeanPowers conformance-bearing engineering-effect gate and the pairwise token target. The small task set, shared pilot failure, and observed variance prevent a general equivalence or release claim.
+3. **The latest bounded matrix matched executable pass count and met its aggregate token target, but the combined target remains open.** Both workflows passed 5/6, and LeanPowers used 50.03% of Superpowers' summed model tokens. The engineering-effect decision failed because both missed the required 6/6 and LeanPowers conformance was 0/6. The small task set, shared failure, and observed variance prevent a general equivalence or release claim.
 
 The intended relationship is therefore complementary rather than adversarial:
 
@@ -160,4 +163,4 @@ The intended relationship is therefore complementary rather than adversarial:
 - **LeanPowers** is a respectful, independently implemented exploration of a smaller, risk-adaptive workflow surface.
 - **The benchmark** asks whether that different optimization point is non-inferior within a predeclared margin while using fewer resources; it does not seek a narrative of defeating Superpowers.
 
-Users should choose based on their preferred process shape and validate on representative work. The current pilot and one-case held-out check support only their tested conditions; a future full passing benchmark would support a broader, still bounded claim that LeanPowers preserved outcomes while reducing workflow overhead.
+Users should choose based on their preferred process shape and validate on representative work. The current pilot, one-case held-out check, and multi-task confirmatory run support only their tested conditions. A future newly frozen passing benchmark would support a broader, still bounded claim that LeanPowers preserved outcomes while reducing workflow overhead.
