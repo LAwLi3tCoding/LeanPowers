@@ -47,7 +47,7 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
   assert.match(body, /Capsule order is mandatory/i);
   assert.match(body, /exactly ONE `tail -n \+1 -- path1 path2 \.\.\.`/i);
   assert.match(body, /BUILD behavior changes:[\s\S]{0,180}patch tests only[\s\S]{0,180}then patch product/i);
-  assert.match(body, /never edit tests green after product/i);
+  assert.match(body, /After product begins, final RED tests never change/i);
   assert.match(body, /DEBUG keeps product\+regression edits contiguous/i);
   assert.match(body, /after the last edit[\s\S]{0,260}DEBUG reruns exact pre-edit REPRODUCE/i);
   assert.ok(
@@ -171,20 +171,18 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /Tests must kill plausible shortcuts/i);
   assert.match(route, /Dry-run return\/event\/call order/i);
   assert.match(route, /async\/concurrent tests use deferred settlement and deterministic checkpoints, not sleeps/i);
-  assert.match(route, /BUILD behavior changes:[\s\S]{0,160}patch tests only[\s\S]{0,160}expected missing-behavior failure[\s\S]{0,80}then patch product/i);
-  assert.match(route, /Inspect RED output; test defects are not missing-behavior evidence/i);
-  assert.match(route, /A later test correction invalidates RED and blocks completion/i);
-  assert.match(route, /never edit tests green after product/i);
+  assert.match(route, /BUILD behavior changes:[\s\S]{0,160}patch tests only[\s\S]{0,160}assertion-level missing-behavior failure[\s\S]{0,80}then patch product only/i);
+  assert.match(route, /Inspect RED output:[^\n]*syntax\/import\/setup\/expectation defects are not RED/i);
+  assert.match(route, /After product begins, final RED tests never change/i);
+  assert.match(route, /needed correction invalidates BUILD and enters debug/i);
   assert.match(route, /Non-behavior docs\/config name why RED does not apply and the pre-change check/i);
-  assert.match(route, /Preserve final RED tests/i);
-  assert.match(route, /Codex uses ONE repository-relative `apply_patch` for product/i);
-  assert.match(route, /BUILD cannot alter RED tests/i);
-  assert.match(route, /DEBUG keeps product\+regression edits contiguous/i);
+  assert.match(route, /Codex uses repository-relative `apply_patch`/i);
   assert.match(route, /Claude uses adjacent `Edit`\/`Write`/i);
-  assert.match(route, /Include failure paths/i);
-  assert.match(route, /Failure reopens the cycle/i);
+  assert.match(route, /BUILD preserves final RED tests/i);
+  assert.match(route, /DEBUG keeps product\+regression edits contiguous in one mutation window/i);
+  assert.match(route, /prefer `apply_patch`, or adjacent edits with no command\/other tool/i);
   assert.match(route, /Pre-PATCH emit header-alone `Clause→test ledger:`/i);
-  assert.match(route, /one `<constraint>→<test>` per regression\/preserved boundary/i);
+  assert.match(route, /one `<constraint>→<test>` per boundary/i);
   assert.match(route, /VALIDATE-COMBINED\(1\)/i);
   assert.match(route, /after the last edit, BUILD runs targeted regression plus integration\/lint\/typecheck\/build\/full-suite checks in one shell-safe call/i);
   assert.match(route, /DEBUG reruns exact pre-edit REPRODUCE plus validation/i);

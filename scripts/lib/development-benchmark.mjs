@@ -2279,7 +2279,11 @@ function groupContiguousFileChanges(events, taskChanges) {
   for (const change of taskChanges) {
     const separated = previousIndex >= 0 && events
       .slice(previousIndex + 1, change.index)
-      .some((event) => event?.item?.type !== "file_change");
+      .some((event) => ![
+        "agent_message",
+        "file_change",
+        "reasoning",
+      ].includes(event?.item?.type));
     if (batches.length === 0 || separated) batches.push([]);
     batches.at(-1).push(change);
     previousIndex = change.index;
@@ -3530,7 +3534,7 @@ export function evaluateWorkflowConformance(run) {
         if (!capsule.patch_protocol_observed) {
           reasons.push(run.expected_workflow === "build"
             ? "ordered TEST-PATCH, RED, and CODE-PATCH protocol was not observed"
-            : "contiguous code-and-test PATCH protocol was not observed");
+            : "uninterrupted code-and-test mutation window was not observed");
         }
         if (!capsule.quality_validation_observed) {
           reasons.push("supported successful post-edit validation was not observed");
@@ -5043,7 +5047,7 @@ export function renderDevelopmentReport(result) {
     "## Interpretation boundary",
     "",
     "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, every case-owned semantic fault family policy to pass, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    `- LeanPowers quality-bearing conformance requires an unambiguous semantic route declaration before any task tool, rejects conflicting declarations, and forbids risk downgrade after an upgrade. Build/debug traces must show each later-edited existing file was successfully read before its own first edit and supported successful validation after the final edit. Build additionally requires a test-only patch, exactly one nonfatal failing supported test command before product edits, preservation of those RED test paths, and a later product patch; one invalidated test cycle may restart before the final conformant cycle. Debug requires fixture-owned structured pre-edit reproduction and one contiguous code-and-test patch. Discovery syntax, extra grounded-file reads, split versus batched reads, validation-manifest reads, Skill/reference reloads, exact command/call budgets, clause-ledger shape, repeated route or ledger presentation, one-call versus two-call validation, and later non-mutating tooling remain efficiency or ceremony diagnostics rather than quality gates. Representation-boundary adequacy is measured workflow-neutrally in Task PASS: every pre-registered fault-family member must preserve baseline tests, every candidate counterfactual must complete, and every member must be killed by the candidate test delta. Replay telemetry proves only that the exact reproduction command ran, not that its diagnostic meaning changed. These observable checks are scoped to ${caseScope}, not universal semantic proof. Strict quality additionally requires a current independent PASS review with the complete task and current validation context, plus proof the reviewer did not mutate the workspace; exact Skill invocation, prompt/verdict surface, reviewer count, wait targeting, and cycle choreography remain diagnostics.`,
+    `- LeanPowers quality-bearing conformance requires an unambiguous semantic route declaration before any task tool, rejects conflicting declarations, and forbids risk downgrade after an upgrade. Build/debug traces must show each later-edited existing file was successfully read before its own first edit and supported successful validation after the final edit. Build additionally requires a test-only patch, exactly one nonfatal failing supported test command before product edits, preservation of those RED test paths, and a later product patch; one invalidated test cycle may restart before the final conformant cycle. Debug requires fixture-owned structured pre-edit reproduction and one uninterrupted code-and-test mutation window before validation; narration between adjacent file edits is ceremony, while any intervening command or other tool closes the window. Discovery syntax, extra grounded-file reads, split versus batched reads, validation-manifest reads, Skill/reference reloads, exact command/call budgets, clause-ledger shape, repeated route or ledger presentation, one-call versus two-call validation, and later non-mutating tooling remain efficiency or ceremony diagnostics rather than quality gates. Representation-boundary adequacy is measured workflow-neutrally in Task PASS: every pre-registered fault-family member must preserve baseline tests, every candidate counterfactual must complete, and every member must be killed by the candidate test delta. Replay telemetry proves only that the exact reproduction command ran, not that its diagnostic meaning changed. These observable checks are scoped to ${caseScope}, not universal semantic proof. Strict quality additionally requires a current independent PASS review with the complete task and current validation context, plus proof the reviewer did not mutate the workspace; exact Skill invocation, prompt/verdict surface, reviewer count, wait targeting, and cycle choreography remain diagnostics.`,
     "- Codex JSONL does not expose raw spawn arguments such as `fork_context`; observable spawn/wait behavior is checked dynamically, while exact argument shape is covered by static workflow tests and remains a runtime telemetry gap.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",

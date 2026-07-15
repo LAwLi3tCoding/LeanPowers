@@ -14,7 +14,9 @@ A 12-run paired development pilot has now tested three small task shapes. Both w
 
 A separate preregistered, one-case frozen held-out check found 2/2 executable task passes for both workflows. LeanPowers workflow conformance was 1/2, however, so the engineering-effect gate failed. Its paired token shares were 83.3% and 75.9% of Superpowers, a 79.6% median, so 0/2 pairs met the `<=60%` target. See the [held-out report](benchmarks/development-effects-heldout-2026-07-14.md). This result is retained as recorded rather than post-hoc reclassified.
 
-The latest preregistered multi-task comparison used three newly frozen standard-risk cases with two counterbalanced repetitions. Both workflows passed 5/6 executable runs and failed the same repetition of the `layered-build-options` mutation gate. LeanPowers used 50.03% of Superpowers' summed model tokens, passing the frozen aggregate token target, but LeanPowers quality-bearing conformance was 0/6. The engineering-effect decision and combined target therefore failed. See the [confirmatory result](benchmarks/development-effects-confirmatory-2026-07-15.md) and [preregistration](benchmarks/development-effects-confirmatory-preregistration-2026-07-15.md). The result is not post-hoc reclassified.
+The first preregistered multi-task comparison used three newly frozen standard-risk cases with two counterbalanced repetitions. Both workflows passed 5/6 executable runs and failed the same repetition of the `layered-build-options` mutation gate. LeanPowers used 50.03% of Superpowers' summed model tokens, passing the frozen aggregate token target, but LeanPowers quality-bearing conformance was 0/6. The engineering-effect decision and combined target therefore failed. See the [confirmatory result](benchmarks/development-effects-confirmatory-2026-07-15.md) and [preregistration](benchmarks/development-effects-confirmatory-preregistration-2026-07-15.md).
+
+A newly frozen follow-up used three different standard-risk cases under the same 12-run matrix shape. Both workflows passed 4/6 executable runs. LeanPowers used 78.38% of Superpowers' summed model tokens and had 0/6 quality-bearing conformance, so the aggregate-token, engineering-effect, and combined decisions failed. The shared `stable-task-batches` failures included an under-specified null-prototype boundary; the limitation is recorded without changing the frozen verdict. See the [follow-up result](benchmarks/development-effects-confirmatory-followup-2026-07-15.md) and [preregistration](benchmarks/development-effects-confirmatory-followup-preregistration-2026-07-15.md).
 
 The comparison set contains all 14 Superpowers 6.1.1 Skills. LeanPowers consolidates the 13 engineering-workflow concerns into six engineering workflows; `writing-skills` remains an external specialist concern. Two compact control Skills sit outside the engineering chain: `route` improves entry discovery, while `adapt` adds project-local feedback learning.
 
@@ -138,16 +140,17 @@ Verified now:
 - The 2026-07-14 live pilot produced equal 5/6 run success, zero activation failures, zero scope violations, and lower median tokens and wall time for LeanPowers across three task classes.
 - The separate frozen held-out task produced equal 2/2 executable success and zero scope violations. Its preregistered engineering-effect gate still failed because LeanPowers conformance was 1/2; its `<=60%` pairwise token target failed 0/2, with a 79.6% median share.
 - The 2026-07-15 multi-task confirmatory matrix completed all 12 frozen runs. Both workflows passed 5/6 executable runs and failed the same `layered-build-options` repetition. The aggregate LeanPowers token share was 50.03%, so the token decision passed; LeanPowers quality-bearing conformance was 0/6, so the engineering-effect and combined decisions failed.
+- The follow-up confirmatory matrix also completed all 12 frozen runs. Both workflows passed 4/6 executable runs. The aggregate LeanPowers token share was 78.38% and quality-bearing conformance was 0/6, so the token, engineering-effect, and combined decisions all failed. Its under-specified null-prototype boundary is reported as a limitation without changing the result.
 
 Still not verified:
 
 - Task-success non-inferiority across the full 11-scenario release catalog with a formal uncertainty interval.
-- The current full-suite 40% aggregate token, 40% wall-time, and 60% agent-call reduction gates. The multi-task confirmatory run passed its narrower aggregate token rule, but it is not the full release suite and its engineering-effect decision failed. The pilot did not measure agent calls, and the one-case held-out check retains its older, stricter failed every-pair rule.
+- The current full-suite 40% aggregate token, 40% wall-time, and 60% agent-call reduction gates. The first multi-task confirmatory run passed its narrower aggregate token rule, while the follow-up did not; both failed engineering effect. The pilot did not measure agent calls, and the one-case held-out check retains its older, stricter failed every-pair rule.
 - Seeded-defect escape rates across live agents and repositories.
 - Cross-runtime behavior under identical live model and evaluator conditions.
 - Related-task improvement, zero unrelated-task contamination, zero safety bypass, and bounded retrieval in a paired live four-turn learning run.
 
-Until the full paired suite in [benchmark.md](benchmark.md) passes, describe LeanPowers as structurally lighter with mixed, bounded live evidence: the latest small matrix matched executable pass count and met its aggregate token target, but did not meet the engineering-effect gate. Do not describe it as generally equal or faster.
+Until the full paired suite in [benchmark.md](benchmark.md) passes, describe LeanPowers as structurally lighter with mixed, bounded live evidence. The first confirmatory matrix met its aggregate token target but failed engineering effect; the follow-up failed both decisions. Do not describe LeanPowers as generally equal or faster.
 
 ## Balanced conclusion
 
@@ -155,7 +158,7 @@ The source comparison supports three conclusions:
 
 1. **LeanPowers is structurally lighter.** The checked source surface is materially smaller and uses one-owner routing plus shared policies instead of a broadly mandatory sequence.
 2. **The critical safeguards are retained by design.** Scope, regression evidence, root-cause diagnosis, independent high-risk review, current verification, authorization, and remote delivery readback remain explicit invariants.
-3. **The latest bounded matrix matched executable pass count and met its aggregate token target, but the combined target remains open.** Both workflows passed 5/6, and LeanPowers used 50.03% of Superpowers' summed model tokens. The engineering-effect decision failed because both missed the required 6/6 and LeanPowers conformance was 0/6. The small task set, shared failure, and observed variance prevent a general equivalence or release claim.
+3. **The two bounded matrices matched executable pass counts but did not establish reliable parity or efficiency.** The first matrix produced 5/6 for both workflows and met its aggregate token target, but failed engineering effect. The follow-up produced 4/6 for both, while its 78.38% LeanPowers token share and 0/6 conformance failed both frozen decisions. Small task sets, shared failures, a specification limitation, and observed variance prevent a general equivalence or release claim.
 
 The intended relationship is therefore complementary rather than adversarial:
 
@@ -163,4 +166,4 @@ The intended relationship is therefore complementary rather than adversarial:
 - **LeanPowers** is a respectful, independently implemented exploration of a smaller, risk-adaptive workflow surface.
 - **The benchmark** asks whether that different optimization point is non-inferior within a predeclared margin while using fewer resources; it does not seek a narrative of defeating Superpowers.
 
-Users should choose based on their preferred process shape and validate on representative work. The current pilot, one-case held-out check, and multi-task confirmatory run support only their tested conditions. A future newly frozen passing benchmark would support a broader, still bounded claim that LeanPowers preserved outcomes while reducing workflow overhead.
+Users should choose based on their preferred process shape and validate on representative work. The current pilot, one-case held-out check, and two multi-task confirmatory runs support only their tested conditions. A future newly frozen passing benchmark would support a broader, still bounded claim that LeanPowers preserved outcomes while reducing workflow overhead.

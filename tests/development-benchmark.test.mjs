@@ -513,6 +513,7 @@ function capsuleTraceEvents({
   failedReproductionAttempts = [],
   finalMessage = "Done",
   initialExtra = null,
+  interPatchCommand = null,
   ledgerAfterDiscover = false,
   nonReviewTail = false,
   omitBuildRed = false,
@@ -761,6 +762,15 @@ function capsuleTraceEvents({
       }
     } else if (patchBatches > 1 && index < changes.length - 1) {
       events.push(completed({ type: "agent_message", text: "Starting another patch." }));
+      if (interPatchCommand !== null) {
+        events.push(completed({
+          type: "command_execution",
+          command: interPatchCommand,
+          aggregated_output: "intervening command",
+          exit_code: 0,
+          status: "completed",
+        }));
+      }
     }
   }
   if (separatePostReproduction) {
@@ -2105,6 +2115,32 @@ test("Codex trace observes the complete debug capsule stage protocol", () => {
 
   assert.deepEqual(parsed.workflow_trace.capsule_stage, passingCapsuleStage("debug"));
 
+  const narratedAdjacentEdits = parseCodexResult(
+    capsuleTraceEvents({ patchBatches: 2 }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  );
+  assert.deepEqual(
+    narratedAdjacentEdits.workflow_trace.capsule_stage,
+    passingCapsuleStage("debug"),
+  );
+  const reasonedAdjacentEvents = capsuleTraceEvents({ patchBatches: 2 });
+  const interPatchNarration = reasonedAdjacentEvents.findIndex(({ item }) =>
+    item?.type === "agent_message" && item.text === "Starting another patch."
+  );
+  assert.notEqual(interPatchNarration, -1);
+  reasonedAdjacentEvents.splice(interPatchNarration + 1, 0, {
+    type: "item.completed",
+    item: { type: "reasoning", text: "Continue the same mutation window." },
+  });
+  const reasonedAdjacentEdits = parseCodexResult(
+    reasonedAdjacentEvents.map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  );
+  assert.deepEqual(
+    reasonedAdjacentEdits.workflow_trace.capsule_stage,
+    passingCapsuleStage("debug"),
+  );
+
   const literalShellSyntax = parseCodexResult(
     capsuleTraceEvents({
       discoverCommand: "rg --files .; rg -n -- 'cache$(literal)' .",
@@ -3081,7 +3117,7 @@ test("distilled real r2 route requires exact reproduction replay after patch", (
     workflow: "leanpowers-0.2.0",
   }), {
     status: "FAIL",
-    reasons: ["contiguous code-and-test PATCH protocol was not observed"],
+    reasons: ["uninterrupted code-and-test mutation window was not observed"],
   });
 
   const missingReplayEvents = structuredClone(events);
@@ -3111,7 +3147,7 @@ test("distilled real r2 route requires exact reproduction replay after patch", (
   }), {
     status: "FAIL",
     reasons: [
-      "contiguous code-and-test PATCH protocol was not observed",
+      "uninterrupted code-and-test mutation window was not observed",
       "supported successful post-edit validation was not observed",
     ],
   });
@@ -3536,7 +3572,10 @@ test("debug capsule stage protocol rejects one-property trace regressions", () =
     [{ readCommand: "cat src/index.mjs" }, "read_observed"],
     [{ reproduceCommand: "npm test", reproduceOutput: "pass" }, "reproduce_observed"],
     [{ reproduceOutput: "arbitrary executable output" }, "reproduce_observed"],
-    [{ patchBatches: 2 }, "patch_batches"],
+    [{
+      interPatchCommand: "git diff --check",
+      patchBatches: 2,
+    }, "patch_batches"],
     [{ patchPaths: ["src/index.mjs", "src/helper.mjs"] }, "test_patch_observed"],
     [{ nonReviewTail: true }, "patch_batches"],
     [{ validationExitCode: 1 }, "validation_observed"],
