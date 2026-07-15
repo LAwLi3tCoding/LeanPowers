@@ -330,6 +330,7 @@ function normalizeSuiteContract(source, reasons) {
     effort: source?.effort,
     repetitions: source?.repetitions,
     workflow_order: source?.workflow_order,
+    case_order: source?.case_order,
     token_target: source?.token_target,
     freeze_contract: source?.freeze_contract ?? {},
     cases,
@@ -362,6 +363,26 @@ function normalizeSuiteContract(source, reasons) {
     contract.workflow_order.some((order) =>
       !Array.isArray(order) ||
       !isDeepStrictEqual([...order].sort(), [...WORKFLOWS].sort())
+    ) ||
+    (
+      contract.case_order !== undefined &&
+      (
+        !Array.isArray(contract.case_order) ||
+        contract.case_order.length !== contract.repetitions ||
+        contract.case_order.some((order) =>
+          !Array.isArray(order) ||
+          order.length !== cases.length ||
+          new Set(order).size !== order.length ||
+          !isDeepStrictEqual(
+            [...order].sort(),
+            cases.map(({ id }) => id).sort(),
+          )
+        ) ||
+        !isDeepStrictEqual(
+          contract.freeze_contract?.case_order,
+          contract.case_order,
+        )
+      )
     ) ||
     !isDeepStrictEqual(contract.token_target, {
       metric: "aggregate-model-token-share",
@@ -419,7 +440,12 @@ function validateRuntime(runtime, contract, reasons) {
 function validateMatrix(runs, contract, repetitions, reasons) {
   const expected = [];
   for (let repetition = 1; repetition <= contract.repetitions; repetition += 1) {
-    for (const benchmarkCase of contract.cases) {
+    const orderedCases = contract.case_order === undefined
+      ? contract.cases
+      : contract.case_order[repetition - 1].map((caseId) =>
+          contract.casesById.get(caseId)
+        );
+    for (const benchmarkCase of orderedCases) {
       for (const workflow of contract.workflow_order[repetition - 1]) {
         expected.push(`${repetition}\0${benchmarkCase.id}\0${workflow}`);
       }

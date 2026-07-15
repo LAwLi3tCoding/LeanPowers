@@ -451,6 +451,26 @@ export async function loadDevelopmentSuite(input) {
     }
   }
 
+  if (suite.case_order !== undefined) {
+    const caseIds = Array.isArray(suite.cases)
+      ? suite.cases.map(({ id }) => id)
+      : [];
+    if (
+      !Array.isArray(suite.case_order) ||
+      suite.case_order.length !== suite.repetitions ||
+      suite.case_order.some((order) =>
+        !Array.isArray(order) ||
+        order.length !== caseIds.length ||
+        new Set(order).size !== order.length ||
+        !isDeepStrictEqual([...order].sort(), [...caseIds].sort())
+      )
+    ) {
+      errors.push(
+        "case_order must define one exact permutation of all case ids per repetition",
+      );
+    }
+  }
+
   if (suite.evidence_level === "paired-development-heldout") {
     let freezeContractVerified = false;
     try {
@@ -464,6 +484,9 @@ export async function loadDevelopmentSuite(input) {
         effort: suite.effort,
         repetitions: suite.repetitions,
         workflow_order: suite.workflow_order,
+        ...(suite.case_order === undefined
+          ? {}
+          : { case_order: suite.case_order }),
         agent_read_isolation: HELDOUT_AGENT_READ_ISOLATION,
         superpowers_revision: suite.freeze_contract?.superpowers_revision,
         ...(suite.freeze_contract?.leanpowers_revision === undefined
@@ -5537,7 +5560,12 @@ export async function runDevelopmentPilot({
     const pendingArtifacts = [];
     for (let repetition = 0; repetition < runRepetitions; repetition += 1) {
       const order = suite.workflow_order[repetition];
-      for (const benchmarkCase of selectedCases) {
+      const repetitionCases = orderedDevelopmentCases(
+        suite,
+        selectedCases,
+        repetition,
+      );
+      for (const benchmarkCase of repetitionCases) {
         for (const workflow of order) {
           const runId = `r${repetition + 1}-${benchmarkCase.id}-${workflow}`;
           onProgress({ type: "start", runId, workflow, caseId: benchmarkCase.id });
@@ -6812,6 +6840,19 @@ async function runSingleCase({
   } finally {
     await rm(runRoot, { force: true, recursive: true });
   }
+}
+
+export function orderedDevelopmentCases(suite, selectedCases, repetitionIndex) {
+  const declaredOrder = suite?.case_order?.[repetitionIndex];
+  if (!Array.isArray(declaredOrder)) return [...selectedCases];
+  const selectedById = new Map(selectedCases.map((benchmarkCase) => [
+    benchmarkCase.id,
+    benchmarkCase,
+  ]));
+  return declaredOrder.flatMap((caseId) => {
+    const benchmarkCase = selectedById.get(caseId);
+    return benchmarkCase === undefined ? [] : [benchmarkCase];
+  });
 }
 
 export function makePilotResult(suite, runtime, runs, repetitions, selectedCases) {

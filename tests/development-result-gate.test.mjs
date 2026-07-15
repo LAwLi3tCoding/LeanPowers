@@ -430,6 +430,43 @@ test("explicit suite contract supports new pinned Lean, evaluator, and runner re
   );
 });
 
+test("explicit suite case order is frozen and enforced per repetition", () => {
+  const suite = structuredClone(frozenSuite);
+  const ids = suite.cases.map(({ id }) => id);
+  suite.case_order = [ids, [...ids].reverse()];
+  suite.freeze_contract.case_order = suite.case_order;
+
+  const result = passingResult();
+  const runsByKey = new Map(result.runs.map((entry) => [
+    `${entry.repetition}\0${entry.case_id}\0${entry.workflow}`,
+    entry,
+  ]));
+  result.runs = [];
+  for (let repetition = 1; repetition <= suite.repetitions; repetition += 1) {
+    for (const caseId of suite.case_order[repetition - 1]) {
+      for (const workflow of suite.workflow_order[repetition - 1]) {
+        result.runs.push(
+          runsByKey.get(`${repetition}\0${caseId}\0${workflow}`),
+        );
+      }
+    }
+  }
+  assert.equal(evaluateDevelopmentResultGate(result, { suite }).status, "PASS");
+
+  const fixedCaseOrder = passingResult();
+  const orderVerdict = evaluateDevelopmentResultGate(fixedCaseOrder, { suite });
+  assert.equal(orderVerdict.status, "FAIL");
+  assert.ok(orderVerdict.reasons.includes("run-order"));
+
+  const unpinned = structuredClone(suite);
+  delete unpinned.freeze_contract.case_order;
+  const contractVerdict = evaluateDevelopmentResultGate(result, {
+    suite: unpinned,
+  });
+  assert.equal(contractVerdict.status, "FAIL");
+  assert.ok(contractVerdict.reasons.includes("suite-contract"));
+});
+
 test("categorized exact report contract requires the canonical rendered artifact", () => {
   const suite = structuredClone(frozenSuite);
   suite.suite_id = "development-effects-categorized-report-test";

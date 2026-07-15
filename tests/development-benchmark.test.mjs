@@ -37,6 +37,7 @@ import {
   materializeRunArtifacts,
   materializeDevelopmentSummaryArtifacts,
   materializeWorkspaceSnapshot,
+  orderedDevelopmentCases,
   parseClaudeResult,
   parseCodexResult,
   parseLeanRouteLedger,
@@ -1297,6 +1298,53 @@ test("resolved reproduction output is an optional object-only suite contract", a
       await assert.rejects(
         loadDevelopmentSuite(copiedSuitePath),
         /reproduction_contract\.resolved_output must be an object when provided/u,
+      );
+    }
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("case order freezes one complete case permutation per repetition", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "lp-case-order-schema-"));
+  try {
+    const copiedRoot = path.join(root, "development-effects");
+    await cp(new URL("../evals/development-effects/", import.meta.url), copiedRoot, {
+      recursive: true,
+    });
+    const copiedSuitePath = path.join(copiedRoot, "pilot-suite.json");
+    const baseline = JSON.parse(await readFile(copiedSuitePath, "utf8"));
+    const ids = baseline.cases.map(({ id }) => id);
+    const valid = structuredClone(baseline);
+    valid.case_order = [ids, [...ids].reverse()];
+    await writeFile(copiedSuitePath, `${JSON.stringify(valid, null, 2)}\n`);
+
+    const loaded = await loadDevelopmentSuite(copiedSuitePath);
+    assert.deepEqual(
+      orderedDevelopmentCases(loaded, loaded.cases, 0).map(({ id }) => id),
+      ids,
+    );
+    assert.deepEqual(
+      orderedDevelopmentCases(loaded, loaded.cases, 1).map(({ id }) => id),
+      [...ids].reverse(),
+    );
+    assert.deepEqual(
+      orderedDevelopmentCases(loaded, loaded.cases.slice(1), 1).map(({ id }) => id),
+      [...ids].reverse().filter((id) => id !== ids[0]),
+    );
+
+    for (const caseOrder of [
+      [ids],
+      [ids, [ids[0], ids[0], ids[2]]],
+      [ids, ids.slice(0, -1)],
+      [ids, [ids[0], ids[1], "unknown-case"]],
+    ]) {
+      const invalid = structuredClone(baseline);
+      invalid.case_order = caseOrder;
+      await writeFile(copiedSuitePath, `${JSON.stringify(invalid, null, 2)}\n`);
+      await assert.rejects(
+        loadDevelopmentSuite(copiedSuitePath),
+        /case_order must define one exact permutation/u,
       );
     }
   } finally {
