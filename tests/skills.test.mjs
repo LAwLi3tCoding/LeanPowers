@@ -34,29 +34,77 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
   }
   assert.match(body, /Choose (?:the )?lowest-safe owner/i);
   assert.match(body, /lowest-safe|lowest safe/i);
-  assert.match(body, /security.*authorization.*payment.*privacy/is);
-  assert.match(body, /credentials/i);
   assert.match(body, /risk[=:]RISK/i);
   assert.match(body, /explicit-feedback→`adapt`[\s\S]{0,180}implementation\/known-repair→`build`/i);
-  assert.match(body, /Risk is `lean` for clear local/i);
-  assert.match(body, /`strict` for security/i);
-  assert.match(body, /otherwise `standard`/i);
+  assert.match(
+    body,
+    /`lean` only when[\s\S]{0,180}`clear`[\s\S]{0,180}`local`[\s\S]{0,180}`reversible`[\s\S]{0,180}`establishedValidation`[\s\S]{0,180}no standard or strict signal/i,
+  );
+  for (const signal of [
+    "behaviorChange",
+    "boundedUncertainty",
+    "dataModelChange",
+    "defect",
+    "dependencyChange",
+    "diagnosisRequested",
+    "externalSystem",
+    "multiFile",
+    "publicBoundaryChange",
+    "scopeExpanded",
+    "validationFailed",
+  ]) {
+    assert.match(body, new RegExp(`\\\`${signal}\\\``), signal);
+  }
+  for (const signal of [
+    "authorization",
+    "authentication",
+    "concurrency",
+    "credentialGated",
+    "credentials",
+    "cryptography",
+    "dataRisk",
+    "destructive",
+    "irreversible",
+    "largeRefactor",
+    "migration",
+    "payment",
+    "privacy",
+    "production",
+    "reviewHighRisk",
+    "security",
+    "secrets",
+    "signatureVerification",
+  ]) {
+    assert.match(body, new RegExp(`\\\`${signal}\\\``), signal);
+  }
+  assert.match(body, /`causeKnown=false`[\s\S]{0,100}`standard`/i);
   assert.match(body, /Gates are strict `\[independent_review, current_evidence\]`/i);
   assert.match(body, /leanpowers:route \| workflow=OWNER \| risk=RISK/i);
   assert.match(body, /alone on line 1/i);
-  assert.match(body, /Green capsule order is mandatory/i);
-  assert.match(body, /Codex uses one `tail -n \+1 -- path\.\.\.`/i);
-  assert.match(body, /BUILD behavior change: tests are the executable ledger/i);
-  assert.match(body, /First mutation touches tests only/i);
-  assert.match(body, /any product path invalidates BUILD/i);
+  assert.match(body, /BUILD[\s\S]{0,120}DISCOVER→READ→TEST-PATCH→RED→CODE-PATCH→VALIDATE/i);
+  assert.match(body, /DEBUG[\s\S]{0,160}DISCOVER→READ\+REPRODUCE\/TRACE→PATCH→VALIDATE/i);
+  assert.match(body, /READ every edit target[\s\S]{0,100}before edit/i);
+  assert.match(body, /BUILD behavior change[\s\S]{0,160}tests first/i);
+  assert.match(body, /meaningful RED/i);
+  assert.match(body, /product patch[\s\S]{0,100}after[\s\S]{0,100}RED/i);
+  assert.match(body, /current validation[\s\S]{0,120}final file edit/i);
+  assert.match(body, /DEBUG[\s\S]{0,180}before edit[\s\S]{0,180}root cause/i);
+  assert.match(body, /regression[\s\S]{0,100}product repair/i);
+  assert.match(body, /applicable full validation[\s\S]{0,140}replay[\s\S]{0,80}reproduction/i);
+  assert.match(body, /getter|counter/i);
+  assert.match(body, /no-access/i);
+  assert.match(body, /immutability/i);
+  assert.match(body, /short-circuit/i);
+  assert.match(body, /one-property|one-element/i);
+  assert.match(body, /exact validation boundar/i);
   assert.match(body, /Codex native `apply_patch`[\s\S]{0,80}Claude `Edit`\/`Write`/i);
-  assert.match(body, /Next tool runs targeted tests and must show assertion-level RED/i);
-  assert.match(body, /never combine test\/product patches/i);
-  assert.match(body, /Docs\/nonbehavioral config use PRECHECK→PATCH→VALIDATE/i);
-  assert.match(body, /behavior config uses RED/i);
-  assert.match(body, /After product, tests freeze/i);
-  assert.match(body, /Patch product\+regression contiguously once/i);
-  assert.match(body, /VALIDATE once after the last edit[\s\S]{0,260}DEBUG runs exact repro plus validation/i);
+  assert.doesNotMatch(body, /One call\/stage/i);
+  assert.doesNotMatch(body, /Codex joins `rg --files`|tail -n \+1/i);
+  assert.doesNotMatch(body, /mandatory combined|one combined targeted/i);
+  assert.doesNotMatch(body, /<repro> && <validation>/i);
+  assert.doesNotMatch(body, /One test-only correction/i);
+  assert.doesNotMatch(body, /Exact pass immediately finalizes with no later tool/i);
+  assert.doesNotMatch(body, /never rediscover\/reread/i);
   assert.ok(
     body.indexOf("First emitted bytes MUST be") < body.indexOf("Choose the lowest-safe owner"),
     "canonical declaration must precede routing prose",
@@ -97,11 +145,18 @@ test("direct workflow entry loads one compact runtime contract at most once", as
       "risk-policy.md",
       "quality-gates.md",
       "evidence-protocol.md",
-      "subagent-policy.md",
       "workflow-transitions.md",
     ]) {
       assert.doesNotMatch(content, new RegExp(legacy.replace(".", "\\."), "i"), `${name}: ${legacy}`);
     }
+    const subagentLinks = [
+      ...content.matchAll(/\.\.\/\.\.\/references\/subagent-policy\.md/giu),
+    ].length;
+    assert.equal(
+      subagentLinks,
+      name === "build" || name === "debug" ? 1 : 0,
+      `${name}: lazy strict-review policy link count`,
+    );
   }
 
   const route = await readFile(path.join(skillsRoot, "route", "SKILL.md"), "utf8");
@@ -130,8 +185,10 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
 
   assert.match(build, /lean or standard[\s\S]{0,180}next: null/i);
   assert.match(debug, /lean or standard[\s\S]{0,180}next: null/i);
-  assert.match(build, /strict[\s\S]{0,100}next: review/i);
-  assert.match(debug, /strict[\s\S]{0,100}next: review/i);
+  assert.doesNotMatch(build, /next:\s*review/i);
+  assert.doesNotMatch(debug, /next:\s*review/i);
+  assert.match(build, /strict direct entry[\s\S]{0,180}independent review[\s\S]{0,120}same turn/i);
+  assert.match(debug, /strict direct entry[\s\S]{0,180}independent review[\s\S]{0,120}same turn/i);
   assert.match(verify, /independent_review: pass \| missing \| not_required/i);
   assert.match(build, /affected integration[\s\S]{0,120}full-suite/i);
   assert.match(build, /validation gap blocks `complete`/i);
@@ -150,145 +207,214 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /alone on line 1/i);
   assert.match(route, /never prefix or repeat it/i);
   assert.match(route, /If evidence raises risk, emit `leanpowers:risk \| risk=strict`; never downgrade/i);
-  assert.match(route, /Routed entry is the sole tool-order\/budget authority/i);
-  assert.match(build, /Routed entry makes the route capsule sole tool-order\/budget authority/i);
-  assert.match(debug, /Routed entry makes the route capsule sole tool-order\/budget authority/i);
+  assert.match(route, /Routed entry owns workflow order/i);
+  assert.match(build, /Routed entry owns workflow order/i);
+  assert.match(debug, /Routed entry owns workflow order/i);
   assert.match(build, /Direct-entry slice loop/i);
   assert.match(debug, /Direct-entry root-cause loop/i);
-  assert.match(route, /Green capsule order is mandatory/i);
-  assert.match(route, /One call\/stage/i);
-  assert.match(route, /narrate only risk changes, failures, blockers, authorization/i);
-  assert.match(route, /only this recovery repeats validation/i);
   assert.match(route, /Destructive\/irreversible\/credential-gated\/production action requires prior explicit authorization/i);
   assert.match(route, /BUILD DISCOVER→READ→TEST-PATCH→RED→CODE-PATCH→VALIDATE/i);
   assert.match(route, /DEBUG DISCOVER→READ\+REPRODUCE\/TRACE→PATCH→VALIDATE/i);
-  assert.match(route, /DISCOVER once; skip only when instructions name implementation\/caller\/test\/repro\/manifest paths/i);
-  assert.match(route, /Codex joins `rg --files` and `rg -n --` with one semicolon/i);
-  assert.match(route, /task-derived pattern/i);
-  assert.match(route, /never copy placeholders/i);
-  assert.doesNotMatch(route, /'a\|b'/i);
-  assert.doesNotMatch(route, /PRIMARY\|TEST/i);
-  assert.match(route, /same relative scope/i);
-  assert.match(route, /Claude uses adjacent `Glob`\+`Grep`/i);
-  assert.match(route, /READ every edit target plus affected test\/manifest\/caller once, before edits/i);
-  assert.match(route, /Codex uses one `tail -n \+1 -- path\.\.\.`/i);
-  assert.match(route, /Claude uses adjacent `Read`/i);
-  assert.match(route, /DEBUG also runs the supplied repro before edits/i);
-  assert.match(route, /run one differentiating TRACE/i);
-  assert.match(route, /cause remains hypothetical/i);
-  assert.match(route, /derive applicable positive, adjacent-negative, preservation, identity\/side-effect, and interacting-failure assertions/i);
-  assert.match(route, /dry-run input→return\/event\/call/i);
-  assert.match(route, /async\/concurrent work[\s\S]{0,100}deferred deterministic checkpoints, never sleeps/i);
-  assert.match(route, /map every created promise to resolve\/reject and await/i);
-  assert.match(route, /First mutation touches tests only/i);
-  assert.match(route, /any product path invalidates BUILD/i);
-  assert.match(route, /Next tool runs targeted tests and must show assertion-level RED/i);
-  assert.match(route, /One test-only correction may fix syntax\/import\/setup\/expectation/i);
-  assert.match(route, /Patch product only after valid RED/i);
-  assert.match(route, /never combine test\/product patches/i);
-  assert.match(route, /After product, tests freeze/i);
-  assert.match(route, /failure enters full `debug` or stops incomplete/i);
-  assert.match(route, /DEBUG never uses separate TEST-PATCH\/RED/i);
-  assert.match(route, /map first wrong transition to regression\/interacting-failure evidence/i);
-  assert.match(route, /Patch product\+regression contiguously once/i);
-  assert.match(route, /do not delete\/recreate files/i);
-  assert.match(route, /VALIDATE once after the last edit/i);
-  assert.match(route, /combined targeted\+applicable integration\/lint\/typecheck\/build\/full-suite command/i);
-  assert.match(route, /DEBUG runs exact repro plus validation as `<repro> && <validation>`/i);
-  assert.match(route, /one already-read\/in-scope regression-preserving correction and identical rerun/i);
-  assert.match(route, /Second failure stops incomplete/i);
-  assert.match(route, /Before green, never rediscover\/reread\/change-command\/loop or claim completion/i);
-  assert.match(route, /Green lean\/standard finalizes with outcome\/root cause, paths, validation, residual risk/i);
+  assert.match(route, /READ every edit target[\s\S]{0,100}before edit/i);
+  assert.match(route, /tests first[\s\S]{0,180}meaningful RED[\s\S]{0,180}product patch/i);
+  assert.match(route, /current validation[\s\S]{0,120}final file edit/i);
+  assert.match(route, /first wrong transition[\s\S]{0,100}root cause[\s\S]{0,160}before edit/i);
+  assert.match(route, /regression[\s\S]{0,100}product repair/i);
+  assert.match(route, /applicable full validation[\s\S]{0,140}replay[\s\S]{0,80}reproduction/i);
+  assert.match(route, /structured resolved output[\s\S]{0,120}separate final command/i);
+  assert.match(route, /combined validation\+reproduction[\s\S]{0,120}acceptable only/i);
+  assert.match(route, /successful final validation[\s\S]{0,100}no later file edit/i);
+  assert.match(route, /read-only reporting[\s\S]{0,80}allowed/i);
   assert.match(route, /Synchronous reentrancy alone is not concurrency/i);
-  assert.doesNotMatch(route, /use-post-success-tools/i);
-  assert.doesNotMatch(route, /tool_search\(query="wait_agent targets spawn_agent fork_context"/i);
-  assert.match(route, /STRICT only after green VALIDATE/i);
-  assert.match(route, /next tool MUST read \[subagent policy\]/i);
-  assert.match(route, /Mandatory strict review protocol, then stop/i);
-  assert.match(route, /Exact pass immediately finalizes with no later tool/i);
+  assert.match(route, /Routed strict[\s\S]{0,140}green validation[\s\S]{0,140}immediately continue[\s\S]{0,140}independent review/i);
+  assert.doesNotMatch(route, /next:\s*review|handoff/i);
   assert.match(route, /Lean\/standard never read it/i);
   route = `${route}\n${strictPolicy}`;
-  assert.match(route, /Mandatory strict review protocol/i);
-  assert.match(route, /multi_agent_v1\.spawn_agent[\s\S]{0,220}wait_agent/i);
-  assert.match(route, /tool_search\(query="wait_agent targets spawn_agent fork_context", limit=2\)/i);
-  assert.match(route, /Spawn only if its result exposes both; otherwise return incomplete before any spawn/i);
-  assert.match(route, /save ID, then call `multi_agent_v1\.wait_agent` once with `targets:\[ID\]`/i);
-  assert.match(route, /No other review-tool action\./i);
-  assert.match(route, /fork_context:false/i);
-  assert.match(route, /original task (?:verbatim|byte-for-byte)/i);
-  assert.match(route, /spawn_agent` once/i);
-  assert.match(route, /with (?:`message` only|only `message`)[\s\S]{0,220}Never probe or use `items`/i);
-  assert.match(route, /second\/placeholder\/`noop`/i);
-  assert.match(route, /Never probe/i);
-  assert.match(route, /as above/i);
-  assert.match(route, /\$leanpowers:review/i);
-  assert.match(route, /\/leanpowers:review/i);
-  assert.match(route, /Codex message:\s*\$leanpowers:review\s*Original task:/i);
-  assert.match(route, /Claude message:\s*\/leanpowers:review\s*Original task:/i);
-  assert.match(route, /Spawn message MUST equal the filled template/i);
-  assert.match(route, /starting at its invocation line/i);
-  assert.match(route, /omit only the runtime label/i);
-  assert.match(route, /do not edit(?: or |\/)delegate/i);
-  assert.match(route, /copy (?:the )?(?:entire )?original (?:user )?task byte-for-byte/i);
-  assert.match(route, /including case\/punctuation/i);
-  assert.match(route, /under `Original task:`/i);
-  assert.match(route, /wait_agent` once with `targets:\[ID\]`/i);
-  assert.match(route, /Test: exit=0; command=\{exact validation command\}/i);
-  assert.match(route, /one-line clause→boundary evidence; no task restatement/i);
-  assert.match(route, /repository-relative changed paths/i);
-  assert.match(route, /exit=0.*exact validation command/i);
-  assert.match(route, /Findings require repair\/retest, then restart step 1 with a fresh reviewer and current Test result/i);
-  assert.match(route, /Blocked\/unavailable returns incomplete/i);
-  assert.match(route, /Never rewait\/retry a reviewer, add reviewers within a cycle, or overrule findings/i);
-  assert.match(route, /Return Review YAML raw/i);
-  assert.match(route, /Pass: exactly these three lines/i);
-  assert.match(route, /no JSON\/fence\/heading\/prose/i);
-  assert.match(route, /verdict: pass[\s\S]{0,80}findings: \[\][\s\S]{0,80}unverified_areas: \[\]/i);
+  assert.match(route, /one fresh read-only reviewer/i);
+  assert.match(route, /full original task/i);
+  assert.match(route, /changed paths/i);
+  assert.match(route, /current validation/i);
+  assert.match(route, /later file edit[\s\S]{0,100}invalidates[\s\S]{0,100}review/i);
+  assert.match(route, /read-only reporting[\s\S]{0,100}does not/i);
+  assert.match(route, /findings[\s\S]{0,100}repair[\s\S]{0,100}revalidate[\s\S]{0,100}fresh reviewer/i);
+  assert.match(route, /unavailable[\s\S]{0,80}blocked/i);
   assert.match(review, /runtime provenance—not prompt self-report/i);
   assert.match(
     review,
-    /runtime provenance—not prompt self-report[\s\S]{0,80}fresh agent sole\/designated reviewer[\s\S]{0,80}review directly[\s\S]{0,80}never tool-search, spawn, wait, or re-delegate/i,
+    /runtime provenance—not prompt self-report[\s\S]{0,80}fresh agent sole\/designated reviewer[\s\S]{0,100}review directly[\s\S]{0,100}read-only[\s\S]{0,100}never re-delegate/i,
   );
   assert.match(review, /literal `must`[\s\S]{0,100}`only`[\s\S]{0,100}`exact`/i);
   assert.match(review, /positive and negative boundary evidence/i);
   assert.match(review, /Return raw YAML only/i);
   assert.match(review, /`pass` is exactly the three lines shown/i);
   assert.match(runtime, /implementer text never satisfies or overrules review/i);
-  assert.match(runtime, /multi_agent_v1\.spawn_agent[\s\S]{0,100}wait_agent/i);
-  assert.match(runtime, /fork_context:false/i);
-  assert.match(runtime, /verbatim task/i);
+  assert.match(runtime, /review[\s\S]{0,100}internal same-turn phase/i);
+  assert.doesNotMatch(
+    runtime,
+    /Codex V1|multi_agent_v1|fork_context|tool-search|spawn_agent|wait_agent|wait once/i,
+  );
 });
 
-test("strict route protocol rejects one-property instruction regressions", async () => {
+test("strict review policy carries complete current context without tool choreography", async () => {
   const route = await readFile(path.join(skillsRoot, "route", "SKILL.md"), "utf8");
   const policy = await readFile(
     path.join(root, "references", "subagent-policy.md"),
     "utf8",
   );
-  const clauses = [
-    "if either V1/native tool is hidden, call exactly `tool_search(query=\"wait_agent targets spawn_agent fork_context\", limit=2)`",
-    "Spawn only if its result exposes both; otherwise return incomplete before any spawn. Call `multi_agent_v1.spawn_agent` once",
-    "with only `message`, `fork_context:false`; save ID, then call `multi_agent_v1.wait_agent` once with `targets:[ID]`",
-    "No other review-tool action.",
-    "Copy original task byte-for-byte—including case/punctuation—under `Original task:`.",
-    "Spawn message MUST equal the filled template, starting at its invocation line; omit only the runtime label.",
-    "Findings require repair/retest, then restart step 1 with a fresh reviewer and current Test result.",
-  ];
-  const preservesStrictProtocol = (candidate) =>
-    clauses.every((clause) => candidate.includes(clause));
-
   assert.match(
     route,
     /Destructive\/irreversible\/credential-gated\/production action requires prior explicit authorization/i,
   );
-  assert.equal(preservesStrictProtocol(policy), true);
-  for (const [index, clause] of clauses.entries()) {
-    assert.equal(
-      preservesStrictProtocol(policy.replace(clause, `[mutated strict clause ${index}]`)),
-      false,
-      clause,
+  for (const clause of [
+    /native review mechanism/i,
+    /internal same-turn phase/i,
+    /one fresh read-only reviewer/i,
+    /full original task/i,
+    /changed paths/i,
+    /current validation/i,
+    /pass[\s\S]{0,100}(?:satisfies|completes)[\s\S]{0,100}strict/i,
+    /later file edit[\s\S]{0,100}invalidates[\s\S]{0,100}review/i,
+    /read-only reporting[\s\S]{0,100}does not/i,
+  ]) {
+    assert.match(policy, clause);
+  }
+  assert.doesNotMatch(policy, /tool_search|spawn_agent|wait_agent|fork_context|exactly one|call exactly/i);
+});
+
+test("runtime recovery freezes accepted evidence without hiding new omissions", async () => {
+  const route = await readFile(path.join(skillsRoot, "route", "SKILL.md"), "utf8");
+  const build = await readFile(path.join(skillsRoot, "build", "SKILL.md"), "utf8");
+  const debug = await readFile(path.join(skillsRoot, "debug", "SKILL.md"), "utf8");
+
+  for (const source of [route, build]) {
+    assert.match(
+      source,
+      /meaningful RED[\s\S]{0,140}freezes[\s\S]{0,100}regression assertion/i,
+    );
+    assert.match(
+      source,
+      /invalid test design[\s\S]{0,140}restart[\s\S]{0,80}TEST-PATCH→RED[\s\S]{0,140}pre-behavior baseline/i,
+    );
+    assert.match(source, /never weaken[\s\S]{0,100}assertion[\s\S]{0,100}implementation/i);
+  }
+
+  for (const source of [route, debug]) {
+    assert.match(
+      source,
+      /failed validation[\s\S]{0,140}one grounded correction[\s\S]{0,180}identical affected checks/i,
+    );
+    assert.match(
+      source,
+      /another failure[\s\S]{0,120}(?:blocks|rescope)[\s\S]{0,120}before more edits/i,
     );
   }
+
+  for (const source of [route, build, debug]) {
+    assert.match(
+      source,
+      /first green[\s\S]{0,120}freezes[\s\S]{0,120}completed acceptance set/i,
+    );
+    assert.match(
+      source,
+      /material omission discovered before review[\s\S]{0,140}new incomplete cycle/i,
+    );
+  }
+
+  for (const source of [route, build]) {
+    assert.match(
+      source,
+      /configuration or generated output[\s\S]{0,140}(?:baseline|precheck)[\s\S]{0,180}failing evidence[\s\S]{0,120}(?:behavioral change|defect)/i,
+    );
+  }
+  assert.doesNotMatch(build, /Configuration or generated output needs a failing/i);
+});
+
+test("debug reproduction output stays attributable after validation", async () => {
+  const route = await readFile(path.join(skillsRoot, "route", "SKILL.md"), "utf8");
+  const debug = await readFile(path.join(skillsRoot, "debug", "SKILL.md"), "utf8");
+
+  for (const source of [route, debug]) {
+    assert.match(
+      source,
+      /run[\s\S]{0,200}validation[\s\S]{0,80}then[\s\S]{0,80}exact reproduction/i,
+    );
+    assert.match(
+      source,
+      /structured resolved output[\s\S]{0,140}MUST[\s\S]{0,100}separate final command[\s\S]{0,140}(?:own output|output is) attributable/i,
+    );
+    assert.match(
+      source,
+      /combined[\s\S]{0,120}only[\s\S]{0,140}no structured output contract[\s\S]{0,120}attribution/i,
+    );
+  }
+});
+
+test("runtime risk prose mirrors the executable classifier", async () => {
+  const runtime = await readFile(
+    path.join(root, "references", "runtime-contract.md"),
+    "utf8",
+  );
+  const riskPolicy = await readFile(
+    path.join(root, "references", "risk-policy.md"),
+    "utf8",
+  );
+  const transitions = await readFile(
+    path.join(root, "references", "workflow-transitions.md"),
+    "utf8",
+  );
+  const review = await readFile(path.join(skillsRoot, "review", "SKILL.md"), "utf8");
+
+  assert.match(
+    runtime,
+    /`lean` only when[\s\S]{0,180}`clear`[\s\S]{0,180}`local`[\s\S]{0,180}`reversible`[\s\S]{0,180}`establishedValidation`[\s\S]{0,180}no standard or strict signal/i,
+  );
+  for (const signal of [
+    "behaviorChange",
+    "boundedUncertainty",
+    "dataModelChange",
+    "defect",
+    "dependencyChange",
+    "diagnosisRequested",
+    "externalSystem",
+    "multiFile",
+    "publicBoundaryChange",
+    "scopeExpanded",
+    "validationFailed",
+    "authorization",
+    "authentication",
+    "concurrency",
+    "credentialGated",
+    "credentials",
+    "cryptography",
+    "dataRisk",
+    "destructive",
+    "irreversible",
+    "largeRefactor",
+    "migration",
+    "payment",
+    "privacy",
+    "production",
+    "reviewHighRisk",
+    "security",
+    "secrets",
+    "signatureVerification",
+  ]) {
+    assert.match(runtime, new RegExp(`\\\`${signal}\\\``), signal);
+  }
+  assert.match(runtime, /`causeKnown=false`[\s\S]{0,100}`standard`/i);
+  assert.match(
+    riskPolicy,
+    /`lean`[\s\S]{0,140}no standard or strict signal[\s\S]{0,220}`standard`[\s\S]{0,140}(?:behavior change|defect|unknown cause)/i,
+  );
+  assert.match(
+    riskPolicy,
+    /strict[\s\S]{0,300}internal same-turn `review/i,
+  );
+  assert.match(
+    transitions,
+    /strict[\s\S]{0,100}`review`[\s\S]{0,100}internal[\s\S]{0,80}same turn/i,
+  );
+  assert.doesNotMatch(review, /tool-search|spawn(?:_agent)?|wait(?:_agent)?/i);
 });
 
 test("skill frontmatter is portable and descriptions are discovery-focused", async () => {

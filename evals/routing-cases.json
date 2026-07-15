@@ -11,7 +11,14 @@
   },
   {
     "name": "ordinary-feature",
-    "signals": { "multiFile": true },
+    "signals": {
+      "behaviorChange": true,
+      "clear": true,
+      "establishedValidation": true,
+      "local": true,
+      "multiFile": true,
+      "reversible": true
+    },
     "expected": "standard"
   },
   {
@@ -21,7 +28,13 @@
   },
   {
     "name": "public-api-change",
-    "signals": { "publicBoundaryChange": true },
+    "signals": {
+      "clear": true,
+      "establishedValidation": true,
+      "local": true,
+      "publicBoundaryChange": true,
+      "reversible": true
+    },
     "expected": "standard"
   },
   {

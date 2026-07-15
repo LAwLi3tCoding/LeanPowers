@@ -53,6 +53,7 @@ const SAFE_ARTIFACT_DIRECTORY_NAME = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u;
 export const HELDOUT_PERMISSION_PROFILE = "benchmark";
 export const HELDOUT_AGENT_READ_ISOLATION =
   "codex-minimal-workspace-plugin-toolchain-read-v1";
+const VERIFIER_SOURCE_PATHS = new WeakMap();
 const REGEX_PREFIX_KEYWORDS = new Set([
   "await",
   "case",
@@ -264,10 +265,12 @@ export async function loadDevelopmentSuite(input) {
               );
             } else {
               const source = await readFile(verifierPath, "utf8");
-              benchmarkCase.verifier_snapshots.push({
+              const verifierSnapshot = {
                 sha256: createHash("sha256").update(source).digest("hex"),
                 source,
-              });
+              };
+              VERIFIER_SOURCE_PATHS.set(verifierSnapshot, verifierPath);
+              benchmarkCase.verifier_snapshots.push(verifierSnapshot);
             }
           } catch {
             errors.push(
@@ -879,12 +882,14 @@ export async function preflightHeldoutAgentReadIsolation({
       throw new Error("Held-out read-isolation preflight could not locate an installed skill");
     }
     const evaluatorSentinel = path.join(PROJECT_ROOT, "package.json");
-    const hiddenVerifier = path.join(
-      PROJECT_ROOT,
-      "evals",
-      "development-effects",
-      benchmarkCase.verifier_files[0],
+    const hiddenVerifier = VERIFIER_SOURCE_PATHS.get(
+      benchmarkCase.verifier_snapshots?.[0],
     );
+    if (typeof hiddenVerifier !== "string") {
+      throw new Error(
+        "Held-out read-isolation preflight could not resolve the loaded verifier source",
+      );
+    }
     await access(hiddenVerifier, fsConstants.R_OK);
     const probeTarget = path.join(workspace, ".leanpowers-permission-probe");
     const probeScript = [
@@ -1105,12 +1110,10 @@ export function parseCodexResult(
     )].map((match) => match[1])
   ))].sort();
   const finalFileChangeIndex = events.findLastIndex(
-    (event) =>
-      event?.type === "item.completed" && event?.item?.type === "file_change",
+    (event) => isCompletedFileChange(event),
   );
   const firstFileChangeIndex = events.findIndex(
-    (event) =>
-      event?.type === "item.completed" && event?.item?.type === "file_change",
+    (event) => isCompletedFileChange(event),
   );
   const startedCollabCalls = new Map();
   const collabCallLifecycles = new Map();
@@ -1212,8 +1215,12 @@ export function parseCodexResult(
       index > firstFileChangeIndex &&
       isReviewerPrompt(item.prompt)
     ) {
+      const lastFileChangeBeforeSpawnIndex = events.findLastIndex(
+        (candidate, candidateIndex) =>
+          candidateIndex < index && isCompletedFileChange(candidate),
+      );
       const reviewValidationCommands = events.flatMap((candidate, candidateIndex) =>
-        candidateIndex > finalFileChangeIndex &&
+        candidateIndex > lastFileChangeBeforeSpawnIndex &&
           candidateIndex < index &&
           candidate?.type === "item.completed" &&
           candidate?.item?.type === "command_execution" &&
@@ -1221,6 +1228,31 @@ export function parseCodexResult(
           ? [{ event: candidate, index: candidateIndex }]
           : []
       );
+      const reviewValidation = parseSupportedPostChangeValidation(
+        reviewValidationCommands,
+        expectedWorkflow,
+        reproductionContract,
+        events.map((candidate, candidateIndex) => ({
+          event: candidate,
+          index: candidateIndex,
+        })),
+      );
+      const currentSpawnId = item.id;
+      const validationFreshAtSpawn = reviewValidation !== null &&
+        postBoundaryActivityIsReadOnly(
+          events.flatMap((candidate, candidateIndex) =>
+            candidateIndex < index &&
+              !(
+                typeof currentSpawnId === "string" &&
+                candidate?.item?.type === "collab_tool_call" &&
+                candidate.item.tool === "spawn_agent" &&
+                candidate.item.id === currentSpawnId
+              )
+              ? [{ event: candidate, index: candidateIndex }]
+              : []
+          ),
+          reviewValidation?.final_index ?? -1,
+        );
       for (const agentId of item.receiver_thread_ids ?? []) {
         reviewAgentSpawns.set(agentId, {
           contract_verbatim: hasExactCodexReviewContract(
@@ -1231,12 +1263,7 @@ export function parseCodexResult(
             item.prompt,
             expectedReviewContract,
           ),
-          quality_current_validation_observed:
-            parseSupportedPostChangeValidation(
-              reviewValidationCommands,
-              expectedWorkflow,
-              reproductionContract,
-            ) !== null,
+          quality_current_validation_observed: validationFreshAtSpawn,
           packet: parseCompleteCodexReviewPacket(
             item.prompt,
             expectedReviewContract,
@@ -1260,6 +1287,18 @@ export function parseCodexResult(
         typeof item.id === "string"
           ? startedCollabCalls.get(item.id)?.receiver_thread_ids
           : null;
+      const currentWaitId = item.id;
+      const reviewWindowEvents = events.flatMap((candidate, candidateIndex) =>
+        candidateIndex < index &&
+          !(
+            typeof currentWaitId === "string" &&
+            candidate?.item?.type === "collab_tool_call" &&
+            candidate.item.tool === "wait" &&
+            candidate.item.id === currentWaitId
+          )
+          ? [{ event: candidate, index: candidateIndex }]
+          : []
+      );
       const completedReviews = [];
       for (const [agentId, state] of Object.entries(item.agents_states ?? {})) {
         const spawn = reviewAgentSpawns.get(agentId);
@@ -1302,34 +1341,37 @@ export function parseCodexResult(
           sole_wait_target: soleWaitTarget,
           wait_index: index,
         });
-        if (completedReviews.every((review) => review.spawn_index > finalFileChangeIndex)) {
-          latestIndependentReview = {
-            contract_verbatim: completedReviews.every(
-              (review) => review.contract_verbatim,
-            ),
-            pass: completedReviews.every((review) => review.verdict === "pass"),
-            quality_context_complete: completedReviews.every(
-              (review) => review.quality_context_complete,
-            ),
-            quality_current_validation_observed: completedReviews.every(
-              (review) => review.quality_current_validation_observed,
-            ),
-            quality_pass: completedReviews.every(
-              (review) => review.quality_verdict === "pass",
-            ),
-            review_skill_invoked: completedReviews.every(
-              (review) => review.review_skill_invoked,
-            ),
-            workspace_mutation_check_observed: completedReviews.every(
-              (review) => review.workspace_mutation_check_observed,
-            ),
-            workspace_mutation_observed: completedReviews.some(
-              (review) => review.workspace_mutation_observed,
-            ),
-            sole_wait_target: soleWaitTarget,
-            wait_index: index,
-          };
-        }
+        latestIndependentReview = {
+          contract_verbatim: completedReviews.every(
+            (review) => review.contract_verbatim,
+          ),
+          pass: completedReviews.every((review) => review.verdict === "pass"),
+          quality_context_complete: completedReviews.every(
+            (review) => review.quality_context_complete,
+          ),
+          quality_current_validation_observed: completedReviews.every(
+            (review) =>
+              review.quality_current_validation_observed &&
+              postBoundaryActivityIsReadOnly(
+                reviewWindowEvents,
+                review.spawn_index,
+              ),
+          ),
+          quality_pass: completedReviews.every(
+            (review) => review.quality_verdict === "pass",
+          ),
+          review_skill_invoked: completedReviews.every(
+            (review) => review.review_skill_invoked,
+          ),
+          workspace_mutation_check_observed: completedReviews.every(
+            (review) => review.workspace_mutation_check_observed,
+          ),
+          workspace_mutation_observed: completedReviews.some(
+            (review) => review.workspace_mutation_observed,
+          ),
+          sole_wait_target: soleWaitTarget,
+          wait_index: index,
+        };
       }
     }
   });
@@ -1393,10 +1435,10 @@ export function parseCodexResult(
   const strictFinalStopObserved =
     latestIndependentReview?.quality_pass === true &&
     finalStrictReviewWaitIndex >= 0 &&
-    countToolCallsAfter(
+    postBoundaryActivityIsReadOnly(
       events.map((event, index) => ({ event, index })),
       finalStrictReviewWaitIndex,
-    ) === 0;
+    );
   const finalMessage = [...events].reverse().find(
     (event) => event?.type === "item.completed" && event?.item?.type === "agent_message",
   );
@@ -1704,13 +1746,40 @@ function traceCapsuleStage(
   const changePaths = ({ event }) => (event.item.changes ?? [])
     .map((change) => benchmarkObservedPath(change?.path))
     .filter(Boolean);
-  const buildTestPatchBatch = patchBatches.at(-2) ?? [];
-  const buildCodePatchBatch = patchBatches.at(-1) ?? [];
-  const buildTestPatchPaths = buildTestPatchBatch.flatMap(changePaths);
-  const buildCodePatchPaths = buildCodePatchBatch.flatMap(changePaths);
-  const buildTestPatchObserved =
-    buildTestPatchPaths.length > 0 && buildTestPatchPaths.every(isTestPath);
-  const buildCodePatchObserved = buildCodePatchPaths.some(isImplementationPath);
+  const completedChangeStartIndex = ({ event, index }) => {
+    const changeId = event?.item?.id;
+    if (typeof changeId !== "string") return index;
+    return indexed.findLast(({ event: candidate, index: candidateIndex }) =>
+      candidateIndex <= index &&
+      candidate?.type === "item.started" &&
+      candidate?.item?.type === "file_change" &&
+      candidate.item.id === changeId
+    )?.index ?? index;
+  };
+  const firstProductChange = expectedWorkflow === "build"
+    ? taskChanges.find((change) => changePaths(change).some(isImplementationPath)) ?? null
+    : null;
+  const firstProductChangeIndex = firstProductChange?.index ?? -1;
+  const firstProductPatchStartIndex = firstProductChange === null
+    ? -1
+    : completedChangeStartIndex(firstProductChange);
+  const preProductChanges = expectedWorkflow === "build"
+    ? taskChanges.filter(({ index }) => index < firstProductChangeIndex)
+    : [];
+  const productChanges = expectedWorkflow === "build" && firstProductChangeIndex >= 0
+    ? taskChanges.filter(({ index }) => index >= firstProductChangeIndex)
+    : [];
+  const preProductPatchBatches = expectedWorkflow === "build"
+    ? groupContiguousFileChanges(events, preProductChanges)
+    : [];
+  const buildTestPatchPaths = preProductChanges.flatMap(changePaths);
+  const buildCodePatchPaths = productChanges.flatMap(changePaths);
+  const buildTestPatchObserved = expectedWorkflow === "build" &&
+    buildTestPatchPaths.length > 0 &&
+    buildTestPatchPaths.every(isTestPath);
+  const buildCodePatchObserved = expectedWorkflow === "build" &&
+    buildCodePatchPaths.length > 0 &&
+    buildCodePatchPaths.every(isImplementationPath);
   const buildCodePatchPathSet = new Set(buildCodePatchPaths);
   const redTestPathsPreservedObserved = expectedWorkflow === "build"
     ? buildTestPatchPaths.length > 0 &&
@@ -1718,47 +1787,63 @@ function traceCapsuleStage(
         !buildCodePatchPathSet.has(changedPath)
       )
     : null;
-  const buildTestPatchEndIndex = buildTestPatchBatch.at(-1)?.index ?? -1;
-  const buildCodePatchStartIndex = buildCodePatchBatch[0]?.index ?? -1;
+  const buildTestPatchEndIndex = preProductChanges.at(-1)?.index ?? -1;
   const buildRedCommands = expectedWorkflow === "build" &&
     buildTestPatchEndIndex >= 0 &&
-    buildCodePatchStartIndex > buildTestPatchEndIndex
+    firstProductPatchStartIndex > buildTestPatchEndIndex
     ? taskCommands.filter(({ index }) =>
-        index > buildTestPatchEndIndex && index < buildCodePatchStartIndex
+        index > buildTestPatchEndIndex && index < firstProductPatchStartIndex
       )
     : [];
+  const finalBuildTestAttempt = buildRedCommands.findLast(({ event }) =>
+    isBuildRedRetryAttempt(event.item)
+  ) ?? null;
+  const finalBuildRedWindowSafe = buildTestPatchEndIndex >= 0 &&
+    postBuildEvidenceActivityIsSafe(
+      indexed.filter(({ index }) => index < firstProductPatchStartIndex),
+      buildTestPatchEndIndex,
+    );
   const buildRedObserved = expectedWorkflow === "build"
-    ? buildRedCommands.length === 1 &&
-      isExpectedBuildRed(buildRedCommands[0].event.item)
+    ? finalBuildTestAttempt !== null &&
+      isExpectedBuildRed(finalBuildTestAttempt.event.item) &&
+      finalBuildRedWindowSafe
     : null;
   const buildRedCycleRestarts = expectedWorkflow === "build"
-    ? Math.max(0, patchBatches.length - 2)
+    ? Math.max(0, preProductPatchBatches.length - 1)
     : 0;
-  const priorBuildPatchBatches = expectedWorkflow === "build"
-    ? patchBatches.slice(0, -2)
-    : [];
-  const priorBuildPatchPaths = priorBuildPatchBatches.flatMap((batch) =>
-    batch.flatMap(changePaths)
-  );
-  const priorBuildPatchEndIndex =
-    priorBuildPatchBatches.at(-1)?.at(-1)?.index ?? -1;
-  const buildTestPatchStartIndex = buildTestPatchBatch[0]?.index ?? -1;
-  const buildRedRetryCommands = expectedWorkflow === "build" &&
-    priorBuildPatchEndIndex >= 0 &&
-    buildTestPatchStartIndex > priorBuildPatchEndIndex
-    ? taskCommands.filter(({ index }) =>
-        index > priorBuildPatchEndIndex && index < buildTestPatchStartIndex
-      )
-    : [];
-  const buildRedRetryProtocolObserved = expectedWorkflow === "build"
-    ? buildRedCycleRestarts === 0 ||
-      (buildRedCycleRestarts === 1 &&
-        priorBuildPatchPaths.length > 0 &&
-        priorBuildPatchPaths.every(isTestPath) &&
-        buildRedRetryCommands.length <= 1 &&
-        buildRedRetryCommands.every(({ event }) =>
+  const buildRedRetryWindows = expectedWorkflow === "build"
+    ? preProductPatchBatches.slice(0, -1).map((batch, index) => {
+        const afterIndex = batch.at(-1)?.index ?? -1;
+        const beforeIndex = completedChangeStartIndex(
+          preProductPatchBatches[index + 1][0],
+        );
+        const commands = taskCommands.filter(({ index: commandIndex }) =>
+          commandIndex > afterIndex && commandIndex < beforeIndex
+        );
+        const relevantAttempts = commands.filter(({ event }) =>
           isBuildRedRetryAttempt(event.item)
-        ))
+        );
+        return {
+          commands,
+          evidence_preserved:
+            postBuildEvidenceActivityIsSafe(
+              indexed.filter(({ index: eventIndex }) => eventIndex < beforeIndex),
+              afterIndex,
+            ),
+          relevant_attempts: relevantAttempts,
+        };
+      })
+    : [];
+  const buildRedRetryCommands = buildRedRetryWindows.flatMap(
+    ({ commands }) => commands,
+  );
+  const buildRedRetryProtocolObserved = expectedWorkflow === "build"
+    ? buildRedRetryWindows.every(({
+        evidence_preserved: evidencePreserved,
+        relevant_attempts: relevantAttempts,
+      }) =>
+        relevantAttempts.length >= 1 && evidencePreserved
+      )
     : null;
   const validation = parsePostChangeValidationSequence(
     postChangeCommands,
@@ -1770,6 +1855,7 @@ function traceCapsuleStage(
     postChangeCommands,
     expectedWorkflow,
     reproductionContract,
+    indexed,
   );
   const qualityValidationObserved = qualityValidation !== null;
   const qualityPreChangeEvidenceObserved =
@@ -1840,39 +1926,54 @@ function traceCapsuleStage(
   const debugRecoveryProtocolObserved = expectedWorkflow === "debug"
     ? debugRecoveryCount === 0
       ? patchBatches.length === 1 &&
-        debugInitialPatchObserved &&
-        validation?.mode === "combined"
+        debugInitialPatchObserved
       : debugRecoveryCount === 1 &&
         debugInitialPatchObserved &&
         debugRecoveryToolCallCount === 1 &&
         debugRecoveryPathsObserved &&
         failedDebugValidation !== null &&
-        validation?.mode === "combined" &&
-        failedDebugValidation.command === validation.command
+        failedDebugValidation.validation_command ===
+          qualityValidation?.validation_command
     : null;
   const patchProtocolObserved = expectedWorkflow === "build"
-    ? [2, 3].includes(patchBatches.length) &&
-      buildRedObserved &&
+    ? buildRedObserved &&
       buildTestPatchObserved &&
       buildCodePatchObserved &&
       buildRedRetryProtocolObserved &&
       redTestPathsPreservedObserved &&
       implementationPatchObserved &&
       testPatchObserved
-    : debugRecoveryProtocolObserved;
+    : debugInitialPatchObserved;
   const qualityPatchObserved = implementationPatchObserved && testPatchObserved;
+  const freshnessAnchorIndex = expectedWorkflow === "build"
+    ? firstProductChangeIndex
+    : debugInitialPatchEndIndex;
+  const freshnessValidation = freshnessAnchorIndex < 0
+    ? null
+    : parseFirstSupportedPostChangeValidation(
+        taskCommands.filter(({ index }) => index > freshnessAnchorIndex),
+        expectedWorkflow,
+        reproductionContract,
+        indexed,
+      );
   const postValidationToolCalls = validationObserved
     ? countToolCallsAfter(indexed, validation.final_index)
     : 0;
   const qualityPostValidationToolCalls = qualityValidationObserved
-    ? countToolCallsAfter(indexed, qualityValidation.final_index)
+    ? countToolCallsAfter(indexed, freshnessValidation?.final_index ?? -1)
     : 0;
+  const readOnlyAfterFreshnessValidation = freshnessValidation !== null &&
+    postBoundaryActivityIsReadOnly(indexed, freshnessValidation.final_index);
   const ordinaryStopObserved = declaredRisk === "strict"
     ? null
-    : validationObserved && postValidationToolCalls === 0;
+    : validationObserved &&
+      freshnessValidation !== null &&
+      readOnlyAfterFreshnessValidation;
   const qualityOrdinaryStopObserved = declaredRisk === "strict"
     ? null
-    : qualityValidationObserved && qualityPostValidationToolCalls === 0;
+    : qualityValidationObserved &&
+      freshnessValidation !== null &&
+      readOnlyAfterFreshnessValidation;
   const finalStopObserved = declaredRisk === "strict"
     ? null
     : qualityOrdinaryStopObserved;
@@ -2237,6 +2338,83 @@ function countToolCallsAfter(indexed, afterIndex) {
   return countToolCallsBetween(indexed, { afterIndex });
 }
 
+function isSafeGitReportingCommand(item) {
+  if (
+    item?.status === "failed" ||
+    item?.timed_out === true ||
+    item?.exit_code !== 0
+  ) {
+    return false;
+  }
+  const command = unwrapShellInvocation(item?.command);
+  if (command === null || /[\\\r\n;&|`<>$#]/u.test(command)) return false;
+  const words = parseSimpleShellWords(command);
+  if (words === null || words[0] !== "git") return false;
+  if (
+    words[1] === "status" &&
+    words.length === 3 &&
+    ["--porcelain", "--short"].includes(words[2])
+  ) {
+    return true;
+  }
+  const safeDiffFlags = new Set([
+    "--cached",
+    "--check",
+    "--name-only",
+    "--no-ext-diff",
+    "--stat",
+    "--staged",
+  ]);
+  return words[1] === "diff" &&
+    words.length >= 3 &&
+    words.slice(2).every((word) => safeDiffFlags.has(word));
+}
+
+function isProvenPostBoundaryRead(item) {
+  return successfulReadEvidencePaths(item).length > 0 ||
+    isSafeGitReportingCommand(item);
+}
+
+function postBoundaryActivityIsSafe(indexed, afterIndex, isSafeCommand) {
+  if (afterIndex < 0) return false;
+  const completedToolIds = new Set(indexed.flatMap(({ event, index }) =>
+    index > afterIndex &&
+      event?.type === "item.completed" &&
+      !["agent_message", "reasoning"].includes(event?.item?.type) &&
+      typeof event?.item?.id === "string"
+      ? [event.item.id]
+      : []
+  ));
+  return indexed.every(({ event, index }) => {
+    if (index <= afterIndex || event?.item === undefined) return true;
+    const item = event.item;
+    if (["agent_message", "reasoning"].includes(item.type)) return true;
+    if (event.type === "item.started") {
+      return typeof item.id === "string" && completedToolIds.has(item.id);
+    }
+    if (event.type !== "item.completed") return false;
+    return item.type === "command_execution" && isSafeCommand(item);
+  });
+}
+
+function postBoundaryActivityIsReadOnly(indexed, afterIndex) {
+  return postBoundaryActivityIsSafe(
+    indexed,
+    afterIndex,
+    isProvenPostBoundaryRead,
+  );
+}
+
+function postBuildEvidenceActivityIsSafe(indexed, afterIndex) {
+  return postBoundaryActivityIsSafe(
+    indexed,
+    afterIndex,
+    (item) =>
+      isProvenPostBoundaryRead(item) ||
+      isBuildRedRetryAttempt(item),
+  );
+}
+
 function countToolCallsBetween(
   indexed,
   { afterIndex, beforeIndex = Number.POSITIVE_INFINITY },
@@ -2443,12 +2621,15 @@ function isExpectedBuildRed(item) {
 
 function isBuildRedRetryAttempt(item) {
   return (
+    item?.type === "command_execution" &&
+    ["completed", "failed"].includes(item?.status) &&
+    item?.timed_out !== true &&
     canonicalTestValidationCommand(item?.command) !== null &&
-    (item?.status === "failed" ||
-      item?.timed_out === true ||
-      (Number.isInteger(item?.exit_code) &&
-        item.exit_code >= 0 &&
-        item.exit_code <= 255))
+    Number.isInteger(item?.exit_code) &&
+    item.exit_code >= 0 &&
+    item.exit_code <= 255 &&
+    String(item?.aggregated_output ?? "").trim().length > 0 &&
+    !hasFatalShellDiagnostic(item?.aggregated_output)
   );
 }
 
@@ -2978,7 +3159,11 @@ function parsePostChangeValidationCommand(
     ? canonicalBuildValidationCommand(command)
     : canonicalTestValidationCommand(command);
   if (direct !== null) {
-    return { command: direct, reproduction_replayed: false };
+    return {
+      command: direct,
+      reproduction_replayed: false,
+      validation_command: direct,
+    };
   }
   if (expectedWorkflow !== "debug") return null;
   const reproductionCommand = reproductionContract?.command;
@@ -2990,16 +3175,16 @@ function parsePostChangeValidationCommand(
   }
   const text = unwrapShellInvocation(command);
   if (text === null) return null;
-  const prefix = `${reproductionCommand} && `;
-  if (!text.startsWith(prefix)) return null;
-  const testCommand = canonicalTestValidationCommand(text.slice(prefix.length));
-  if (
-    testCommand === null ||
-    text !== `${reproductionCommand} && ${testCommand}`
-  ) {
-    return null;
-  }
-  return { command: text, reproduction_replayed: true };
+  const parts = text.split(" && ");
+  if (parts.length !== 2 || parts[1] !== reproductionCommand) return null;
+  const testText = parts[0];
+  const testCommand = canonicalTestValidationCommand(testText);
+  if (testCommand === null || testCommand !== testText) return null;
+  return {
+    command: text,
+    reproduction_replayed: true,
+    validation_command: testCommand,
+  };
 }
 
 function parsePostChangeValidation(item, expectedWorkflow, reproductionContract) {
@@ -3010,29 +3195,60 @@ function parsePostChangeValidation(item, expectedWorkflow, reproductionContract)
   );
   if (
     validation === null ||
-    !validation.reproduction_replayed ||
-    reproductionContract?.resolved_output === undefined
+    !validation.reproduction_replayed
   ) {
     return validation;
   }
-  return resolvedReproductionOutputObserved(
-      item?.aggregated_output,
-      reproductionContract.resolved_output,
-    )
+  return reproductionContract?.resolved_output === undefined
     ? validation
     : null;
 }
 
 function resolvedReproductionOutputObserved(output, expected) {
-  const firstLine = String(output ?? "")
+  const lines = String(output ?? "")
     .split(/\r?\n/u)
-    .find((line) => line.trim().length > 0);
-  if (firstLine === undefined) return false;
+    .filter((line) => line.trim().length > 0);
+  const finalLine = lines.at(-1);
+  if (finalLine === undefined) return false;
   try {
-    return isDeepStrictEqual(JSON.parse(firstLine), expected);
+    return isDeepStrictEqual(JSON.parse(finalLine), expected);
   } catch {
     return false;
   }
+}
+
+function reproductionOutputObserved(item, reproductionContract) {
+  return reproductionContract?.resolved_output === undefined ||
+    resolvedReproductionOutputObserved(
+      item?.aggregated_output,
+      reproductionContract.resolved_output,
+    );
+}
+
+function parseStandalonePostChangeReproduction(item, reproductionContract) {
+  const reproductionCommand = reproductionContract?.command;
+  if (
+    typeof reproductionCommand !== "string" ||
+    canonicalReproductionCommand(item?.command) !== reproductionCommand
+  ) {
+    return null;
+  }
+  return {
+    command: reproductionCommand,
+    output_observed: reproductionOutputObserved(item, reproductionContract),
+  };
+}
+
+function isSuccessfulStandalonePostChangeReproduction(
+  item,
+  reproductionContract,
+) {
+  return item?.type === "command_execution" &&
+    item?.status === "completed" &&
+    item?.timed_out !== true &&
+    item?.exit_code === 0 &&
+    parseStandalonePostChangeReproduction(item, reproductionContract)
+      ?.output_observed === true;
 }
 
 function parseFailedDebugValidation(item, reproductionContract) {
@@ -3043,7 +3259,10 @@ function parseFailedDebugValidation(item, reproductionContract) {
   );
   if (
     validation === null ||
-    validation.reproduction_replayed !== true ||
+    (
+      validation.reproduction_replayed &&
+      reproductionContract?.resolved_output !== undefined
+    ) ||
     !["completed", "failed"].includes(item?.status) ||
     item?.timed_out === true ||
     !Number.isInteger(item?.exit_code) ||
@@ -3087,20 +3306,18 @@ function parsePostChangeValidationSequence(
   ) {
     return null;
   }
-  const reproductionCommand = reproductionContract?.command;
-  if (
-    typeof reproductionCommand !== "string" ||
-    canonicalReproductionCommand(commands[0].event.item.command) !== reproductionCommand
-  ) {
-    return null;
-  }
-  const testCommand = canonicalTestValidationCommand(commands[1].event.item.command);
-  if (testCommand === null) return null;
+  const testCommand = canonicalTestValidationCommand(commands[0].event.item.command);
+  const reproduction = parseStandalonePostChangeReproduction(
+    commands[1].event.item,
+    reproductionContract,
+  );
+  if (testCommand === null || reproduction?.output_observed !== true) return null;
   return {
     command: testCommand,
     final_index: commands[1].index,
     mode: "separate",
     reproduction_replayed: true,
+    validation_command: testCommand,
   };
 }
 
@@ -3108,37 +3325,54 @@ function parseSupportedPostChangeValidation(
   commands,
   expectedWorkflow,
   reproductionContract,
+  activities = commands,
 ) {
   const reproductionCommand = reproductionContract?.command;
   const reproductionAttempts = [];
-  const validationAttempts = commands.flatMap(({ event, index }) => {
-    const parsed = parsePostChangeValidation(
-      event.item,
+  const validationAttempts = [];
+  for (const { event, index } of commands) {
+    const parsed = parsePostChangeValidationCommand(
+      event.item.command,
       expectedWorkflow,
       reproductionContract,
     );
+    if (
+      parsed?.reproduction_replayed &&
+      reproductionContract?.resolved_output !== undefined
+    ) {
+      continue;
+    }
     if (parsed?.reproduction_replayed) {
       reproductionAttempts.push({
         exit_code: event.item.exit_code,
         index,
+        output_observed: reproductionOutputObserved(
+          event.item,
+          reproductionContract,
+        ),
       });
     } else if (
       expectedWorkflow === "debug" &&
       canonicalReproductionCommand(event.item.command) === reproductionCommand
     ) {
+      const reproduction = parseStandalonePostChangeReproduction(
+        event.item,
+        reproductionContract,
+      );
       reproductionAttempts.push({
         exit_code: event.item.exit_code,
         index,
+        output_observed: reproduction?.output_observed === true,
       });
     }
-    return parsed === null
-      ? []
-      : [{
-          ...parsed,
-          exit_code: event.item.exit_code,
-          final_index: index,
-        }];
-  });
+    if (parsed !== null) {
+      validationAttempts.push({
+        ...parsed,
+        exit_code: event.item.exit_code,
+        final_index: index,
+      });
+    }
+  }
   const latestValidation = validationAttempts.at(-1) ?? null;
   if (latestValidation === null || latestValidation.exit_code !== 0) {
     return null;
@@ -3153,16 +3387,60 @@ function parseSupportedPostChangeValidation(
   if (
     latestReproduction === null ||
     latestReproduction.exit_code !== 0 ||
-    latestReproduction.index > latestValidation.final_index
+    latestReproduction.output_observed !== true ||
+    latestValidation.final_index > latestReproduction.index ||
+    (
+      latestValidation.final_index === latestReproduction.index &&
+      latestValidation.reproduction_replayed !== true
+    )
+  ) {
+    return null;
+  }
+  if (
+    latestValidation.final_index < latestReproduction.index &&
+    !postBoundaryActivityIsSafe(
+      activities.filter(({ index }) => index <= latestReproduction.index),
+      latestValidation.final_index,
+      (item) =>
+        isProvenPostBoundaryRead(item) ||
+        isSuccessfulStandalonePostChangeReproduction(
+          item,
+          reproductionContract,
+        ),
+    )
   ) {
     return null;
   }
   return {
     command: latestValidation.command,
-    final_index: latestValidation.final_index,
-    mode: latestValidation.reproduction_replayed ? "combined" : "separate",
+    final_index: latestReproduction.index,
+    mode: latestValidation.final_index === latestReproduction.index
+      ? "combined"
+      : "separate",
     reproduction_replayed: true,
+    validation_command: latestValidation.validation_command,
+    validation_index: latestValidation.final_index,
   };
+}
+
+function parseFirstSupportedPostChangeValidation(
+  commands,
+  expectedWorkflow,
+  reproductionContract,
+  activities = commands,
+) {
+  for (let length = 1; length <= commands.length; length += 1) {
+    const validation = parseSupportedPostChangeValidation(
+      commands.slice(0, length),
+      expectedWorkflow,
+      reproductionContract,
+      activities,
+    );
+    if (validation?.final_index === commands[length - 1].index) {
+      return validation;
+    }
+  }
+  return null;
 }
 
 function canonicalValidationCommand(command) {
@@ -3819,11 +4097,15 @@ export function evaluateWorkflowConformance(run) {
         }
         if (
           run.expected_workflow === "debug" &&
+          capsule.patch_protocol_observed === true &&
           (
             !Number.isInteger(capsule.debug_recovery_count) ||
             capsule.debug_recovery_count < 0 ||
             capsule.debug_recovery_count > 1 ||
-            capsule.debug_recovery_protocol_observed !== true
+            (
+              capsule.debug_recovery_count > 0 &&
+              capsule.debug_recovery_protocol_observed !== true
+            )
           )
         ) {
           reasons.push("bounded DEBUG recovery protocol was not observed");
@@ -3832,11 +4114,13 @@ export function evaluateWorkflowConformance(run) {
           reasons.push("supported successful post-edit validation was not observed");
         }
         if (
-          run.expected_workflow === "debug" &&
+          run.risk_level !== "strict" &&
+          run.declared_risk !== "strict" &&
           capsule.highest_presented_risk !== "strict" &&
+          capsule.quality_validation_observed === true &&
           capsule.final_stop_observed !== true
         ) {
-          reasons.push("DEBUG did not stop after final successful validation");
+          reasons.push("unsafe activity occurred after first successful validation");
         }
       }
     }
@@ -3844,9 +4128,11 @@ export function evaluateWorkflowConformance(run) {
       run.risk_level === "strict" ||
       run.declared_risk === "strict" ||
       run.telemetry?.workflow_trace?.capsule_stage?.highest_presented_risk === "strict";
+    const passingStrictReviewObserved =
+      run.telemetry?.workflow_trace?.quality_independent_review_pass_observed === true;
     if (
       strictRequired &&
-      !run.telemetry?.workflow_trace?.quality_independent_review_pass_observed
+      !passingStrictReviewObserved
     ) {
       reasons.push("current passing independent review was not observed");
     } else if (
@@ -3857,6 +4143,7 @@ export function evaluateWorkflowConformance(run) {
     }
     if (
       strictRequired &&
+      passingStrictReviewObserved &&
       !run.telemetry?.workflow_trace
         ?.quality_independent_review_current_validation_observed
     ) {
@@ -3864,20 +4151,23 @@ export function evaluateWorkflowConformance(run) {
     }
     if (
       strictRequired &&
+      passingStrictReviewObserved &&
       !run.telemetry?.workflow_trace?.reviewer_workspace_mutation_check_observed
     ) {
       reasons.push("reviewer workspace mutation check was not observed");
     } else if (
       strictRequired &&
+      passingStrictReviewObserved &&
       run.telemetry?.workflow_trace?.reviewer_workspace_mutation_observed
     ) {
       reasons.push("designated reviewer mutated the workspace");
     }
     if (
       strictRequired &&
+      passingStrictReviewObserved &&
       run.telemetry?.workflow_trace?.strict_final_stop_observed !== true
     ) {
-      reasons.push("strict workflow did not stop after the final passing review");
+      reasons.push("unsafe activity occurred after the final passing independent review");
     }
   }
   return { status: reasons.length === 0 ? "PASS" : "FAIL", reasons };
@@ -6021,8 +6311,8 @@ export function renderDevelopmentReport(
     "## Interpretation boundary",
     "",
     "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, every case-owned semantic fault family policy to pass, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    `- LeanPowers quality-bearing conformance requires an unambiguous semantic route declaration before any task tool, rejects conflicting declarations, and forbids risk downgrade after an upgrade. Build/debug traces must show each later-edited existing file was successfully read before its own first edit and supported successful validation after the final edit. Build additionally requires a test-only patch, exactly one nonfatal failing supported test command before product edits, preservation of those RED test paths, and a later product patch; one invalidated test cycle may restart before the final conformant cycle. Debug requires fixture-owned structured pre-edit reproduction and an initial uninterrupted code-and-test mutation window. A failed combined validation may open exactly one bounded recovery patch only when no other tool intervenes, every recovery path was already read and remains in scope, and the final rerun uses the identical command; a second failure or recovery is incomplete. When the fixture declares resolved output, the successful reproduction replay must emit that exact JSON. Lean and standard runs stop after successful validation; strict runs stop after the final passing review. Discovery syntax, extra grounded-file reads, split versus batched reads, validation-manifest reads, Skill/reference reloads, exact pre-validation command/call budgets, clause-ledger shape, repeated route or ledger presentation, and one-call versus two-call validation remain efficiency or ceremony diagnostics rather than quality gates. Representation-boundary adequacy is measured workflow-neutrally in Task PASS: every pre-registered fault-family member must preserve baseline tests, every candidate counterfactual must complete, and every member must be killed by the candidate test delta. Reproduction telemetry proves the exact command and, when declared, resolved structured output; it is not universal semantic proof. These observable checks are scoped to ${caseScope}, not universal semantic proof. Strict quality additionally requires a current independent PASS review with the complete task and current validation context, proof the reviewer did not mutate the workspace, and no subsequent tool call; exact Skill invocation, prompt/verdict surface, reviewer count, wait targeting, and cycle choreography remain diagnostics.`,
-    "- Codex JSONL does not expose raw spawn arguments such as `fork_context`; observable spawn/wait behavior is checked dynamically, while exact argument shape is covered by static workflow tests and remains a runtime telemetry gap.",
+    `- LeanPowers quality-bearing conformance requires an unambiguous semantic route declaration before any task tool, rejects conflicting declarations, and forbids risk downgrade after an upgrade. Build/debug traces must show each later-edited existing file was successfully read before its own first edit and supported successful validation after the final edit. Build additionally requires test-only edits before the first product edit, one or more meaningful focused RED results after the final test correction, preservation of those RED test paths, and product-only edits thereafter. Every pre-product evidence window may contain only proven reads, narrow Git reporting, and completed nonfatal canonical test attempts; the final window's last test attempt must be a meaningful RED. Evidence-driven invalid test-design corrections and repeated RED confirmation are allowed, while exact counts remain diagnostics rather than fixed gates. Debug requires fixture-owned structured pre-edit reproduction and an initial uninterrupted code-and-test mutation window. One failed supported validation may open exactly one bounded recovery patch only when no other tool intervenes, every recovery path was already read and remains in scope, and the final rerun uses the identical validation command; the resolved reproduction then runs separately. A second failure or recovery is incomplete. Canonical DEBUG completion runs validation before reproduction. When the fixture declares resolved output, only a standalone reproduction can supply quality-bearing evidence and its final nonblank output line must be that exact JSON; combined validation and reproduction remains eligible only for contracts without structured resolved output. Lean and standard runs preserve the first successful validation after the first product edit or initial DEBUG mutation; only proven relative-file reads and the narrow Git reporting allowlist may follow. Strict runs require the same freshness from validation through reviewer spawn and wait, preserve the final passing review under the same read-only boundary, and separately prove the designated reviewer did not mutate the workspace. Discovery syntax, extra grounded-file reads, split versus batched reads, validation-manifest reads, Skill/reference reloads, exact pre-validation command/call budgets, clause-ledger shape, repeated route or ledger presentation, and one-call versus two-call validation remain efficiency or ceremony diagnostics rather than quality gates. Representation-boundary adequacy is measured workflow-neutrally in Task PASS: every pre-registered fault-family member must preserve baseline tests, every candidate counterfactual must complete, and every member must be killed by the candidate test delta. Reproduction telemetry proves the exact command and, when declared, resolved structured output; it is not universal semantic proof. These observable checks are scoped to ${caseScope}, not universal semantic proof. Strict quality additionally requires a current independent PASS review with the complete task and current validation context; exact Skill invocation, prompt/verdict surface, reviewer count, wait targeting, and cycle choreography remain diagnostics.`,
+    "- Async/blocking review adapter mechanics are runtime-specific diagnostics. The quality gate is one fresh read-only independent review effect; Codex JSONL does not expose every raw adapter argument.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
     `- Paired reductions and Lean token shares are computed within each identical case and repetition. The declared token target uses ${tokenTarget.metric === "aggregate-model-token-share" ? "the ratio of summed LeanPowers tokens to summed Superpowers tokens" : "the maximum paired LeanPowers share"} across ${tokenTarget.population}; every-pair and median shares remain distribution diagnostics rather than substitute quality gates. Complete telemetry and the full target population are required. Failing faster or skipping workflow gates never counts as an improvement.`,

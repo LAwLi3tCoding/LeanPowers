@@ -549,7 +549,10 @@ test("held-out reports identify confirmatory evidence and the actual case scope"
   assert.match(report, /transient-profile-load verifier exercises/u);
   assert.match(report, /exactly one bounded recovery patch/u);
   assert.match(report, /resolved structured output/u);
-  assert.match(report, /strict runs stop after the final passing review/u);
+  assert.match(
+    report,
+    /Strict runs require the same freshness from validation through reviewer spawn and wait, preserve the final passing review under the same read-only boundary/u,
+  );
   assert.match(report, /## Validity exclusions/u);
   assert.match(report, /Infrastructure failures: \*\*0\*\*/u);
   assert.doesNotMatch(report, /later non-mutating tooling remain/u);

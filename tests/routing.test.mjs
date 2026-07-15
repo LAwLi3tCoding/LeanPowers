@@ -12,6 +12,10 @@ import {
 const cases = JSON.parse(
   await readFile(new URL("../evals/routing-cases.json", import.meta.url), "utf8"),
 );
+const routingSource = await readFile(
+  new URL("../scripts/lib/routing.mjs", import.meta.url),
+  "utf8",
+);
 
 test("structured risk fixtures use the highest applicable signal", () => {
   for (const fixture of cases) {
@@ -34,6 +38,32 @@ test("user rigor can upgrade but never downgrade a strict signal", () => {
     }),
     "standard",
   );
+});
+
+test("every standard signal overrides otherwise lean-eligible work", () => {
+  const leanEligible = {
+    clear: true,
+    establishedValidation: true,
+    local: true,
+    reversible: true,
+  };
+  for (const signal of [
+    "behaviorChange",
+    "boundedUncertainty",
+    "dataModelChange",
+    "defect",
+    "dependencyChange",
+    "diagnosisRequested",
+    "externalSystem",
+    "multiFile",
+    "publicBoundaryChange",
+    "scopeExpanded",
+    "validationFailed",
+  ]) {
+    assert.equal(classifyRisk({ ...leanEligible, [signal]: true }), "standard", signal);
+  }
+  assert.equal(classifyRisk({ ...leanEligible, causeKnown: false }), "standard");
+  assert.equal(classifyRisk({ ...leanEligible, preferredMode: "standard" }), "standard");
 });
 
 test("security-boundary signals are always strict", () => {
@@ -194,6 +224,23 @@ test("risk becomes a sticky gate ledger across workflow transitions", () => {
       reviewVerdict: "blocked",
     }),
     "incomplete",
+  );
+});
+
+test("strict review is represented as an internal same-turn phase", () => {
+  for (const current of ["build", "debug"]) {
+    assert.equal(
+      selectNextWorkflow({ current, risk: "strict", evidenceCurrent: true }),
+      "review",
+    );
+  }
+  assert.match(
+    routingSource,
+    /INTERNAL_REVIEW_PHASE[\s\S]{0,120}internal same-turn phase[\s\S]{0,120}never[\s\S]{0,80}(?:user )?handoff/i,
+  );
+  assert.doesNotMatch(
+    routingSource,
+    /multi_agent_v1|fork_context|tool_search|spawn_agent|wait_agent/i,
   );
 });
 

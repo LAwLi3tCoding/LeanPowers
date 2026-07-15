@@ -5,24 +5,27 @@ description: Use when software, tests, builds, integrations, performance, hooks,
 
 # Debug
 
-Convert an observed failure into a reproducible root cause and a regression-proven repair. A plausible guess is not a diagnosis.
+Turn an observed failure into a reproducible root cause and regression-proven repair. A plausible guess is not a diagnosis.
 
-Inherit the ledger. Routed entry makes the route capsule sole tool-order/budget authority; this Skill adds causal reasoning/output only. Without a ledger, read the [runtime contract](../../references/runtime-contract.md) once and use the direct-entry loop.
+Inherit the ledger. Routed entry owns workflow order; this Skill adds causal reasoning and output. Without a ledger, read the [runtime contract](../../references/runtime-contract.md) once and use the direct-entry loop.
 
 If project learning is enabled, use `adapt` to query once at entry under the [learning policy](../../references/learning-policy.md) with this workflow, relevant paths, and tags; add at most three behavior-changing advisory rules to the task brief. Treat lessons as hypotheses, never root cause, and send explicit downstream outcome or correction feedback to `adapt`.
 
 ## Direct-entry root-cause loop
 
-1. State the exact symptom, expected behavior, affected revision, and known environment.
-2. Reproduce with the smallest reliable command, case, trace, or fixture. If reproduction is unavailable, identify the closest observable boundary and mark the validation gap.
-3. Trace evidence backward through the data or control path until the first incorrect transition is located.
-4. Form one falsifiable primary hypothesis: cause, predicted observation, and smallest distinguishing experiment.
-5. Run the experiment and inspect raw evidence. Reject or refine the hypothesis when prediction and evidence disagree.
-6. Add regression evidence for the real failure path.
-7. Apply the smallest root-cause repair. Avoid broad defensive changes that merely hide the symptom.
-8. Re-run reproduction, regression evidence, and affected integration checks.
+1. State the exact symptom, expected behavior, revision, and environment. Read every edit target before editing and preserve unrelated changes.
+2. Before editing, reproduce with the smallest reliable command, case, trace, or fixture. Trace backward to the first incorrect transition and root cause. If unavailable, report the validation gap; do not claim repair.
+3. Form one falsifiable hypothesis: cause, predicted observation, and smallest distinguishing experiment. Inspect evidence; reject or refine when prediction fails.
+4. Map the first wrong transition to regression and interacting-failure assertions. Put all applicable regression/API assertions and product repair in the initial repair so evidence exercises the corrected boundary.
+5. Post-edit, run current regression evidence and applicable affected integration, lint, typecheck, static, package, build, or full-suite validation. Then replay exact reproduction. Structured resolved output: reproduction MUST be a separate final command so its output is attributable. Combined validation+reproduction is acceptable only when no structured output contract needs attribution.
+6. Failed validation permits one grounded correction preserving regression evidence; rerun identical affected checks. Another failure blocks/rescopes before more edits.
+7. First green freezes the completed acceptance set. A material omission discovered before review starts a new incomplete cycle. File edits invalidate validation and reproduction; read-only reporting does not.
 
-Before `fixed`, map every repair claim to current reproduction, regression, and applicable integration, lint, typecheck, static, package, or full-suite evidence. A failure or material validation gap blocks completion.
+Use observable counterexamples for exact side-effect or traversal boundaries: getter/counter no-access sentinels, snapshots plus nested identity for immutability, post-guard short-circuit sentinels, and one-property or one-element exact-validation cases.
+
+## Strict direct entry
+
+After green validation and reproduction, strict direct entry loads the [subagent policy](../../references/subagent-policy.md) and runs its independent review in the same turn. `changes_required` reopens repair, revalidation, then fresh review. Routed strict already continues under route; neither path outputs a user transition.
 
 ## Output
 
@@ -39,20 +42,7 @@ hypothesis:
 repair: changed boundary or null
 evidence: commands and current results
 validation_gaps: unproven claims
-next: build | review | verify | null
+next: build | verify | null
 ```
 
-## Stop conditions
-
-- Do not change production behavior while the cause remains a guess unless the user explicitly requests a reversible diagnostic experiment.
-- Do not stack unrelated fixes to “see what works.” Change one causal variable per experiment.
-- Do not treat absence of logs as evidence that a component behaved correctly.
-
-Use `build` when the root cause requires a broader implementation slice. Strict repair always sets `next: review`. Lean or standard repair with current reproduction, regression, and affected integration evidence sets `next: null`; use `verify` only for explicit verification, stale or cross-session evidence, requested delivery, or cross-artifact/runtime claims.
-
-## Common mistakes
-
-- Accepting the user's proposed cause without testing it.
-- Expanding descriptions, retries, timeouts, or null guards before reproducing the failure.
-- Debugging the final error site instead of the first corrupted input or transition.
-- Reporting “fixed” when only the original symptom was not observed once.
+Do not change production behavior while cause remains a guess except for an explicitly requested reversible diagnostic. Do not stack unrelated fixes or treat missing logs as proof. Use `build` for a broader slice. Lean or standard with current reproduction, regression, and affected integration evidence sets `next: null`; use `verify` only for explicit, stale, delivery, or cross-artifact proof.

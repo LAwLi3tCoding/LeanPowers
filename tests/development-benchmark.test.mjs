@@ -7,6 +7,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rename,
   rm,
   symlink,
@@ -40,6 +41,7 @@ import {
   parseCodexResult,
   parseLeanRouteLedger,
   preflightDevelopmentOutputDirectory,
+  preflightHeldoutAgentReadIsolation,
   resolveDevelopmentOutputDirectory,
   reportsWorkflowActivation,
   renderDevelopmentReport,
@@ -493,15 +495,15 @@ function passingCapsuleStage(workflow = "build") {
     test_patch_observed: true,
     multi_file_patch_observed: workflow === "debug",
     patch_protocol_observed: true,
-    post_change_command_calls: 1,
+    post_change_command_calls: workflow === "debug" ? 2 : 1,
     validation_observed: true,
     quality_validation_observed: true,
-    quality_validation_mode: workflow === "debug" ? "combined" : "canonical",
-    post_change_validation_mode: workflow === "debug" ? "combined" : "canonical",
+    quality_validation_mode: workflow === "debug" ? "separate" : "canonical",
+    post_change_validation_mode: workflow === "debug" ? "separate" : "canonical",
     debug_recovery_count: 0,
     debug_recovery_protocol_observed: workflow === "debug" ? true : null,
-    final_validation_budget_observed: true,
-    capsule_green_path_observed: true,
+    final_validation_budget_observed: workflow !== "debug",
+    capsule_green_path_observed: workflow !== "debug",
     post_change_reproduction_replayed: workflow === "debug",
     post_validation_tool_calls: 0,
     quality_post_validation_tool_calls: 0,
@@ -566,6 +568,9 @@ function capsuleTraceEvents({
     "Counterexample: behavior=case=fixture,value=current→case=fixture,value=changed→preserve current behavior",
   ].join("\n"),
   postValidationReview = false,
+  postReproductionOutput = JSON.stringify(
+    capsuleReproductionContract.resolved_output,
+  ),
   readCommand = "tail -n +1 -- src/index.mjs test/index.test.mjs package.json",
   readOutput = "source and test contents",
   reproduceBeforeRead = false,
@@ -584,7 +589,7 @@ function capsuleTraceEvents({
   retryRedStatus = "completed",
   retryRedTimedOut = false,
   routeDeclaration = null,
-  separatePostReproduction = false,
+  separatePostReproduction = null,
   validationExitCode = 0,
   validationCommand = null,
   validationOutput = null,
@@ -599,14 +604,16 @@ function capsuleTraceEvents({
     "Starting work.",
   ].join("\n");
   const declaration = routeDeclaration ?? ledger;
+  const resolvedSeparatePostReproduction = separatePostReproduction ??
+    (expectedWorkflow === "debug" && validationCommand === null);
   const resolvedValidationCommand = validationCommand ?? (
-    expectedWorkflow === "debug" && !separatePostReproduction
-      ? `${reproduceCommand} && npm test`
+    expectedWorkflow === "debug" && !resolvedSeparatePostReproduction
+      ? `npm test && ${reproduceCommand}`
       : "npm test"
   );
   const successfulValidationOutput = expectedWorkflow === "debug" &&
       resolvedValidationCommand.includes(" && ")
-    ? `${JSON.stringify(capsuleReproductionContract.resolved_output)}\npass`
+    ? `pass\n${JSON.stringify(capsuleReproductionContract.resolved_output)}`
     : "pass";
   const completed = (item) => ({ type: "item.completed", item });
   const events = [];
@@ -816,15 +823,6 @@ function capsuleTraceEvents({
       }
     }
   }
-  if (separatePostReproduction) {
-    events.push(completed({
-      type: "command_execution",
-      command: reproduceCommand,
-      aggregated_output: "reproduction replayed",
-      exit_code: 0,
-      status: "completed",
-    }));
-  }
   events.push(completed({
     type: "command_execution",
     command: resolvedValidationCommand,
@@ -834,6 +832,15 @@ function capsuleTraceEvents({
     exit_code: validationExitCode,
     status: "completed",
   }));
+  if (resolvedSeparatePostReproduction && validationExitCode === 0) {
+    events.push(completed({
+      type: "command_execution",
+      command: reproduceCommand,
+      aggregated_output: postReproductionOutput,
+      exit_code: 0,
+      status: "completed",
+    }));
+  }
   const appendRecoveryPatch = (paths, prefix) => {
     for (const [index, changedPath] of paths.entries()) {
       const item = {
@@ -880,6 +887,15 @@ function capsuleTraceEvents({
       exit_code: recoveryValidationExitCode,
       status: "completed",
     }));
+    if (resolvedSeparatePostReproduction && recoveryValidationExitCode === 0) {
+      events.push(completed({
+        type: "command_execution",
+        command: reproduceCommand,
+        aggregated_output: postReproductionOutput,
+        exit_code: 0,
+        status: "completed",
+      }));
+    }
   }
   if (Array.isArray(secondRecoveryPatchPaths)) {
     appendRecoveryPatch(secondRecoveryPatchPaths, "second-recovery-patch");
@@ -892,6 +908,18 @@ function capsuleTraceEvents({
       exit_code: secondRecoveryValidationExitCode,
       status: "completed",
     }));
+    if (
+      resolvedSeparatePostReproduction &&
+      secondRecoveryValidationExitCode === 0
+    ) {
+      events.push(completed({
+        type: "command_execution",
+        command: reproduceCommand,
+        aggregated_output: postReproductionOutput,
+        exit_code: 0,
+        status: "completed",
+      }));
+    }
   }
   if (postValidationReview) {
     events.push(completed({
@@ -1104,6 +1132,94 @@ test("suite input snapshots pin workspace, hidden verifier, and applied fault fr
       contractBefore,
     );
 
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("held-out isolation preflight uses the loaded suite verifier without serializing its path", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("fake executable fixture requires a POSIX shebang");
+    return;
+  }
+  const root = await mkdtemp(path.join(os.tmpdir(), "lp-external-suite-isolation-"));
+  try {
+    const externalSuiteRoot = path.join(root, "external-development-effects");
+    await cp(
+      new URL("../evals/development-effects/", import.meta.url),
+      externalSuiteRoot,
+      { recursive: true },
+    );
+    const suite = await loadDevelopmentSuite(
+      path.join(externalSuiteRoot, "pilot-suite.json"),
+    );
+    const benchmarkCase = suite.cases.find(
+      ({ id }) => id === "localized-template-cache",
+    );
+    const expectedVerifier = await realpath(path.join(
+      externalSuiteRoot,
+      benchmarkCase.verifier_files[0],
+    ));
+    const serializedSuite = JSON.stringify(suite);
+    assert.equal(serializedSuite.includes(expectedVerifier), false);
+    assert.equal(serializedSuite.includes(externalSuiteRoot), false);
+
+    const codexHome = path.join(root, "codex-home");
+    await mkdir(path.join(codexHome, "plugins", "leanpowers", "skills", "route"), {
+      recursive: true,
+    });
+    await writeFile(path.join(codexHome, "auth.json"), "{}\n");
+    await writeFile(
+      path.join(codexHome, "plugins", "leanpowers", "skills", "route", "SKILL.md"),
+      "# route\n",
+    );
+    const fakeCodex = path.join(root, "fake-codex.cjs");
+    await writeFile(fakeCodex, `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+if (args.includes("prompt-input")) {
+  const workspace = fs.realpathSync(process.cwd());
+  const home = fs.realpathSync(process.env.CODEX_HOME);
+  const text = ["Network access is restricted.", "Denied filesystem reads",
+    workspace, path.join(home, "tmp"), path.join(home, "auth.json")].join("\\n");
+  process.stdout.write(JSON.stringify([{ content: [{ type: "input_text", text }] }]));
+} else if (args[args.indexOf("-C") + 2] === process.execPath) {
+  const actualVerifier = args.at(-1);
+  if (actualVerifier !== process.env.EXPECTED_VERIFIER_SENTINEL) process.exit(43);
+  if (process.env.FAKE_SENTINEL_READABLE === "1") {
+    fs.readFileSync(actualVerifier);
+    process.exit(42);
+  }
+}
+`, { mode: 0o755 });
+
+    const toolchain = {
+      environment: {
+        EXPECTED_VERIFIER_SENTINEL: expectedVerifier,
+      },
+      git: "git",
+      node: process.execPath,
+      npm: "npm",
+      runtimeReadRoots: [],
+    };
+    const preflight = (readable) => preflightHeldoutAgentReadIsolation({
+      benchmarkCase,
+      codexExecutable: fakeCodex,
+      codexHome,
+      toolchain: {
+        ...toolchain,
+        environment: {
+          ...toolchain.environment,
+          FAKE_SENTINEL_READABLE: readable ? "1" : "0",
+        },
+      },
+    });
+    assert.equal((await preflight(false)).status, "PASS");
+    await assert.rejects(
+      preflight(true),
+      /filesystem probe failed/u,
+    );
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -2778,28 +2894,20 @@ test("Codex trace observes the complete debug capsule stage protocol", () => {
     }).map(JSON.stringify).join("\n"),
     capsuleTraceOptions("debug"),
   );
-  assert.deepEqual(
-    reproAndTestValidation.workflow_trace.capsule_stage,
-    {
-      ...passingCapsuleStage("debug"),
-      post_change_reproduction_replayed: true,
-      post_change_validation_mode: "combined",
-    },
+  assert.equal(
+    reproAndTestValidation.workflow_trace.capsule_stage.validation_observed,
+    false,
   );
-  const wrappedReproAndTestValidation = parseCodexResult(
+  const wrappedValidationThenStandaloneRepro = parseCodexResult(
     capsuleTraceEvents({
-      validationCommand:
-        `/bin/zsh -lc '${capsuleReproductionContract.command} && npm test'`,
+      separatePostReproduction: true,
+      validationCommand: "/bin/zsh -lc 'npm test'",
     }).map(JSON.stringify).join("\n"),
     capsuleTraceOptions("debug"),
   );
   assert.deepEqual(
-    wrappedReproAndTestValidation.workflow_trace.capsule_stage,
-    {
-      ...passingCapsuleStage("debug"),
-      post_change_reproduction_replayed: true,
-      post_change_validation_mode: "combined",
-    },
+    wrappedValidationThenStandaloneRepro.workflow_trace.capsule_stage,
+    passingCapsuleStage("debug"),
   );
   const validationWithoutReplay = parseCodexResult(
     capsuleTraceEvents({ validationCommand: "npm test" })
@@ -2811,25 +2919,15 @@ test("Codex trace observes the complete debug capsule stage protocol", () => {
   assert.equal(validationWithoutReplay.post_change_reproduction_replayed, false);
   assert.equal(validationWithoutReplay.capsule_green_path_observed, false);
   assert.equal(validationWithoutReplay.protocol_observed, false);
-  const separateReproAndTestValidation = parseCodexResult(
-    capsuleTraceEvents({ separatePostReproduction: true }).map(JSON.stringify).join("\n"),
+  const wrongSplitOutput = parseCodexResult(
+    capsuleTraceEvents({
+      postReproductionOutput: "WRONG_REPRO_OUTPUT",
+      separatePostReproduction: true,
+    }).map(JSON.stringify).join("\n"),
     capsuleTraceOptions("debug"),
-  );
-  assert.deepEqual(
-    separateReproAndTestValidation.workflow_trace.capsule_stage,
-    {
-      ...passingCapsuleStage("debug"),
-      debug_recovery_protocol_observed: false,
-      final_validation_budget_observed: false,
-      capsule_green_path_observed: false,
-      patch_protocol_observed: false,
-      post_change_command_calls: 2,
-      post_change_reproduction_replayed: true,
-      quality_validation_mode: "separate",
-      post_change_validation_mode: "separate",
-      protocol_observed: false,
-    },
-  );
+  ).workflow_trace.capsule_stage;
+  assert.equal(wrongSplitOutput.validation_observed, false);
+  assert.equal(wrongSplitOutput.quality_validation_observed, false);
   const reproductionBeforeRead = parseCodexResult(
     capsuleTraceEvents({ reproduceBeforeRead: true }).map(JSON.stringify).join("\n"),
     capsuleTraceOptions("debug"),
@@ -2837,7 +2935,7 @@ test("Codex trace observes the complete debug capsule stage protocol", () => {
   assert.equal(reproductionBeforeRead.reproduce_observed, true);
   assert.equal(reproductionBeforeRead.ordered_reproduce_observed, true);
   assert.equal(reproductionBeforeRead.pre_change_stage_protocol_observed, true);
-  assert.equal(reproductionBeforeRead.capsule_green_path_observed, true);
+  assert.equal(reproductionBeforeRead.capsule_green_path_observed, false);
 });
 
 test("debug capsule permits one evidence-bounded recovery and then stops", () => {
@@ -2854,6 +2952,7 @@ test("debug capsule permits one evidence-bounded recovery and then stops", () =>
   assert.equal(stage.debug_recovery_protocol_observed, true);
   assert.equal(stage.patch_protocol_observed, true);
   assert.equal(stage.quality_validation_observed, true);
+  assert.equal(stage.quality_validation_mode, "separate");
   assert.equal(stage.final_stop_observed, true);
   assert.equal(stage.capsule_green_path_observed, false);
   assert.deepEqual(evaluateWorkflowConformance({
@@ -2866,9 +2965,71 @@ test("debug capsule permits one evidence-bounded recovery and then stops", () =>
     telemetry: { workflow_trace: recovered.workflow_trace },
     workflow: "leanpowers-0.2.0",
   }), { status: "PASS", reasons: [] });
+
 });
 
-test("debug recovery fails closed on excess, changed, reopened, or post-final work", () => {
+test("DEBUG R1 and R2 traces separate mutation, recovery, validation, and freshness evidence", () => {
+  const conformance = (parsed) => evaluateWorkflowConformance({
+    activation_reported: true,
+    declared_risk: "standard",
+    declared_workflow: "debug",
+    expected_workflow: "debug",
+    risk_level: "standard",
+    route_ledger_reported: true,
+    telemetry: { workflow_trace: parsed.workflow_trace },
+    workflow: "leanpowers-0.2.0",
+  });
+  const parse = (options) => parseCodexResult(
+    capsuleTraceEvents(options).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  );
+  const passingScenarios = [
+    {
+      extraPostCommand: true,
+      validationExitCode: 1,
+      validationOutput: "tests fail",
+      recoveryPatchPaths: ["src/index.mjs"],
+    },
+    {
+      extraPostCommand: true,
+    },
+  ];
+  for (const options of passingScenarios) {
+    const parsed = parse(options);
+    const stage = parsed.workflow_trace.capsule_stage;
+    assert.deepEqual([
+      stage.patch_protocol_observed,
+      stage.debug_recovery_protocol_observed,
+      stage.quality_validation_observed,
+      stage.final_stop_observed,
+    ], [true, true, true, true]);
+    assert.deepEqual(conformance(parsed), { status: "PASS", reasons: [] });
+  }
+
+  const changedAfterSuccess = parse({
+    nonReviewTail: true,
+  });
+  assert.equal(
+    changedAfterSuccess.workflow_trace.capsule_stage.final_stop_observed,
+    false,
+  );
+
+  const missingValidation = parse({ validationCommand: "npm test" });
+  assert.equal(
+    missingValidation.workflow_trace.capsule_stage.patch_protocol_observed,
+    true,
+  );
+  assert.equal(
+    missingValidation.workflow_trace.capsule_stage.debug_recovery_protocol_observed,
+    true,
+  );
+  assert.deepEqual(conformance(missingValidation), {
+    status: "FAIL",
+    reasons: ["supported successful post-edit validation was not observed"],
+  });
+});
+
+test("debug recovery fails closed on excess, changed, reopened, or ungrounded work", () => {
   const invalid = [
     {
       name: "second correction",
@@ -2935,12 +3096,6 @@ test("debug recovery fails closed on excess, changed, reopened, or post-final wo
         recoveryPatchPaths: ["src/unread.mjs"],
       },
     },
-    {
-      name: "post-final command",
-      options: {
-        extraPostCommand: true,
-      },
-    },
   ];
 
   for (const { name, options } of invalid) {
@@ -2969,9 +3124,9 @@ test("debug recovery fails closed on excess, changed, reopened, or post-final wo
 });
 
 test("resolved reproduction output is required only when the suite declares it", () => {
-  const parseStage = (validationOutput, reproductionContract = capsuleReproductionContract) =>
+  const parseStage = (postReproductionOutput, reproductionContract = capsuleReproductionContract) =>
     parseCodexResult(
-      capsuleTraceEvents({ validationOutput }).map(JSON.stringify).join("\n"),
+      capsuleTraceEvents({ postReproductionOutput }).map(JSON.stringify).join("\n"),
       {
         ...capsuleTraceOptions("debug"),
         reproductionContract,
@@ -2979,12 +3134,13 @@ test("resolved reproduction output is required only when the suite declares it",
     ).workflow_trace.capsule_stage;
 
   assert.equal(parseStage(
-    `${JSON.stringify(capsuleReproductionContract.resolved_output)}\npass`,
+    `pass\n${JSON.stringify(capsuleReproductionContract.resolved_output)}`,
   ).quality_validation_observed, true);
   for (const stale of [
     "pass",
     "{malformed-json}\npass",
     `${JSON.stringify(capsuleReproductionContract.expected_output)}\npass`,
+    `${JSON.stringify(capsuleReproductionContract.resolved_output)}\nWRONG_REPRO_OUTPUT`,
   ]) {
     assert.equal(parseStage(stale).quality_validation_observed, false, stale);
   }
@@ -2993,7 +3149,27 @@ test("resolved reproduction output is required only when the suite declares it",
     command: capsuleReproductionContract.command,
     expected_output: capsuleReproductionContract.expected_output,
   };
-  assert.equal(parseStage("pass", legacyContract).quality_validation_observed, true);
+  const legacyCombined = parseCodexResult(
+    capsuleTraceEvents({
+      separatePostReproduction: false,
+      validationCommand: `npm test && ${capsuleReproductionContract.command}`,
+      validationOutput: "pass",
+    }).map(JSON.stringify).join("\n"),
+    { ...capsuleTraceOptions("debug"), reproductionContract: legacyContract },
+  ).workflow_trace.capsule_stage;
+  assert.equal(legacyCombined.quality_validation_observed, true);
+
+  const combinedSpoof = parseCodexResult(
+    capsuleTraceEvents({
+      separatePostReproduction: false,
+      validationCommand: `npm test && ${capsuleReproductionContract.command}`,
+      validationOutput: JSON.stringify(
+        capsuleReproductionContract.resolved_output,
+      ),
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(combinedSpoof.quality_validation_observed, false);
 });
 
 test("capsule clause-to-test ledger must appear before PATCH, not only in final", () => {
@@ -3433,7 +3609,6 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
     capsuleTraceEvents({
       routeDeclaration:
         "Routing selected: `leanpowers:route` workflow is `debug`; risk is `standard`; required gate is `[current_evidence]`.",
-      validationCommand: `${capsuleReproductionContract.command} && npm test`,
     }).map(JSON.stringify).join("\n"),
     capsuleTraceOptions("debug"),
   ).workflow_trace.capsule_stage;
@@ -3643,16 +3818,61 @@ test("capsule retries require concrete evidence and completed stages never reope
   assert.equal(reopenedRead.unexpected_pre_change_command_calls, 1);
 });
 
-test("lean and standard capsules stop every tool after successful validation", () => {
-  const stage = parseCodexResult(
-    capsuleTraceEvents({ postValidationReview: true }).map(JSON.stringify).join("\n"),
-    capsuleTraceOptions("debug"),
-  ).workflow_trace.capsule_stage;
-
-  assert.equal(stage.validation_observed, true);
-  assert.equal(stage.post_validation_tool_calls, 2);
-  assert.equal(stage.ordinary_stop_observed, false);
-  assert.equal(stage.protocol_observed, false);
+test("lean and standard freshness permits proven reads and rejects unsafe activity", () => {
+  const completed = (item) => ({ type: "item.completed", item });
+  const stageWithTail = (...items) => {
+    const events = capsuleTraceEvents();
+    events.splice(-2, 0, ...items.map(completed));
+    return parseCodexResult(
+      events.map(JSON.stringify).join("\n"),
+      capsuleTraceOptions("debug"),
+    ).workflow_trace.capsule_stage;
+  };
+  for (const safeItem of [
+    {
+      type: "command_execution",
+      command: "cat package.json",
+      aggregated_output: "{}",
+      exit_code: 0,
+      status: "completed",
+    },
+    {
+      type: "command_execution",
+      command: "git diff --check",
+      aggregated_output: "",
+      exit_code: 0,
+      status: "completed",
+    },
+  ]) {
+    assert.equal(stageWithTail(safeItem).final_stop_observed, true);
+  }
+  for (const unsafeItem of [
+    {
+      type: "command_execution",
+      command: "npm run format",
+      aggregated_output: "formatted",
+      exit_code: 0,
+      status: "completed",
+    },
+    {
+      type: "command_execution",
+      command: "echo changed > src/index.mjs",
+      aggregated_output: "",
+      exit_code: 0,
+      status: "completed",
+    },
+    {
+      id: "late-wait",
+      type: "collab_tool_call",
+      tool: "wait",
+      agents_states: { helper: { status: "completed", message: "done" } },
+      status: "completed",
+    },
+  ]) {
+    const stage = stageWithTail(unsafeItem);
+    assert.equal(stage.quality_validation_observed, true);
+    assert.equal(stage.final_stop_observed, false);
+  }
 });
 
 test("quality validation uses the latest relevant test and reproduction evidence", () => {
@@ -3666,28 +3886,27 @@ test("quality validation uses the latest relevant test and reproduction evidence
       status: "completed",
     },
   });
-  const stageWithCommandAfterCombined = (command, exitCode) => {
+  const stageWithCommandAfterReproduction = (command, exitCode) => {
     const events = capsuleTraceEvents();
-    const combinedIndex = events.findIndex(({ item }) =>
+    const reproductionIndex = events.findLastIndex(({ item }) =>
       item?.type === "command_execution" &&
-      String(item.command).includes(" && npm test")
+      item.command === capsuleReproductionContract.command
     );
-    assert.notEqual(combinedIndex, -1);
-    events.splice(combinedIndex + 1, 0, completedCommand(command, exitCode));
+    assert.notEqual(reproductionIndex, -1);
+    events.splice(reproductionIndex + 1, 0, completedCommand(command, exitCode));
     return parseCodexResult(
       events.map(JSON.stringify).join("\n"),
       capsuleTraceOptions("debug"),
     ).workflow_trace.capsule_stage;
   };
 
-  const fresherPassingTest = stageWithCommandAfterCombined("npm test", 0);
-  assert.equal(fresherPassingTest.quality_validation_observed, true);
-  assert.equal(fresherPassingTest.quality_validation_mode, "separate");
+  const fresherPassingTest = stageWithCommandAfterReproduction("npm test", 0);
+  assert.equal(fresherPassingTest.quality_validation_observed, false);
 
-  const fresherFailingTest = stageWithCommandAfterCombined("npm test", 1);
+  const fresherFailingTest = stageWithCommandAfterReproduction("npm test", 1);
   assert.equal(fresherFailingTest.quality_validation_observed, false);
 
-  const laterFailingReproduction = stageWithCommandAfterCombined(
+  const laterFailingReproduction = stageWithCommandAfterReproduction(
     capsuleReproductionContract.command,
     1,
   );
@@ -3711,6 +3930,60 @@ test("quality validation uses the latest relevant test and reproduction evidence
   assert.equal(readBetweenEvidence.validation_observed, false);
   assert.equal(readBetweenEvidence.quality_validation_observed, true);
   assert.equal(readBetweenEvidence.quality_validation_mode, "separate");
+
+  const stageWithValidationIntervalItem = (item) => {
+    const events = capsuleTraceEvents();
+    const reproductionIndex = events.findLastIndex(({ item: candidate }) =>
+      candidate?.type === "command_execution" &&
+      candidate.command === capsuleReproductionContract.command
+    );
+    assert.notEqual(reproductionIndex, -1);
+    events.splice(reproductionIndex, 0, {
+      type: "item.completed",
+      item,
+    });
+    return parseCodexResult(
+      events.map(JSON.stringify).join("\n"),
+      capsuleTraceOptions("debug"),
+    ).workflow_trace.capsule_stage;
+  };
+  const safeIntervalRead = stageWithValidationIntervalItem({
+    type: "command_execution",
+    command: "cat package.json",
+    aggregated_output: "{}",
+    exit_code: 0,
+    status: "completed",
+  });
+  assert.equal(safeIntervalRead.quality_validation_observed, true);
+  assert.equal(safeIntervalRead.final_stop_observed, true);
+  const unsafeIntervalItems = [
+    ["formatter", {
+      type: "command_execution",
+      command: "npm run format",
+      aggregated_output: "formatted",
+      exit_code: 0,
+      status: "completed",
+    }],
+    ["collaboration", {
+      id: "interval-collaboration",
+      type: "collab_tool_call",
+      tool: "send_message",
+      status: "completed",
+    }],
+    ["mcp", {
+      id: "interval-mcp",
+      type: "mcp_tool_call",
+      tool: "write_file",
+      status: "completed",
+    }],
+  ];
+  assert.deepEqual(
+    unsafeIntervalItems.map(([name, item]) => [
+      name,
+      stageWithValidationIntervalItem(item).quality_validation_observed,
+    ]),
+    unsafeIntervalItems.map(([name]) => [name, false]),
+  );
 });
 
 test("distilled live failures preserve quality-bearing stage truth", () => {
@@ -3842,9 +4115,9 @@ test("distilled real r2 route requires exact reproduction replay after patch", (
       status: "completed",
     },
   });
-  const validationIndex = events.findIndex(({ item }) =>
+  const validationIndex = events.findLastIndex(({ item }) =>
     item?.type === "command_execution" &&
-    String(item.command).includes(" && npm test")
+    item.command === "npm test"
   );
   assert.notEqual(validationIndex, -1);
   events.splice(validationIndex, 0, {
@@ -3873,7 +4146,7 @@ test("distilled real r2 route requires exact reproduction replay after patch", (
   assert.equal(stage.validation_observed, false);
   assert.equal(stage.quality_validation_observed, true);
   assert.equal(stage.quality_post_validation_tool_calls, 1);
-  assert.equal(stage.quality_ordinary_stop_observed, false);
+  assert.equal(stage.quality_ordinary_stop_observed, true);
   assert.equal(stage.protocol_observed, false);
   assert.deepEqual(evaluateWorkflowConformance({
     activation_reported: true,
@@ -3886,20 +4159,16 @@ test("distilled real r2 route requires exact reproduction replay after patch", (
     workflow: "leanpowers-0.2.0",
   }), {
     status: "FAIL",
-    reasons: [
-      "uninterrupted code-and-test mutation window was not observed",
-      "bounded DEBUG recovery protocol was not observed",
-      "DEBUG did not stop after final successful validation",
-    ],
+    reasons: ["uninterrupted code-and-test mutation window was not observed"],
   });
 
   const missingReplayEvents = structuredClone(events);
-  const combinedValidation = missingReplayEvents.find(({ item }) =>
+  const standaloneReproduction = missingReplayEvents.findLast(({ item }) =>
     item?.type === "command_execution" &&
-    String(item.command).includes(" && npm test")
+    item.command === capsuleReproductionContract.command
   );
-  assert.ok(combinedValidation);
-  combinedValidation.item.command = "npm test";
+  assert.ok(standaloneReproduction);
+  standaloneReproduction.item.command = "node repro/other.mjs";
   const missingReplay = parseCodexResult(
     missingReplayEvents.map(JSON.stringify).join("\n"),
     capsuleTraceOptions("debug"),
@@ -3921,9 +4190,7 @@ test("distilled real r2 route requires exact reproduction replay after patch", (
     status: "FAIL",
     reasons: [
       "uninterrupted code-and-test mutation window was not observed",
-      "bounded DEBUG recovery protocol was not observed",
       "supported successful post-edit validation was not observed",
-      "DEBUG did not stop after final successful validation",
     ],
   });
 });
@@ -4365,9 +4632,6 @@ test("debug capsule stage protocol rejects one-property trace regressions", () =
     }, "validation_observed"],
     [{ validationCommand: "node repro/other.mjs && npm test" }, "validation_observed"],
     [{
-      validationCommand: `npm test && ${capsuleReproductionContract.command}`,
-    }, "validation_observed"],
-    [{
       validationCommand: `${capsuleReproductionContract.command} && npm test && npm test`,
     }, "validation_observed"],
     [{
@@ -4381,7 +4645,6 @@ test("debug capsule stage protocol rejects one-property trace regressions", () =
     }, "validation_observed"],
     [{ extraPreCommand: true }, "pre_change_command_calls"],
     [{ extraPostCommand: true }, "post_change_command_calls"],
-    [{ postValidationReview: true }, "ordinary_stop_observed"],
   ];
 
   for (const [mutation, field] of cases) {
@@ -4455,7 +4718,7 @@ test("build capsule stage protocol omits reproduction but keeps all other gates"
   }
 });
 
-test("build capsule requires one focused failing RED between test and product patches", () => {
+test("build capsule accepts evidence-driven RED retries without a fixed call budget", () => {
   const recoveredRed = parseCodexResult(
     capsuleTraceEvents({
       expectedWorkflow: "build",
@@ -4471,20 +4734,164 @@ test("build capsule requires one focused failing RED between test and product pa
   assert.equal(recoveredRed.red_test_paths_preserved_observed, true);
   assert.equal(recoveredRed.quality_pre_change_evidence_observed, true);
   assert.equal(recoveredRed.patch_protocol_observed, true);
+  assert.equal(recoveredRed.quality_validation_observed, true);
+  assert.equal(recoveredRed.final_stop_observed, true);
   assert.equal(recoveredRed.protocol_observed, true);
   assert.equal(recoveredRed.capsule_green_path_observed, false);
+  assert.deepEqual(evaluateWorkflowConformance({
+    activation_reported: true,
+    declared_risk: "standard",
+    declared_workflow: "build",
+    expected_workflow: "build",
+    risk_level: "standard",
+    route_ledger_reported: true,
+    telemetry: { workflow_trace: { capsule_stage: recoveredRed } },
+    workflow: "leanpowers-0.2.0",
+  }), { status: "PASS", reasons: [] });
 
-  const unrelatedRetry = parseCodexResult(
+  const repeatedRed = parseCodexResult(
     capsuleTraceEvents({
       expectedWorkflow: "build",
-      retryBuildRedCycle: true,
-      retryRedCommand: "git status --short",
+      extraBuildRedCommand: true,
     }).map(JSON.stringify).join("\n"),
     capsuleTraceOptions("build"),
   ).workflow_trace.capsule_stage;
-  assert.equal(unrelatedRetry.build_red_retry_protocol_observed, false);
-  assert.equal(unrelatedRetry.patch_protocol_observed, false);
-  assert.equal(unrelatedRetry.protocol_observed, false);
+  assert.equal(repeatedRed.build_red_command_calls, 2);
+  assert.equal(repeatedRed.patch_protocol_observed, true);
+  assert.equal(repeatedRed.final_stop_observed, true);
+
+  const stageWithCommandAroundRed = (command, position = "after") => {
+    const events = capsuleTraceEvents({ expectedWorkflow: "build" });
+    const redIndex = events.findIndex(({ item }) =>
+      item?.type === "command_execution" && item.exit_code === 1
+    );
+    assert.notEqual(redIndex, -1);
+    events.splice(redIndex + (position === "before" ? 0 : 1), 0, {
+      type: "item.completed",
+      item: {
+        type: "command_execution",
+        command,
+        aggregated_output: command === "cat package.json"
+          ? "{}"
+          : command === "npm test"
+            ? "pass"
+            : "formatted",
+        exit_code: 0,
+        status: "completed",
+      },
+    });
+    return parseCodexResult(
+      events.map(JSON.stringify).join("\n"),
+      capsuleTraceOptions("build"),
+    ).workflow_trace.capsule_stage;
+  };
+  assert.equal(
+    stageWithCommandAroundRed("cat package.json").build_red_observed,
+    true,
+  );
+  assert.equal(stageWithCommandAroundRed("npm test").build_red_observed, false);
+  assert.equal(
+    stageWithCommandAroundRed("npm run format", "before").build_red_observed,
+    false,
+  );
+
+  const multipleCorrectionEvents = capsuleTraceEvents({
+    expectedWorkflow: "build",
+    retryBuildRedCycle: true,
+  });
+  const finalRedIndex = multipleCorrectionEvents.findLastIndex(({ item }) =>
+    item?.type === "command_execution" && item.exit_code === 1
+  );
+  assert.notEqual(finalRedIndex, -1);
+  multipleCorrectionEvents.splice(finalRedIndex, 0,
+    {
+      type: "item.completed",
+      item: {
+        type: "command_execution",
+        command: "node --test test/index.test.mjs",
+        aggregated_output: "invalid correction still passes",
+        exit_code: 0,
+        status: "completed",
+      },
+    },
+    {
+      type: "item.completed",
+      item: {
+        type: "file_change",
+        changes: [{
+          path: "/tmp/run/workspace/test/index.test.mjs",
+          kind: "update",
+        }],
+        status: "completed",
+      },
+    },
+  );
+  const multipleCorrections = parseCodexResult(
+    multipleCorrectionEvents.map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("build"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(multipleCorrections.build_red_cycle_restarts, 2);
+  assert.equal(multipleCorrections.build_red_retry_command_calls, 2);
+  assert.equal(multipleCorrections.patch_protocol_observed, true);
+  assert.equal(multipleCorrections.final_stop_observed, true);
+
+  const postGreenEditEvents = capsuleTraceEvents({ expectedWorkflow: "build" });
+  postGreenEditEvents.splice(-2, 0,
+    {
+      type: "item.completed",
+      item: {
+        type: "file_change",
+        changes: [{
+          path: "/tmp/run/workspace/src/index.mjs",
+          kind: "update",
+        }],
+        status: "completed",
+      },
+    },
+    {
+      type: "item.completed",
+      item: {
+        type: "command_execution",
+        command: "npm test",
+        aggregated_output: "pass",
+        exit_code: 0,
+        status: "completed",
+      },
+    },
+  );
+  const postGreenEdit = parseCodexResult(
+    postGreenEditEvents.map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("build"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(postGreenEdit.patch_protocol_observed, true);
+  assert.equal(postGreenEdit.quality_validation_observed, true);
+  assert.equal(postGreenEdit.final_stop_observed, false);
+
+  const unsafeCorrectionEvents = capsuleTraceEvents({
+    expectedWorkflow: "build",
+    retryBuildRedCycle: true,
+  });
+  const correctionAttemptIndex = unsafeCorrectionEvents.findIndex(({ item }) =>
+    item?.type === "command_execution" &&
+    item.aggregated_output === "unexpected pass before correcting the regression"
+  );
+  assert.notEqual(correctionAttemptIndex, -1);
+  unsafeCorrectionEvents.splice(correctionAttemptIndex, 0, {
+    type: "item.completed",
+    item: {
+      type: "command_execution",
+      command: "npm run format",
+      aggregated_output: "formatted",
+      exit_code: 0,
+      status: "completed",
+    },
+  });
+  const unsafeCorrection = parseCodexResult(
+    unsafeCorrectionEvents.map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("build"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(unsafeCorrection.build_red_retry_protocol_observed, false);
+  assert.equal(unsafeCorrection.patch_protocol_observed, false);
 
   const missingRed = parseCodexResult(
     capsuleTraceEvents({
@@ -4510,17 +4917,13 @@ test("build capsule requires one focused failing RED between test and product pa
     { redTimedOut: true },
     { redExitCode: 256 },
     { redOutput: "zsh: command not found: node" },
-    { extraBuildRedCommand: true },
   ]) {
     const stage = parseCodexResult(
       capsuleTraceEvents({ expectedWorkflow: "build", ...mutation })
         .map(JSON.stringify).join("\n"),
       capsuleTraceOptions("build"),
     ).workflow_trace.capsule_stage;
-    assert.equal(
-      stage.build_red_command_calls,
-      mutation.extraBuildRedCommand ? 2 : 1,
-    );
+    assert.equal(stage.build_red_command_calls, 1);
     assert.equal(stage.build_red_observed, false);
     assert.equal(stage.quality_pre_change_evidence_observed, false);
     assert.equal(stage.patch_protocol_observed, false);
@@ -4570,8 +4973,8 @@ test("build capsule requires one focused failing RED between test and product pa
     }).map(JSON.stringify).join("\n"),
     capsuleTraceOptions("build"),
   ).workflow_trace.capsule_stage;
-  assert.equal(weakenedRedTest.build_red_observed, true);
-  assert.equal(weakenedRedTest.red_test_paths_preserved_observed, false);
+  assert.equal(weakenedRedTest.build_red_observed, false);
+  assert.equal(weakenedRedTest.red_test_paths_preserved_observed, true);
   assert.equal(weakenedRedTest.patch_protocol_observed, false);
   assert.equal(weakenedRedTest.protocol_observed, false);
 });
@@ -5073,6 +5476,25 @@ test("strict review protocol accepts remediated fresh cycles and rejects one-pro
   assert.equal(valid.strict_review_protocol_observed, true);
   assert.equal(valid.strict_final_stop_observed, true);
   assert.equal(valid.quality_independent_review_current_validation_observed, true);
+  for (const boundaryId of ["spawn-2", "wait-2"]) {
+    const staleEvents = buildTrace();
+    const boundaryIndex = staleEvents.findIndex(({ type, item }) =>
+      type === "item.started" && item?.id === boundaryId
+    );
+    assert.notEqual(boundaryIndex, -1);
+    staleEvents.splice(boundaryIndex, 0, event({
+      type: "command_execution",
+      command: "npm run format",
+      aggregated_output: "formatted",
+      exit_code: 0,
+      status: "completed",
+    }));
+    assert.equal(
+      parse(staleEvents).quality_independent_review_current_validation_observed,
+      false,
+      boundaryId,
+    );
+  }
   const postReviewCommand = parse([
     ...buildTrace(),
     event({
@@ -5083,7 +5505,41 @@ test("strict review protocol accepts remediated fresh cycles and rejects one-pro
     }),
   ]);
   assert.equal(postReviewCommand.strict_review_protocol_observed, true);
-  assert.equal(postReviewCommand.strict_final_stop_observed, false);
+  assert.equal(postReviewCommand.strict_final_stop_observed, true);
+  const postReviewFormatter = parse([
+    ...buildTrace(),
+    event({
+      type: "command_execution",
+      command: "npm run format",
+      aggregated_output: "formatted",
+      exit_code: 0,
+      status: "completed",
+    }),
+  ]);
+  assert.equal(postReviewFormatter.quality_independent_review_pass_observed, true);
+  assert.equal(
+    postReviewFormatter.quality_independent_review_current_validation_observed,
+    true,
+  );
+  assert.equal(postReviewFormatter.strict_final_stop_observed, false);
+  assert.deepEqual(evaluateWorkflowConformance({
+    activation_reported: true,
+    declared_risk: "strict",
+    declared_workflow: "build",
+    expected_workflow: "build",
+    risk_level: "strict",
+    route_ledger_reported: true,
+    telemetry: {
+      workflow_trace: {
+        ...postReviewFormatter,
+        capsule_stage: passingCapsuleStage("build"),
+      },
+    },
+    workflow: "leanpowers-0.2.0",
+  }), {
+    status: "FAIL",
+    reasons: ["unsafe activity occurred after the final passing independent review"],
+  });
   const compactBoundaryPacket = prompt.replace(
     `${contract}\n\nReviewer context:`,
     `${contract}\nReviewer context:`,
@@ -5107,11 +5563,10 @@ test("strict review protocol accepts remediated fresh cycles and rejects one-pro
     initialCommand: "/bin/zsh -lc 'npm test'",
     command: "/bin/zsh -lc 'npm test'",
   })).strict_review_protocol_observed, true);
-  const compositeValidation = `${capsuleReproductionContract.command} && npm test`;
-  const compositePacket = strictReviewPrompt(contract, {
-    testEvidence: `exit=0; command=${compositeValidation}`,
+  const splitPacket = strictReviewPrompt(contract, {
+    testEvidence: "exit=0; command=npm test",
   });
-  const composite = parse([
+  const splitValidation = parse([
     event({
       type: "file_change",
       changes: [{ path: "src/index.mjs", kind: "update" }],
@@ -5119,22 +5574,98 @@ test("strict review protocol accepts remediated fresh cycles and rejects one-pro
     }),
     event({
       type: "command_execution",
-      command: compositeValidation,
-      aggregated_output:
-        `${JSON.stringify(capsuleReproductionContract.resolved_output)}\npass`,
+      command: "npm test",
+      aggregated_output: "pass",
       exit_code: 0,
       status: "completed",
     }),
-    ...spawnEvents("spawn-composite", "reviewer-composite", compositePacket),
-    ...waitEvents("wait-composite", "reviewer-composite", pass),
-  ], new Map([["reviewer-composite", false]]), {
+    event({
+      type: "command_execution",
+      command: capsuleReproductionContract.command,
+      aggregated_output: JSON.stringify(
+        capsuleReproductionContract.resolved_output,
+      ),
+      exit_code: 0,
+      status: "completed",
+    }),
+    ...spawnEvents("spawn-split", "reviewer-split", splitPacket),
+    ...waitEvents("wait-split", "reviewer-split", pass),
+  ], new Map([["reviewer-split", false]]), {
     expectedWorkflow: "debug",
     reproductionContract: capsuleReproductionContract,
   });
-  assert.equal(composite.strict_review_protocol_observed, true);
+  assert.equal(splitValidation.strict_review_protocol_observed, true);
   assert.equal(
-    composite.quality_independent_review_current_validation_observed,
+    splitValidation.quality_independent_review_current_validation_observed,
     true,
+  );
+  const debugReviewWithValidationIntervalItem = (intervalItem) => parse([
+    event({
+      type: "file_change",
+      changes: [{ path: "src/index.mjs", kind: "update" }],
+      status: "completed",
+    }),
+    event({
+      type: "command_execution",
+      command: "npm test",
+      aggregated_output: "pass",
+      exit_code: 0,
+      status: "completed",
+    }),
+    event(intervalItem),
+    event({
+      type: "command_execution",
+      command: capsuleReproductionContract.command,
+      aggregated_output: JSON.stringify(
+        capsuleReproductionContract.resolved_output,
+      ),
+      exit_code: 0,
+      status: "completed",
+    }),
+    ...spawnEvents("spawn-interval", "reviewer-interval", splitPacket),
+    ...waitEvents("wait-interval", "reviewer-interval", pass),
+  ], new Map([["reviewer-interval", false]]), {
+    expectedWorkflow: "debug",
+    reproductionContract: capsuleReproductionContract,
+  });
+  assert.equal(
+    debugReviewWithValidationIntervalItem({
+      type: "command_execution",
+      command: "cat package.json",
+      aggregated_output: "{}",
+      exit_code: 0,
+      status: "completed",
+    }).quality_independent_review_current_validation_observed,
+    true,
+  );
+  const unsafeStrictIntervalItems = [
+    ["formatter", {
+      type: "command_execution",
+      command: "npm run format",
+      aggregated_output: "formatted",
+      exit_code: 0,
+      status: "completed",
+    }],
+    ["collaboration", {
+      id: "strict-interval-collaboration",
+      type: "collab_tool_call",
+      tool: "send_message",
+      status: "completed",
+    }],
+    ["mcp", {
+      id: "strict-interval-mcp",
+      type: "mcp_tool_call",
+      tool: "write_file",
+      status: "completed",
+    }],
+  ];
+  assert.deepEqual(
+    unsafeStrictIntervalItems.map(([name, item]) => [
+      name,
+      debugReviewWithValidationIntervalItem(item)
+        .quality_independent_review_current_validation_observed,
+    ]),
+    unsafeStrictIntervalItems.map(([name]) => [name, false]),
   );
   const staleGreenReview = [
     event({
@@ -5430,7 +5961,7 @@ test("Codex trace rejects failed, unrelated, or out-of-order review evidence", (
   }
 });
 
-test("Codex trace requires a passing review after the final file change", () => {
+test("Codex trace rejects nonpassing or malformed independent review verdicts", () => {
   const event = (item) => JSON.stringify({ type: "item.completed", item });
   const spawn = event({
     type: "collab_tool_call",
@@ -5445,7 +5976,11 @@ test("Codex trace requires a passing review after the final file change", () => 
     agents_states: { reviewer: { status: "completed", message } },
     status: "completed",
   });
-  const change = event({ type: "file_change", changes: [] });
+  const change = event({
+    type: "file_change",
+    changes: [{ path: "src/index.mjs", kind: "update" }],
+    status: "completed",
+  });
   const secondSpawn = event({
     type: "collab_tool_call",
     tool: "spawn_agent",
@@ -5479,8 +6014,6 @@ test("Codex trace requires a passing review after the final file change", () => 
   for (const raw of [
     [spawn, wait("verdict: changes_required"), turn],
     [spawn, wait("PASS is not granted; changes are required"), turn],
-    [spawn, change, wait("verdict: pass\nfindings: []\nunverified_areas: []"), turn],
-    [spawn, wait("PASS — no blockers"), change, turn],
     [spawn, wait("verdict: pass\nfindings:\n  - severity: critical\nunverified_areas: []"), turn],
     [spawn, wait("verdict: pass\nfindings: []\nunverified_areas: [tests]"), turn],
     [spawn, wait("verdict: pass\nfindings: []"), turn],
@@ -5947,12 +6480,7 @@ test("workflow declaration and risk classification are separate conformance evid
     }),
     {
       status: "FAIL",
-      reasons: [
-        "current passing independent review was not observed",
-        "passing independent review lacked current validation context",
-        "reviewer workspace mutation check was not observed",
-        "strict workflow did not stop after the final passing review",
-      ],
+      reasons: ["current passing independent review was not observed"],
     },
   );
   const presentedStrictCapsule = passingCapsuleStage("build");
@@ -5970,12 +6498,7 @@ test("workflow declaration and risk classification are separate conformance evid
     }),
     {
       status: "FAIL",
-      reasons: [
-        "current passing independent review was not observed",
-        "passing independent review lacked current validation context",
-        "reviewer workspace mutation check was not observed",
-        "strict workflow did not stop after the final passing review",
-      ],
+      reasons: ["current passing independent review was not observed"],
     },
   );
   assert.deepEqual(
@@ -6142,7 +6665,7 @@ test("workflow declaration and risk classification are separate conformance evid
       strict_final_stop_observed: false,
       post_change_spawn_calls: 1,
       post_change_wait_calls: 1,
-    }, "strict workflow did not stop after the final passing review"],
+    }, "unsafe activity occurred after the final passing independent review"],
   ]) {
     const conformance = evaluateWorkflowConformance({
       workflow: "leanpowers-0.2.0",

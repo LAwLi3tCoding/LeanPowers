@@ -33,6 +33,8 @@ const STANDARD_SIGNALS = [
   "validationFailed",
 ];
 
+const INTERNAL_REVIEW_PHASE = "review"; // Internal same-turn phase; never a user handoff.
+
 export function classifyRisk(signals = {}) {
   if (!signals || typeof signals !== "object" || Array.isArray(signals)) {
     return "standard";
@@ -82,7 +84,7 @@ export function selectInitialWorkflow({
   if (explicitWorkflow !== null) {
     if (explicitWorkflow === "ship") {
       if (!verificationCurrent) return "verify";
-      if (risk === "strict" && !independentReview) return "review";
+      if (risk === "strict" && !independentReview) return INTERNAL_REVIEW_PHASE;
     }
     if (["adapt", "build", "debug", "review", "shape", "ship", "verify"].includes(explicitWorkflow)) {
       return explicitWorkflow;
@@ -93,7 +95,7 @@ export function selectInitialWorkflow({
   }
   if (deliveryOnly) {
     if (!verificationCurrent) return "verify";
-    return risk === "strict" && !independentReview ? "review" : "ship";
+    return risk === "strict" && !independentReview ? INTERNAL_REVIEW_PHASE : "ship";
   }
   if (reviewRequested) {
     return "review";
@@ -147,7 +149,7 @@ export function selectNextWorkflow({
     return null;
   }
   if (risk === "strict") {
-    return "review";
+    return INTERNAL_REVIEW_PHASE;
   }
   if (
     !evidenceCurrent ||

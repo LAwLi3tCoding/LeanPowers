@@ -4,9 +4,7 @@ Use for direct entry or missing routing ledger. Read once; reuse.
 
 ## Risk and gates
 
-Use highest signal. `lean` is clear, local, reversible, validated, and has no public boundary. `standard` covers normal multi-file, public-boundary, dependency, or bounded-uncertainty work; unknown defaults here. `strict` covers security (including authentication, credentials/secrets, cryptography, or signature verification), authorization, payment, privacy, migration, concurrency, production, irreversible work, or a large refactor. Strict is sticky until independent review and current evidence pass.
-
-Carry this ledger:
+Use the highest signal. `lean` only when `clear`, `local`, `reversible`, and `establishedValidation` are true and no standard or strict signal applies. `causeKnown=false` is `standard`; so are `preferredMode=standard`, `behaviorChange`, `boundedUncertainty`, `dataModelChange`, `defect`, `dependencyChange`, `diagnosisRequested`, `externalSystem`, `multiFile`, `publicBoundaryChange`, `scopeExpanded`, and `validationFailed`. Use `strict` for `preferredMode=strict`, `authorization`, `authentication`, `concurrency`, `credentialGated`, `credentials`, `cryptography`, `dataRisk`, `destructive`, `irreversible`, `largeRefactor`, `migration`, `payment`, `privacy`, `production`, `reviewHighRisk`, `security`, `secrets`, and `signatureVerification`. Strict is sticky until independent review and current evidence pass.
 
 ```yaml
 workflow: shape | build | debug | review | verify | ship
@@ -20,20 +18,19 @@ required_gates: [current_evidence] | [independent_review, current_evidence]
 2. Diagnose unknown failure to root cause before claiming repair.
 3. Behavior change requires regression evidence.
 4. Re-shape material scope expansion.
-5. Strict work requires an independent review; implementer self-review is insufficient.
+5. Strict work requires independent review; implementer self-review is insufficient.
 6. Destructive, irreversible, credential-gated, or production action requires authorization.
-7. Re-evaluate when evidence contradicts the conclusion.
-8. Report every material validation gap; unavailable is never pass.
+7. Re-evaluate contradictory evidence and report every material validation gap.
 
-Reuse evidence only while relevant code, generated output, dependencies, configuration, environment, and scope remain unchanged. Keep logs local.
+Evidence remains reusable only while relevant code, output, dependencies, configuration, environment, and scope remain unchanged.
 
 ## Transitions
 
 - `shape -> build` when executable.
-- `build/debug -> review` for strict completion.
-- `build/debug -> complete` for lean or standard work with current evidence.
-- `build/debug -> verify` only for explicit verification, stale/cross-session evidence, delivery, or cross-artifact/runtime claims.
-- `review -> build/debug` on findings; independent strict pass with unchanged current evidence may complete, otherwise use `verify`.
-- `verify -> ship` only when delivery was requested and every material claim passes.
+- Strict `build/debug -> review` is an internal same-turn phase, never a user handoff or `next: review` output.
+- Lean/standard `build/debug -> complete` with current evidence.
+- `build/debug -> verify` only for explicit, stale, delivery, or cross-artifact/runtime evidence.
+- Review findings reopen `build/debug`; pass with unchanged evidence may complete, otherwise use `verify`.
+- `verify -> ship` only for requested delivery with passing evidence.
 
-Default one agent. Strict stabilizes final diff and tests, then uses exactly one fresh reviewer. On Codex V1, tool-search/load `multi_agent_v1.spawn_agent` and `multi_agent_v1.wait_agent`; spawn with `fork_context:false` and a message beginning `$leanpowers:review`, then wait once for that ID. Other runtimes invoke one native review; blocking calls do not wait again. Send the verbatim task, paths, concise evidence, and verdict schema—not paraphrase or transcript. Only its pass after last change satisfies the gate; any scoped edit requires retest/re-review. Implementer text never satisfies or overrules review. Unchanged current evidence remains valid; otherwise return incomplete and never ship.
+Strict build/debug loads the subagent policy only after green validation; that policy alone defines review invocation and effects. Implementer text never satisfies or overrules review. Unavailable review is incomplete and never ships.
