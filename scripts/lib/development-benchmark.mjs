@@ -720,12 +720,31 @@ export function parseCodexResult(
       index > firstFileChangeIndex &&
       isReviewerPrompt(item.prompt)
     ) {
+      const reviewValidationCommands = events.flatMap((candidate, candidateIndex) =>
+        candidateIndex > finalFileChangeIndex &&
+          candidateIndex < index &&
+          candidate?.type === "item.completed" &&
+          candidate?.item?.type === "command_execution" &&
+          candidate.item.status === "completed"
+          ? [{ event: candidate, index: candidateIndex }]
+          : []
+      );
       for (const agentId of item.receiver_thread_ids ?? []) {
         reviewAgentSpawns.set(agentId, {
           contract_verbatim: hasExactCodexReviewContract(
             item.prompt,
             expectedReviewContract,
           ),
+          quality_context_complete: reviewPromptContainsContract(
+            item.prompt,
+            expectedReviewContract,
+          ),
+          quality_current_validation_observed:
+            parseSupportedPostChangeValidation(
+              reviewValidationCommands,
+              expectedWorkflow,
+              reproductionContract,
+            ) !== null,
           packet: parseCompleteCodexReviewPacket(
             item.prompt,
             expectedReviewContract,
@@ -762,6 +781,13 @@ export function parseCodexResult(
               state?.status === "completed"
                 ? classifyReviewVerdict(state?.message)
                 : null,
+            quality_verdict:
+              state?.status === "completed"
+                ? classifyQualityReviewVerdict(state?.message)
+                : null,
+            quality_context_complete: spawn.quality_context_complete,
+            quality_current_validation_observed:
+              spawn.quality_current_validation_observed,
             review_skill_invoked: spawn.review_skill_invoked,
             workspace_mutation_check_observed:
               reviewerWorkspaceMutations.has(agentId),
@@ -790,6 +816,15 @@ export function parseCodexResult(
               (review) => review.contract_verbatim,
             ),
             pass: completedReviews.every((review) => review.verdict === "pass"),
+            quality_context_complete: completedReviews.every(
+              (review) => review.quality_context_complete,
+            ),
+            quality_current_validation_observed: completedReviews.every(
+              (review) => review.quality_current_validation_observed,
+            ),
+            quality_pass: completedReviews.every(
+              (review) => review.quality_verdict === "pass",
+            ),
             review_skill_invoked: completedReviews.every(
               (review) => review.review_skill_invoked,
             ),
@@ -892,6 +927,12 @@ export function parseCodexResult(
       ),
       skills_observed: skillsObserved,
       independent_review_pass_observed: latestIndependentReview?.pass === true,
+      quality_independent_review_pass_observed:
+        latestIndependentReview?.quality_pass === true,
+      quality_independent_review_context_observed:
+        latestIndependentReview?.quality_context_complete === true,
+      quality_independent_review_current_validation_observed:
+        latestIndependentReview?.quality_current_validation_observed === true,
       independent_review_contract_verbatim_observed:
         latestIndependentReview?.contract_verbatim === true,
       independent_review_skill_invoked:
@@ -1018,6 +1059,27 @@ function traceCapsuleStage(
       .map((change) => benchmarkObservedPath(change?.path))
       .filter(Boolean)
   ))].sort();
+  const firstChangeIndexByPath = new Map();
+  for (const { event, index } of taskChanges) {
+    for (const change of event.item.changes ?? []) {
+      const changedPath = benchmarkObservedPath(change?.path);
+      if (
+        changedPath !== null &&
+        !firstChangeIndexByPath.has(changedPath)
+      ) {
+        firstChangeIndexByPath.set(changedPath, index);
+      }
+    }
+  }
+  const qualityReadEvidence = taskCommands.flatMap(({ event, index }) =>
+    successfulReadEvidencePaths(event.item).map((readPath) => ({ index, readPath }))
+  );
+  const qualityReadObserved = qualityReadEvidence.length > 0;
+  const qualityPatchTargetsReadObserved = readRequiredPatchPaths.every(
+    (requiredPath) => qualityReadEvidence.some(({ index, readPath }) =>
+      readPath === requiredPath && index < firstChangeIndexByPath.get(requiredPath)
+    ),
+  );
   const preChangeStage = tracePreChangeStages(
     preChangeCommands,
     expectedWorkflow,
@@ -1100,6 +1162,10 @@ function traceCapsuleStage(
   const discoverObserved = preChangeStage.discover_observed;
   const readObserved = preChangeStage.read_observed;
   const reproduceObserved = preChangeStage.reproduce_observed;
+  const qualityPreChangeEvidenceObserved =
+    qualityReadObserved &&
+    qualityPatchTargetsReadObserved &&
+    (expectedWorkflow !== "debug" || reproduceObserved);
   const testPatterns = changePolicy?.tests ?? [];
   const productPatterns = changePolicy?.product ?? [];
   const testPatchObserved = patchPaths.some((changedPath) =>
@@ -1113,18 +1179,31 @@ function traceCapsuleStage(
     patchBatches.length === 1 &&
     implementationPatchObserved &&
     testPatchObserved;
+  const qualityPatchObserved = implementationPatchObserved && testPatchObserved;
   const validation = parsePostChangeValidationSequence(
     postChangeCommands,
     expectedWorkflow,
     reproductionContract,
   );
   const validationObserved = validation !== null;
+  const qualityValidation = parseSupportedPostChangeValidation(
+    postChangeCommands,
+    expectedWorkflow,
+    reproductionContract,
+  );
+  const qualityValidationObserved = qualityValidation !== null;
   const postValidationToolCalls = validationObserved
     ? countToolCallsAfter(indexed, validation.final_index)
+    : 0;
+  const qualityPostValidationToolCalls = qualityValidationObserved
+    ? countToolCallsAfter(indexed, qualityValidation.final_index)
     : 0;
   const ordinaryStopObserved = declaredRisk === "strict"
     ? null
     : validationObserved && postValidationToolCalls === 0;
+  const qualityOrdinaryStopObserved = declaredRisk === "strict"
+    ? null
+    : qualityValidationObserved && qualityPostValidationToolCalls === 0;
   const protocolObserved =
     routeDeclarationsConsistent &&
     riskMonotonicObserved &&
@@ -1161,6 +1240,11 @@ function traceCapsuleStage(
     grounded_candidate_paths: preChangeStage.grounded_candidate_paths,
     grounded_candidates_read_observed:
       preChangeStage.grounded_candidates_read_observed,
+    quality_grounded_candidates_read_observed:
+      preChangeStage.quality_grounded_candidates_read_observed,
+    quality_patch_targets_read_observed: qualityPatchTargetsReadObserved,
+    quality_pre_change_evidence_observed: qualityPreChangeEvidenceObserved,
+    quality_read_observed: qualityReadObserved,
     required_read_paths: preChangeStage.required_read_paths,
     validation_metadata_read_observed:
       preChangeStage.validation_metadata_read_observed,
@@ -1188,10 +1272,13 @@ function traceCapsuleStage(
     patch_file_events: taskChanges.length,
     patch_paths: patchPaths,
     implementation_patch_observed: implementationPatchObserved,
+    quality_patch_observed: qualityPatchObserved,
     test_patch_observed: testPatchObserved,
     multi_file_patch_observed: multiFilePatchObserved,
     post_change_command_calls: postChangeCommands.length,
     validation_observed: validationObserved,
+    quality_validation_observed: qualityValidationObserved,
+    quality_validation_mode: qualityValidation?.mode ?? null,
     post_change_validation_mode: validation?.mode ?? null,
     final_validation_budget_observed:
       validationObserved && postChangeCommands.length === 1,
@@ -1203,6 +1290,8 @@ function traceCapsuleStage(
     post_change_reproduction_replayed:
       validation?.reproduction_replayed ?? false,
     post_validation_tool_calls: postValidationToolCalls,
+    quality_post_validation_tool_calls: qualityPostValidationToolCalls,
+    quality_ordinary_stop_observed: qualityOrdinaryStopObserved,
     ordinary_stop_observed: ordinaryStopObserved,
     protocol_observed: protocolObserved,
   };
@@ -1506,6 +1595,7 @@ function tracePreChangeStages(
   }
 
   const attempts = { discover: 0, read: 0, reproduce: 0 };
+  const qualityReadPaths = new Set();
   const successfulItems = new Map();
   let extraReadCalls = 0;
   let malformedReadCalls = 0;
@@ -1520,6 +1610,9 @@ function tracePreChangeStages(
     }
     const stage = matchingStages[0];
     const discoverReady = successfulItems.has("discover");
+    for (const readPath of successfulReadEvidencePaths(item)) {
+      qualityReadPaths.add(readPath);
+    }
     if (
       (stage.name !== "discover" && !discoverReady) ||
       successfulItems.has(stage.name)
@@ -1584,6 +1677,17 @@ function tracePreChangeStages(
   const groundedCandidatesReadObserved = groundedCandidatePaths.every((candidate) =>
     readPaths.has(candidate)
   );
+  const qualityPatchTargetsReadObserved = normalizedPatchPaths.every((candidate) =>
+    qualityReadPaths.has(candidate)
+  );
+  const qualityGroundedCandidatesReadObserved = groundedCandidatePaths.every(
+    (candidate) => qualityReadPaths.has(candidate),
+  );
+  const qualityReadObserved = qualityReadPaths.size > 0;
+  const qualityPreChangeEvidenceObserved =
+    qualityReadObserved &&
+    qualityPatchTargetsReadObserved &&
+    (expectedWorkflow !== "debug" || reproduceObserved);
   const retryCalls = Object.values(attempts)
     .reduce((total, count) => total + Math.max(0, count - 1), 0);
   const protocolObserved =
@@ -1603,6 +1707,11 @@ function tracePreChangeStages(
     out_of_order_stage_calls: outOfOrderStageCalls,
     patch_targets_read_observed: patchTargetsReadObserved,
     protocol_observed: protocolObserved,
+    quality_grounded_candidates_read_observed:
+      qualityGroundedCandidatesReadObserved,
+    quality_patch_targets_read_observed: qualityPatchTargetsReadObserved,
+    quality_pre_change_evidence_observed: qualityPreChangeEvidenceObserved,
+    quality_read_observed: qualityReadObserved,
     read_observed: readObserved,
     reproduce_observed: reproduceObserved,
     ordered_reproduce_observed: orderedReproduceObserved,
@@ -1720,6 +1829,60 @@ function batchReadPaths(item) {
   }
   const paths = words.slice(4).map(normalizeReadPath);
   return paths.length >= 2 && paths.every(Boolean) ? [...new Set(paths)] : [];
+}
+
+function successfulReadEvidencePaths(item) {
+  if (
+    item?.status === "failed" ||
+    item?.timed_out === true ||
+    item?.exit_code !== 0 ||
+    String(item?.aggregated_output ?? "").length === 0 ||
+    hasFatalShellDiagnostic(item?.aggregated_output)
+  ) {
+    return [];
+  }
+  const batchPaths = batchReadPaths(item);
+  if (batchPaths.length > 0) return batchPaths;
+  const command = unwrapShellInvocation(item?.command);
+  if (command === null || /[\\\r\n;&|`<>$#]/u.test(command)) return [];
+  const words = parseSimpleShellWords(command);
+  if (words === null) return [];
+  let values;
+  if (words[0] === "cat") {
+    values = words[1] === "--" ? words.slice(2) : words.slice(1);
+  } else if (words[0] === "head") {
+    let offset = 1;
+    if (words[offset] === "-n" && /^\d+$/u.test(words[offset + 1] ?? "")) {
+      offset += 2;
+    } else if (/^-\d+$/u.test(words[offset] ?? "")) {
+      offset += 1;
+    }
+    if (words[offset] === "--") offset += 1;
+    values = words.slice(offset);
+  } else if (words[0] === "tail") {
+    let offset = 1;
+    if (words[offset] === "-n" && /^\+?\d+$/u.test(words[offset + 1] ?? "")) {
+      offset += 2;
+    } else {
+      return [];
+    }
+    if (words[offset] === "--") offset += 1;
+    values = words.slice(offset);
+  } else if (
+    words[0] === "sed" &&
+    words[1] === "-n" &&
+    /^(?:\d+|\d+,\d+)p$/u.test(words[2] ?? "")
+  ) {
+    const offset = words[3] === "--" ? 4 : 3;
+    values = words.slice(offset);
+  } else {
+    return [];
+  }
+  if (values.length === 0 || values.some((value) => value.startsWith("-"))) {
+    return [];
+  }
+  const paths = values.map(normalizeReadPath);
+  return paths.every(Boolean) ? [...new Set(paths)] : [];
 }
 
 function parseSimpleShellWords(command) {
@@ -1963,6 +2126,21 @@ function isReviewerPrompt(prompt) {
   return /(?:\breview\b|reviewer|审查|复核)/iu.test(String(prompt ?? ""));
 }
 
+function reviewPromptContainsContract(prompt, expectedReviewContract) {
+  if (
+    typeof prompt !== "string" ||
+    typeof expectedReviewContract !== "string" ||
+    expectedReviewContract.trim().length === 0
+  ) {
+    return false;
+  }
+  const normalize = (value) => String(value)
+    .normalize("NFKC")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return normalize(prompt).includes(normalize(expectedReviewContract));
+}
+
 function isTerminalAgentState(status) {
   return ["cancelled", "completed", "errored", "failed", "shutdown"].includes(status);
 }
@@ -2144,6 +2322,67 @@ function parsePostChangeValidationSequence(
   };
 }
 
+function parseSupportedPostChangeValidation(
+  commands,
+  expectedWorkflow,
+  reproductionContract,
+) {
+  const reproductionCommand = reproductionContract?.command;
+  const reproductionAttempts = [];
+  const validationAttempts = commands.flatMap(({ event, index }) => {
+    const parsed = parsePostChangeValidation(
+      event.item.command,
+      expectedWorkflow,
+      reproductionContract,
+    );
+    if (parsed?.reproduction_replayed) {
+      reproductionAttempts.push({
+        exit_code: event.item.exit_code,
+        index,
+      });
+    } else if (
+      expectedWorkflow === "debug" &&
+      canonicalReproductionCommand(event.item.command) === reproductionCommand
+    ) {
+      reproductionAttempts.push({
+        exit_code: event.item.exit_code,
+        index,
+      });
+    }
+    return parsed === null
+      ? []
+      : [{
+          ...parsed,
+          exit_code: event.item.exit_code,
+          final_index: index,
+        }];
+  });
+  const latestValidation = validationAttempts.at(-1) ?? null;
+  if (latestValidation === null || latestValidation.exit_code !== 0) {
+    return null;
+  }
+  if (expectedWorkflow !== "debug") {
+    return {
+      ...latestValidation,
+      mode: "canonical",
+    };
+  }
+  const latestReproduction = reproductionAttempts.at(-1) ?? null;
+  if (
+    latestReproduction === null ||
+    latestReproduction.exit_code !== 0 ||
+    latestReproduction.index > latestValidation.final_index
+  ) {
+    return null;
+  }
+  return {
+    command: latestValidation.command,
+    final_index: latestValidation.final_index,
+    mode: latestValidation.reproduction_replayed ? "combined" : "separate",
+    reproduction_replayed: true,
+  };
+}
+
 function canonicalValidationCommand(command) {
   const text = unwrapShellInvocation(command);
   if (text === null) return null;
@@ -2224,6 +2463,40 @@ export function classifyReviewVerdict(message) {
     return null;
   }
   return "changes_required";
+}
+
+export function classifyQualityReviewVerdict(message) {
+  const source = String(message ?? "").replace(/\r\n/gu, "\n");
+  if (classifyReviewVerdict(source) !== null) {
+    return classifyReviewVerdict(source);
+  }
+  try {
+    const parsed = JSON.parse(source);
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      String(parsed.verdict ?? "").toLowerCase() === "pass" &&
+      Array.isArray(parsed.findings) &&
+      parsed.findings.length === 0 &&
+      Array.isArray(parsed.unverified_areas) &&
+      parsed.unverified_areas.length === 0
+    ) {
+      return "pass";
+    }
+  } catch {
+    // Continue with a surface-tolerant closed-field parse.
+  }
+  const normalized = source
+    .replace(/^\s*```[^\r\n]*\r?\n/gu, "")
+    .replace(/\r?\n```\s*$/gu, "")
+    .trim();
+  if (/^verdict\s*:\s*(?!pass\s*$).+$/imu.test(normalized)) return null;
+  return /^verdict\s*:\s*pass\s*$[\s\S]*^findings\s*:\s*\[\]\s*$[\s\S]*^unverified_areas\s*:\s*\[\]\s*$/imu.test(
+    normalized,
+  )
+    ? "pass"
+    : null;
 }
 
 export function evaluateChangedPaths(changedPaths, policy) {
@@ -2520,53 +2793,20 @@ export function evaluateWorkflowConformance(run) {
         if (!capsule.ledger_before_tools_observed) {
           reasons.push("route ledger was not emitted before task tools");
         }
-        if (capsule.workflow_read_calls !== 0) {
-          reasons.push("capsule reloaded a Skill or reference");
+        if (!capsule.quality_pre_change_evidence_observed) {
+          reasons.push("ordered pre-change source and reproduction evidence was not observed");
         }
-        if (!capsule.pre_change_stage_protocol_observed) {
-          reasons.push("quality-bearing pre-change stages with bounded evidence-backed retries were not observed");
+        if (!capsule.quality_read_observed) {
+          reasons.push("pre-change source READ evidence was not observed");
         }
-        if (!capsule.discover_observed) {
-          reasons.push("content-aware DISCOVER was not observed");
-        }
-        if (!capsule.read_observed) {
-          reasons.push("batched READ was not observed");
-        }
-        if (!capsule.validation_metadata_read_observed) {
-          reasons.push("READ omitted discovered validation metadata");
-        }
-        if (!capsule.patch_targets_read_observed) {
+        if (!capsule.quality_patch_targets_read_observed) {
           reasons.push("READ omitted discovered files that were later changed");
-        }
-        if (!capsule.grounded_candidates_read_observed) {
-          reasons.push("READ omitted grounded implementation, caller, or test candidates");
         }
         if (run.expected_workflow === "debug" && !capsule.reproduce_observed) {
           reasons.push("pre-edit executable REPRODUCE was not observed");
         }
-        if (!capsule.pre_patch_clause_test_ledger_observed) {
-          reasons.push("pre-PATCH clause-to-test ledger was not observed");
-        }
-        if (capsule.post_patch_clause_test_ledger_observed) {
-          reasons.push("clause-to-test ledger was repeated after PATCH");
-        }
-        if (
-          capsule.patch_batches !== 1 ||
-          !capsule.implementation_patch_observed ||
-          !capsule.test_patch_observed ||
-          !capsule.multi_file_patch_observed
-        ) {
-          reasons.push("one contiguous multi-file PATCH batch was not observed");
-        }
-        if (!capsule.validation_observed) {
+        if (!capsule.quality_validation_observed) {
           reasons.push("supported successful post-edit validation was not observed");
-        }
-        if (
-          capsule.highest_presented_risk !== "strict" &&
-          capsule.validation_observed &&
-          !capsule.ordinary_stop_observed
-        ) {
-          reasons.push("lean or standard capsule continued tooling after successful validation");
         }
       }
     }
@@ -2576,26 +2816,21 @@ export function evaluateWorkflowConformance(run) {
       run.telemetry?.workflow_trace?.capsule_stage?.highest_presented_risk === "strict";
     if (
       strictRequired &&
-      !run.telemetry?.workflow_trace?.independent_review_pass_observed
+      !run.telemetry?.workflow_trace?.quality_independent_review_pass_observed
     ) {
       reasons.push("current passing independent review was not observed");
     } else if (
       strictRequired &&
-      !run.telemetry?.workflow_trace?.independent_review_contract_verbatim_observed
+      !run.telemetry?.workflow_trace?.quality_independent_review_context_observed
     ) {
-      reasons.push("passing independent review did not receive the verbatim task contract");
+      reasons.push("passing independent review did not receive the complete task contract");
     }
     if (
       strictRequired &&
-      !run.telemetry?.workflow_trace?.independent_review_skill_invoked
+      !run.telemetry?.workflow_trace
+        ?.quality_independent_review_current_validation_observed
     ) {
-      reasons.push("passing reviewer did not explicitly invoke leanpowers:review");
-    }
-    if (
-      strictRequired &&
-      !run.telemetry?.workflow_trace?.independent_review_sole_wait_target_observed
-    ) {
-      reasons.push("strict wait did not target only the designated reviewer");
+      reasons.push("passing independent review lacked current validation context");
     }
     if (
       strictRequired &&
@@ -2607,12 +2842,6 @@ export function evaluateWorkflowConformance(run) {
       run.telemetry?.workflow_trace?.reviewer_workspace_mutation_observed
     ) {
       reasons.push("designated reviewer mutated the workspace");
-    }
-    if (
-      strictRequired &&
-      !run.telemetry?.workflow_trace?.strict_review_protocol_observed
-    ) {
-      reasons.push("strict review cycles violated the one-reviewer protocol");
     }
   }
   return { status: reasons.length === 0 ? "PASS" : "FAIL", reasons };
@@ -3486,7 +3715,7 @@ export function renderDevelopmentReport(result) {
     "## Interpretation boundary",
     "",
     "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, any case-owned seeded mutant to be killed by visible regression tests, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    "- LeanPowers quality-bearing conformance requires an unambiguous semantic route declaration before any task tool, rejects conflicting declarations, and forbids risk downgrade after an upgrade; canonical spelling and consistent repeated mentions remain diagnostic. Build/debug traces must show no Skill/reference reload, the exact root-relative `rg --files .; rg -n -- 'TERMS' .` discovery shape with a nontrivial literal pattern and option terminator, batched reads, fixture-owned structured pre-edit reproduction for debug, a grounded pre-PATCH clause-to-test packet, one contiguous implementation-plus-test patch batch, and supported successful validation. After DISCOVER, debug READ and REPRODUCE may occur in either order but both must finish before PATCH. Clause completeness and structured counterexample telemetry remain diagnostic. Representation-boundary adequacy is instead measured workflow-neutrally in Task PASS: a candidate-test mutant must fail while the same mutant with candidate test deltas removed still passes, in addition to normal visible and hidden verification. Debug may validate with one exact reproduction-plus-test composite or two ordered successful calls; call count remains an efficiency metric, not a correctness gate. Replay telemetry proves only that the exact reproduction command ran, not that its diagnostic meaning changed. Codex JSONL emits one file-change item per changed file and no patch-call identifier, so contiguous file-change items are an explicit call-cardinality proxy; immediately adjacent independent patch calls with no intervening JSONL event are indistinguishable and may be coalesced. The proxy does not prove exact patch-call cardinality. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Each strict review cycle additionally requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
+    "- LeanPowers quality-bearing conformance requires an unambiguous semantic route declaration before any task tool, rejects conflicting declarations, and forbids risk downgrade after an upgrade. Build/debug traces must show each later-edited existing file was successfully read before its own first edit, fixture-owned structured pre-edit reproduction for debug, and supported successful validation after the final edit. Discovery syntax, extra grounded-file reads, implementation/test patch composition, split versus batched reads, validation-manifest reads, Skill/reference reloads, exact command/call budgets, clause-ledger shape, repeated route or ledger presentation, contiguous versus split patch events, one-call versus two-call validation, and later non-mutating tooling remain efficiency or ceremony diagnostics rather than quality gates. Representation-boundary adequacy is measured workflow-neutrally in Task PASS: a candidate-test mutant must fail while the same mutant with candidate test deltas removed still passes, in addition to normal visible and hidden verification. Replay telemetry proves only that the exact reproduction command ran, not that its diagnostic meaning changed. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Strict quality additionally requires a current independent PASS review with the complete task and current validation context, plus proof the reviewer did not mutate the workspace; exact Skill invocation, prompt/verdict surface, reviewer count, wait targeting, and cycle choreography remain diagnostics.",
     "- Codex JSONL does not expose raw spawn arguments such as `fork_context`; observable spawn/wait behavior is checked dynamically, while exact argument shape is covered by static workflow tests and remains a runtime telemetry gap.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
@@ -4531,7 +4760,9 @@ export function parseLeanRouteLedger(message) {
   const firstLine = text.split(/\r?\n/u)[0];
   if (leanRouteMessageDeniesActivation(text)) return null;
   const exact = parseExactLeanRouteLedger(text);
-  if (exact !== null) return exact;
+  if (exact !== null) {
+    return leanRouteFieldsConsistent(text, exact) ? exact : null;
+  }
 
   const routeMatch = /\bleanpowers:route\b/iu.exec(firstLine);
   if (routeMatch === null) return null;
@@ -4570,16 +4801,16 @@ export function parseLeanRouteLedger(message) {
     return null;
   }
   const workflowMatches = [...routeAndFields.matchAll(
-    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|$))/giu,
+    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|\band\b|$))/giu,
   )];
   const riskMatches = [...routeAndFields.matchAll(
-    /\brisk\s*(?:[:=]|\bis\b)\s*`?(lean|standard|strict)`?(?=\s*(?:[|;,.]|$))/giu,
+    /\brisk\s*(?:[:=]|\bis\b)\s*`?(lean|standard|strict)`?(?=\s*(?:[|;,.]|\band\b|$))/giu,
   )];
   const workflowPresentations = [...routeAndFields.matchAll(
-    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(?!not\b|never\b)([\p{L}][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|$))/giu,
+    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(?!not\b|never\b)([\p{L}][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|\band\b|$))/giu,
   )];
   const riskPresentations = [...routeAndFields.matchAll(
-    /\brisk\s*(?:[:=]|\bis\b)\s*`?(?!not\b|never\b)([\p{L}][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|$))/giu,
+    /\brisk\s*(?:[:=]|\bis\b)\s*`?(?!not\b|never\b)([\p{L}][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|\band\b|$))/giu,
   )];
   const workflows = new Set(workflowMatches.map(
     (match) => match[1].toLocaleLowerCase("en-US"),
@@ -4588,10 +4819,10 @@ export function parseLeanRouteLedger(message) {
     (match) => match[1].toLocaleLowerCase("en-US"),
   ));
   const structuredWorkflowMatches = [...routeFieldText.matchAll(
-    /\b(?:workflow|owner)\s*[:=]\s*`?(?:shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|$))/giu,
+    /\b(?:workflow|owner)\s*[:=]\s*`?(?:shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|\band\b|$))/giu,
   )];
   const structuredRiskMatches = [...routeFieldText.matchAll(
-    /\brisk\s*[:=]\s*`?(?:lean|standard|strict)`?(?=\s*(?:[|;,.]|$))/giu,
+    /\brisk\s*[:=]\s*`?(?:lean|standard|strict)`?(?=\s*(?:[|;,.]|\band\b|$))/giu,
   )];
   const structuredWorkflowFields = structuredFields.filter((field) =>
     field === "workflow" || field === "owner"
@@ -4613,16 +4844,16 @@ export function parseLeanRouteLedger(message) {
   const risk = [...risks][0];
   const expectedGates = expectedLeanRouteGates(risk);
   const gateMatches = [...routeAndFields.matchAll(
-    /\b(?:required[_\s]+gates?|gates?)\s*(?:[:=]|\b(?:is|are)\b)\s*`?(\[[^\]\r\n]*\])`?(?=\s*(?:[|;,.]|$))/giu,
+    /\b(?:required[_\s]+gates?|gates?)\s*(?:[:=]|\b(?:is|are)\b)\s*`?(\[[^\]\r\n]*\])`?(?=\s*(?:[|;,.]|\band\b|$))/giu,
   )];
   const gatePresentations = [...routeAndFields.matchAll(
-    /\b(?:required[_\s]+gates?|gates?)\s*(?:[:=]|\b(?:is|are)\b)\s*`?(?!not\b|never\b)(\[[^\]\r\n]*\]|[\p{L}_][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|$))/giu,
+    /\b(?:required[_\s]+gates?|gates?)\s*(?:[:=]|\b(?:is|are)\b)\s*`?(?!not\b|never\b)(\[[^\]\r\n]*\]|[\p{L}_][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|\band\b|$))/giu,
   )];
   const explicitGatePresentations = [...routeAndFields.matchAll(
     /\b(?:required[_\s]+gates?|gates?)\s*(?:[:=]|\b(?:is|are)\b)\s*`?(?:\[|current_evidence\b|independent_review\b)/giu,
   )];
   const structuredGateMatches = [...routeFieldText.matchAll(
-    /\b(?:required[_\s]+gates?|gates?)\s*[:=]\s*`?\[[^\]\r\n]*\]`?(?=\s*(?:[|;,.]|$))/giu,
+    /\b(?:required[_\s]+gates?|gates?)\s*[:=]\s*`?\[[^\]\r\n]*\]`?(?=\s*(?:[|;,.]|\band\b|$))/giu,
   )];
   const structuredGateFields = structuredFields.filter((field) =>
     ["gate", "gates", "required_gate", "required_gates"].includes(field)
@@ -4656,10 +4887,68 @@ export function parseLeanRouteLedger(message) {
   ) {
     return null;
   }
-  if (negatesLeanRouteDeclaration(firstLine, { workflow, risk, expectedGates })) {
+  if (negatesLeanRouteDeclaration(text, { workflow, risk, expectedGates })) {
     return null;
   }
-  return { workflow, risk, required_gates: expectedGates };
+  const parsedDeclaration = { workflow, risk, required_gates: expectedGates };
+  return leanRouteFieldsConsistent(text, parsedDeclaration)
+    ? parsedDeclaration
+    : null;
+}
+
+function leanRouteFieldsConsistent(message, { workflow, risk, required_gates: expectedGates }) {
+  const text = String(message ?? "");
+  const structuredText = text
+    .split(/\r?\n/u)
+    .map(normalizeLeanRouteLedgerPresentation)
+    .filter((line) =>
+      /^(?:workflow|owner|risk|required[_\s]+gates?|gates?)(?:[*_`]+)?\s*[:=]/iu
+        .test(line)
+    )
+    .join("\n");
+  const structuredWorkflowFields = [...structuredText.matchAll(
+    /\b(?:workflow|owner)(?:[*_`]+)?\s*[:=]/giu,
+  )];
+  const structuredWorkflowPresentations = [...structuredText.matchAll(
+    /\b(?:workflow|owner)(?:[*_`]+)?\s*[:=][*_`]*\s*`?(shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|\band\b|$))/gimu,
+  )];
+  const structuredRiskFields = [...structuredText.matchAll(
+    /\brisk(?:[*_`]+)?\s*[:=]/giu,
+  )];
+  const structuredRiskPresentations = [...structuredText.matchAll(
+    /\brisk(?:[*_`]+)?\s*[:=][*_`]*\s*`?(lean|standard|strict)`?(?=\s*(?:[|;,.]|\band\b|$))/gimu,
+  )];
+  const structuredGateFields = [...structuredText.matchAll(
+    /\b(?:required[_\s]+gates?|gates?)(?:[*_`]+)?\s*[:=]/giu,
+  )];
+  const structuredGatePresentations = [...structuredText.matchAll(
+    /\b(?:required[_\s]+gates?|gates?)(?:[*_`]+)?\s*[:=][*_`]*\s*`?(\[[^\]\r\n]*\])`?(?=\s*(?:[|;,.]|\band\b|$))/gimu,
+  )];
+  const workflowPresentations = [
+    ...structuredWorkflowPresentations,
+    ...text.matchAll(
+      /\b(?:workflow|owner)\s+is\s+`?(shape|build|debug|review|verify|ship|adapt)\b/giu,
+    ),
+  ].map((match) => match[1].toLocaleLowerCase("en-US"));
+  const riskPresentations = [
+    ...structuredRiskPresentations,
+    ...text.matchAll(
+      /\brisk\s+is\s+`?(lean|standard|strict)\b/giu,
+    ),
+  ].map((match) => match[1].toLocaleLowerCase("en-US"));
+  const gatePresentations = [
+    ...structuredGatePresentations,
+    ...text.matchAll(
+      /\b(?:required[_\s]+gates?|gates?)\s+(?:is|are)\s+`?(\[[^\]\r\n]*\])`?/giu,
+    ),
+  ].map((match) => normalizeLeanRouteGates(match[1]));
+  return !negatesLeanRouteDeclaration(text, { workflow, risk, expectedGates }) &&
+    structuredWorkflowFields.length === structuredWorkflowPresentations.length &&
+    structuredRiskFields.length === structuredRiskPresentations.length &&
+    structuredGateFields.length === structuredGatePresentations.length &&
+    workflowPresentations.every((value) => value === workflow) &&
+    riskPresentations.every((value) => value === risk) &&
+    gatePresentations.every((value) => value === expectedGates);
 }
 
 function leanRouteMessageDeniesActivation(message) {
@@ -4710,17 +4999,13 @@ function isAssertiveLeanRoutePrefix(value) {
     .replace(/[*_`]/gu, "")
     .trim()
     .replace(/\s+/gu, " ");
-  return /^(?:leanpowers:route|(?:(?:routing|route) selected|selected|using|following|invoking|activated|activating|entrypoint)\s*:?\s*leanpowers:route|I(?:'m|’m| am)?\s+(?:use|using|follow|following|select|selected|activate|activated|invoke|invoking)\s+leanpowers:route)$/iu
+  return /^(?:leanpowers:route|(?:(?:routing|route) selected|selected|using|following|invoking|activated|activating|entrypoint)\s*:?\s*leanpowers:route|starting in workflow\s+leanpowers:route|I(?:'m|’m| am)?\s+(?:use|using|follow|following|select|selected|activate|activated|invoke|invoking)\s+leanpowers:route)$/iu
     .test(normalized);
 }
 
 function parseExactLeanRouteLedger(message) {
   const lines = String(message ?? "").split(/\r?\n/u);
-  if (
-    lines.length < 4 ||
-    lines[0] !== "entrypoint: leanpowers:route" ||
-    !isValidLeanRouteSuffix(lines.slice(4))
-  ) {
+  if (lines.length < 3 || lines[0] !== "entrypoint: leanpowers:route") {
     return null;
   }
   const workflow = lines[1].match(
@@ -4728,10 +5013,17 @@ function parseExactLeanRouteLedger(message) {
   )?.[1];
   const risk = lines[2].match(/^risk: (lean|standard|strict)$/u)?.[1];
   if (!workflow || !risk) return null;
-  const requiredGates = lines[3].match(/^required_gates: (\[[^\]]*\])$/u)?.[1];
   const expectedGates = expectedLeanRouteGates(risk);
-  if (requiredGates !== expectedGates) return null;
-  return { workflow, risk, required_gates: requiredGates };
+  let suffixStart = 3;
+  if (/^required_gates:/u.test(lines[3] ?? "")) {
+    const requiredGates = lines[3].match(
+      /^required_gates: (\[[^\]]*\])$/u,
+    )?.[1];
+    if (requiredGates !== expectedGates) return null;
+    suffixStart = 4;
+  }
+  if (!isValidLeanRouteSuffix(lines.slice(suffixStart))) return null;
+  return { workflow, risk, required_gates: expectedGates };
 }
 
 function isValidLeanRouteSuffix(suffix) {
@@ -4812,9 +5104,13 @@ function analyzeLeanRouteTimeline(indexedEvents, firstToolIndex) {
         );
       if (isLeanRouteDeclarationShape(line) || multilineStructuredPacket) {
         const legacy = /^\s*entrypoint:\s*leanpowers:route\b/iu.test(line);
-        const lineEnd = legacy || multilineStructuredPacket
-          ? Math.min(lines.length - 1, lineIndex + 3)
-          : lineIndex;
+        const packetLineCount = legacy
+          ? structuredLeanRoutePacketLineCount(lines, lineIndex)
+          : multilineStructuredPacket ? 4 : 1;
+        const lineEnd = Math.min(
+          lines.length - 1,
+          lineIndex + packetLineCount - 1,
+        );
         const packet = lines.slice(lineIndex, lineEnd + 1)
           .map((packetLine) => packetLine.trimEnd())
           .join("\n");
@@ -4870,10 +5166,40 @@ function analyzeLeanRouteTimeline(indexedEvents, firstToolIndex) {
     }
 
     routeLedgerOccurrences += 1;
-    const ledger = presentation.message_denies_activation ||
+    let ledger = presentation.message_denies_activation ||
         presentation.legacy_suffix_valid === false
       ? null
       : parseLeanRouteLedgerCandidate(presentation.presentation);
+    const visibleLines = visibleAssertionLines(
+      presentation.event?.item?.text,
+    );
+    const claimedRouteLines = new Set(
+      presentations
+        .filter((candidate) =>
+          candidate.kind === "route" &&
+          candidate.event_index === presentation.event_index
+        )
+        .flatMap((candidate) =>
+          Array.from(
+            { length: candidate.line_end - candidate.line_index + 1 },
+            (_, offset) => candidate.line_index + offset,
+          )
+        ),
+    );
+    const unclaimedFieldLines = visibleLines.filter((line, lineIndex) =>
+      !claimedRouteLines.has(lineIndex) &&
+      !/^\s*leanpowers:risk\s*\|/iu.test(line)
+    );
+    const fieldContext = [
+      presentation.presentation,
+      ...unclaimedFieldLines,
+    ].join("\n");
+    if (
+      ledger !== null &&
+      !leanRouteFieldsConsistent(fieldContext, ledger)
+    ) {
+      ledger = null;
+    }
     if (routeLedgerOccurrences === 1 && ledger !== null) {
       if (presentation.event_index < firstToolIndex) {
         initialRouteLedger = { ...presentation, ledger };
@@ -4882,7 +5208,7 @@ function analyzeLeanRouteTimeline(indexedEvents, firstToolIndex) {
     if (ledger === null) {
       declarationsConsistent = false;
       for (const presentedRisk of presentedLeanRouteRiskTokens(
-        presentation.presentation,
+        visibleLines.join("\n"),
       )) {
         const rank = order.indexOf(presentedRisk);
         if (rank < highestRank) riskMonotonicObserved = false;
@@ -4936,6 +5262,19 @@ function analyzeLeanRouteTimeline(indexedEvents, firstToolIndex) {
       routeLedgerOccurrences > 0 && declarationsConsistent,
     route_ledger_occurrences: routeLedgerOccurrences,
   };
+}
+
+function structuredLeanRoutePacketLineCount(lines, start) {
+  if (
+    !/^\s*entrypoint:\s*leanpowers:route\b/iu.test(lines[start] ?? "") ||
+    !/^workflow:\s*(?:shape|build|debug|review|verify|ship|adapt)\s*$/iu.test(
+      lines[start + 1] ?? "",
+    ) ||
+    !/^risk:\s*(?:lean|standard|strict)\s*$/iu.test(lines[start + 2] ?? "")
+  ) {
+    return 1;
+  }
+  return /^required_gates:/iu.test(lines[start + 3] ?? "") ? 4 : 3;
 }
 
 function isLeanRouteDeclarationShape(line) {

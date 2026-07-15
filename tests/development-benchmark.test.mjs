@@ -217,6 +217,10 @@ function passingCapsuleStage(workflow = "build") {
     patch_targets_read_observed: true,
     grounded_candidate_paths: ["src/index.mjs", "test/index.test.mjs"],
     grounded_candidates_read_observed: true,
+    quality_grounded_candidates_read_observed: true,
+    quality_patch_targets_read_observed: true,
+    quality_pre_change_evidence_observed: true,
+    quality_read_observed: true,
     required_read_paths: ["src/index.mjs", "test/index.test.mjs"],
     validation_metadata_read_observed: true,
     reproduce_observed: workflow === "debug" ? true : null,
@@ -238,15 +242,20 @@ function passingCapsuleStage(workflow = "build") {
     patch_file_events: 2,
     patch_paths: ["src/index.mjs", "test/index.test.mjs"],
     implementation_patch_observed: true,
+    quality_patch_observed: true,
     test_patch_observed: true,
     multi_file_patch_observed: true,
     post_change_command_calls: 1,
     validation_observed: true,
+    quality_validation_observed: true,
+    quality_validation_mode: workflow === "debug" ? "combined" : "canonical",
     post_change_validation_mode: workflow === "debug" ? "combined" : "canonical",
     final_validation_budget_observed: true,
     capsule_green_path_observed: true,
     post_change_reproduction_replayed: workflow === "debug",
     post_validation_tool_calls: 0,
+    quality_post_validation_tool_calls: 0,
+    quality_ordinary_stop_observed: true,
     ordinary_stop_observed: true,
     protocol_observed: true,
   };
@@ -943,6 +952,26 @@ test("LeanPowers route declaration accepts compact semantic and legacy forms", (
       required_gates: "[current_evidence]",
     },
   );
+  assert.deepEqual(
+    parseLeanRouteLedger(
+      "Starting in workflow `leanpowers:route` with `OWNER=debug` and `RISK=standard`. I will inspect first.",
+    ),
+    {
+      workflow: "debug",
+      risk: "standard",
+      required_gates: "[current_evidence]",
+    },
+  );
+  for (const declaration of [
+    "Using leanpowers:route with owner=debug and risk=standard.",
+    "entrypoint: leanpowers:route\nworkflow: debug\nrisk: standard",
+  ]) {
+    assert.deepEqual(parseLeanRouteLedger(declaration), {
+      workflow: "debug",
+      risk: "standard",
+      required_gates: "[current_evidence]",
+    });
+  }
   for (const hiddenPrefix of [
     [
       "````text",
@@ -1097,7 +1126,6 @@ test("LeanPowers route declaration accepts compact semantic and legacy forms", (
   );
   for (const invalid of [
     "entrypoint: leanpowers:route\nworkflow: OWNER\nrisk: strict\nrequired_gates: [independent_review, current_evidence]",
-    "entrypoint: leanpowers:route\nworkflow: build\nrisk: strict",
     "- entrypoint: leanpowers:route\nworkflow: build\nrisk: strict\nrequired_gates: [independent_review, current_evidence]",
     "entrypoint: leanpowers:route\nworkflow: build\nrisk: strict\nrequired_gates: [current_evidence]",
     "entrypoint: leanpowers:route\nworkflow: build\nrisk: lean\nrequired_gates: [independent_review, current_evidence]",
@@ -1179,15 +1207,89 @@ test("LeanPowers route declaration accepts compact semantic and legacy forms", (
   ]) {
     assert.equal(parseLeanRouteLedger(invalid), null, invalid);
   }
+  for (const conflicting of [
+    "Starting in workflow leanpowers:route with OWNER=debug and RISK=standard. workflow is build; risk is strict.",
+    "Starting in workflow leanpowers:route with OWNER=debug and RISK=standard; required_gates=[]",
+    "leanpowers:route | workflow=debug | risk=standard\nworkflow is build; risk is strict",
+    "leanpowers:route | workflow=debug | risk=standard\nrequired_gates=[]",
+    "leanpowers:route | workflow=debug | risk=standard\nworkflow is not debug",
+    "leanpowers:route | workflow=debug | risk=standard\nrisk is not standard",
+    "leanpowers:route | workflow=debug | risk=standard\nrequired_gates are not [current_evidence]",
+    "leanpowers:route | workflow=debug | risk=standard\nworkflow: release",
+    "leanpowers:route | workflow=debug | risk=standard\nworkflow: build and risk: strict",
+    "leanpowers:route | workflow=debug | risk=standard\nrisk=high",
+    "leanpowers:route | workflow=debug | risk=standard\ngates=none",
+    "leanpowers:route | workflow=debug | risk=standard\nworkflow: \"release\"",
+    "leanpowers:route | workflow=debug | risk=standard\nrisk: \"high\"",
+    "leanpowers:route | workflow=debug | risk=standard\nworkflow:",
+    [
+      "entrypoint: leanpowers:route",
+      "workflow: debug",
+      "risk: standard",
+      "",
+      "workflow: build",
+      "risk: strict",
+    ].join("\n"),
+  ]) {
+    assert.equal(parseLeanRouteLedger(conflicting), null, conflicting);
+  }
+  const conflictingTrace = parseCodexResult(
+    capsuleTraceEvents({
+      routeDeclaration:
+        "leanpowers:route | workflow=debug | risk=standard\nworkflow is build; risk is strict",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(conflictingTrace.route_declarations_consistent, false);
+  assert.equal(conflictingTrace.highest_presented_risk, "strict");
+  const negatedTrace = parseCodexResult(
+    capsuleTraceEvents({
+      routeDeclaration:
+        "leanpowers:route | workflow=debug | risk=standard\nworkflow is not debug",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(negatedTrace.route_declarations_consistent, false);
+  const malformedStructuredTrace = parseCodexResult(
+    capsuleTraceEvents({
+      routeDeclaration:
+        "leanpowers:route | workflow=debug | risk=standard\nworkflow=bogus",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(malformedStructuredTrace.route_declarations_consistent, false);
+  const malformedQuotedTrace = parseCodexResult(
+    capsuleTraceEvents({
+      routeDeclaration:
+        "leanpowers:route | workflow=debug | risk=standard\nworkflow: \"release\"",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(malformedQuotedTrace.route_declarations_consistent, false);
+  const expectedSemanticRoute = {
+    workflow: "debug",
+    risk: "standard",
+    required_gates: "[current_evidence]",
+  };
+  for (const validWithProse of [
+    "leanpowers:route | workflow=debug | risk=standard\nThe workflow is now active.",
+    "Using leanpowers:route with owner=debug and risk=standard.\nThe risk is acceptable because the change is local.",
+    "leanpowers:route | workflow=debug | risk=standard\nI will inspect the existing workflow: source resolution.",
+    "leanpowers:route | workflow=debug | risk=standard\nworkflow is not build; risk is not strict",
+    "leanpowers:route | workflow=debug | risk=standard\nworkflow: debug and risk: standard",
+    "leanpowers:route | workflow=debug | risk=standard\nowner=debug and risk=standard and gates=[current_evidence]",
+  ]) {
+    assert.deepEqual(
+      parseLeanRouteLedger(validWithProse),
+      expectedSemanticRoute,
+      validWithProse,
+    );
+  }
   assert.deepEqual(
     parseLeanRouteLedger(
       "Invoking leanpowers:route to investigate a failed test | workflow=debug | risk=standard",
     ),
-    {
-      workflow: "debug",
-      risk: "standard",
-      required_gates: "[current_evidence]",
-    },
+    expectedSemanticRoute,
   );
 });
 
@@ -1310,6 +1412,9 @@ test("Codex JSONL usage and completion are independently parsed", () => {
       read_output_chars: 0,
       skills_observed: [],
       independent_review_pass_observed: false,
+      quality_independent_review_pass_observed: false,
+      quality_independent_review_context_observed: false,
+      quality_independent_review_current_validation_observed: false,
       independent_review_contract_verbatim_observed: false,
       independent_review_skill_invoked: false,
       independent_review_sole_wait_target_observed: false,
@@ -1396,6 +1501,9 @@ test("Codex trace records tool types and exact workflow file reads", () => {
     read_output_chars: 14,
     skills_observed: ["build"],
     independent_review_pass_observed: false,
+    quality_independent_review_pass_observed: false,
+    quality_independent_review_context_observed: false,
+    quality_independent_review_current_validation_observed: false,
     independent_review_contract_verbatim_observed: false,
     independent_review_skill_invoked: false,
     independent_review_sole_wait_target_observed: false,
@@ -1490,6 +1598,7 @@ test("Codex trace observes the complete debug capsule stage protocol", () => {
       capsule_green_path_observed: false,
       post_change_command_calls: 2,
       post_change_reproduction_replayed: true,
+      quality_validation_mode: "separate",
       post_change_validation_mode: "separate",
     },
   );
@@ -2162,6 +2271,64 @@ test("lean and standard capsules stop every tool after successful validation", (
   assert.equal(stage.protocol_observed, false);
 });
 
+test("quality validation uses the latest relevant test and reproduction evidence", () => {
+  const completedCommand = (command, exitCode = 0) => ({
+    type: "item.completed",
+    item: {
+      type: "command_execution",
+      command,
+      aggregated_output: exitCode === 0 ? "pass" : "fail",
+      exit_code: exitCode,
+      status: "completed",
+    },
+  });
+  const stageWithCommandAfterCombined = (command, exitCode) => {
+    const events = capsuleTraceEvents();
+    const combinedIndex = events.findIndex(({ item }) =>
+      item?.type === "command_execution" &&
+      String(item.command).includes(" && npm test")
+    );
+    assert.notEqual(combinedIndex, -1);
+    events.splice(combinedIndex + 1, 0, completedCommand(command, exitCode));
+    return parseCodexResult(
+      events.map(JSON.stringify).join("\n"),
+      capsuleTraceOptions("debug"),
+    ).workflow_trace.capsule_stage;
+  };
+
+  const fresherPassingTest = stageWithCommandAfterCombined("npm test", 0);
+  assert.equal(fresherPassingTest.quality_validation_observed, true);
+  assert.equal(fresherPassingTest.quality_validation_mode, "separate");
+
+  const fresherFailingTest = stageWithCommandAfterCombined("npm test", 1);
+  assert.equal(fresherFailingTest.quality_validation_observed, false);
+
+  const laterFailingReproduction = stageWithCommandAfterCombined(
+    capsuleReproductionContract.command,
+    1,
+  );
+  assert.equal(laterFailingReproduction.quality_validation_observed, false);
+
+  const separated = capsuleTraceEvents({ separatePostReproduction: true });
+  const reproductionIndex = separated.findLastIndex(({ item }) =>
+    item?.type === "command_execution" &&
+    item.command === capsuleReproductionContract.command
+  );
+  assert.notEqual(reproductionIndex, -1);
+  separated.splice(
+    reproductionIndex + 1,
+    0,
+    completedCommand("git status --short"),
+  );
+  const readBetweenEvidence = parseCodexResult(
+    separated.map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(readBetweenEvidence.validation_observed, false);
+  assert.equal(readBetweenEvidence.quality_validation_observed, true);
+  assert.equal(readBetweenEvidence.quality_validation_mode, "separate");
+});
+
 test("distilled live failures preserve quality-bearing stage truth", () => {
   const failedDiscoverThenNoncanonicalRetry = parseCodexResult(
     capsuleTraceEvents({
@@ -2218,6 +2385,120 @@ test("distilled live failures preserve quality-bearing stage truth", () => {
   assert.equal(oldChainedRetry.post_validation_tool_calls, 2);
   assert.equal(oldChainedRetry.ordinary_stop_observed, false);
   assert.equal(oldChainedRetry.protocol_observed, false);
+});
+
+test("distilled real r1 trace preserves quality and capsule budget", () => {
+  const canonicalRoute = [
+    "entrypoint: leanpowers:route",
+    "workflow: debug",
+    "risk: standard",
+    "required_gates: [current_evidence]",
+  ].join("\n");
+  const parsed = parseCodexResult(
+    capsuleTraceEvents({
+      finalMessage: canonicalRoute,
+      routeDeclaration:
+        "Starting in workflow `leanpowers:route` with `OWNER=debug` and `RISK=standard`. I will inspect first.",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  );
+  const stage = parsed.workflow_trace.capsule_stage;
+  assert.equal(stage.route_ledger_occurrences, 2);
+  assert.equal(stage.route_declarations_consistent, true);
+  assert.equal(stage.ledger_before_tools_observed, true);
+  assert.equal(stage.quality_pre_change_evidence_observed, true);
+  assert.equal(stage.quality_validation_observed, true);
+  assert.equal(stage.protocol_observed, true);
+  assert.deepEqual(evaluateWorkflowConformance({
+    activation_reported: true,
+    declared_risk: "standard",
+    declared_workflow: "debug",
+    expected_workflow: "debug",
+    risk_level: "standard",
+    route_ledger_reported: true,
+    telemetry: { workflow_trace: parsed.workflow_trace },
+    workflow: "leanpowers-0.2.0",
+  }), { status: "PASS", reasons: [] });
+});
+
+test("distilled real r2 trace preserves quality without claiming capsule budget", () => {
+  const events = capsuleTraceEvents({
+    discoverCommand: "rg -n -- 'cache|locale' src test",
+    extraPostCommand: true,
+    patchBatches: 2,
+  });
+  const readIndex = events.findIndex(({ item }) =>
+    item?.type === "command_execution" &&
+    String(item.command).includes("tail -n +1 --")
+  );
+  assert.notEqual(readIndex, -1);
+  events.splice(readIndex, 1, {
+    type: "item.completed",
+    item: {
+      type: "command_execution",
+      command: "head -n 200 -- src/index.mjs",
+      aggregated_output: "src/index.mjs contents",
+      exit_code: 0,
+      status: "completed",
+    },
+  });
+  const firstPatchCompletion = events.findIndex(({ type, item }) =>
+    type === "item.completed" && item?.type === "file_change"
+  );
+  assert.notEqual(firstPatchCompletion, -1);
+  events.splice(firstPatchCompletion + 1, 0, {
+    type: "item.completed",
+    item: {
+      type: "command_execution",
+      command: "sed -n '1,240p' test/index.test.mjs",
+      aggregated_output: "test/index.test.mjs contents",
+      exit_code: 0,
+      status: "completed",
+    },
+  });
+  const validationIndex = events.findIndex(({ item }) =>
+    item?.type === "command_execution" &&
+    String(item.command).includes(" && npm test")
+  );
+  assert.notEqual(validationIndex, -1);
+  events.splice(validationIndex, 0, {
+    type: "item.completed",
+    item: {
+      type: "command_execution",
+      command: "cat package.json",
+      aggregated_output: "package metadata",
+      exit_code: 0,
+      status: "completed",
+    },
+  });
+
+  const parsed = parseCodexResult(
+    events.map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  );
+  const stage = parsed.workflow_trace.capsule_stage;
+  assert.equal(stage.route_ledger_occurrences, 1);
+  assert.equal(stage.route_declarations_consistent, true);
+  assert.equal(stage.ledger_before_tools_observed, true);
+  assert.equal(stage.discover_observed, false);
+  assert.equal(stage.pre_change_stage_protocol_observed, false);
+  assert.equal(stage.quality_pre_change_evidence_observed, true);
+  assert.equal(stage.quality_patch_observed, true);
+  assert.equal(stage.validation_observed, false);
+  assert.equal(stage.quality_validation_observed, true);
+  assert.equal(stage.quality_post_validation_tool_calls, 1);
+  assert.equal(stage.quality_ordinary_stop_observed, false);
+  assert.equal(stage.protocol_observed, false);
+  assert.deepEqual(evaluateWorkflowConformance({
+    activation_reported: true,
+    declared_risk: "standard",
+    declared_workflow: "debug",
+    expected_workflow: "debug",
+    risk_level: "standard",
+    route_ledger_reported: true,
+    telemetry: { workflow_trace: parsed.workflow_trace },
+    workflow: "leanpowers-0.2.0",
+  }), { status: "PASS", reasons: [] });
 });
 
 test("capsule READ accepts one boundary-preserving tail batch and requires grounded paths", () => {
@@ -3164,6 +3445,7 @@ test("strict review protocol accepts remediated fresh cycles and rejects one-pro
 
   const valid = parse(buildTrace());
   assert.equal(valid.strict_review_protocol_observed, true);
+  assert.equal(valid.quality_independent_review_current_validation_observed, true);
   const compactBoundaryPacket = prompt.replace(
     `${contract}\n\nReviewer context:`,
     `${contract}\nReviewer context:`,
@@ -3191,7 +3473,7 @@ test("strict review protocol accepts remediated fresh cycles and rejects one-pro
   const compositePacket = strictReviewPrompt(contract, {
     testEvidence: `exit=0; command=${compositeValidation}`,
   });
-  assert.equal(parse([
+  const composite = parse([
     event({
       type: "file_change",
       changes: [{ path: "src/index.mjs", kind: "update" }],
@@ -3208,7 +3490,57 @@ test("strict review protocol accepts remediated fresh cycles and rejects one-pro
   ], new Map([["reviewer-composite", false]]), {
     expectedWorkflow: "debug",
     reproductionContract: capsuleReproductionContract,
-  }).strict_review_protocol_observed, true);
+  });
+  assert.equal(composite.strict_review_protocol_observed, true);
+  assert.equal(
+    composite.quality_independent_review_current_validation_observed,
+    true,
+  );
+  const staleGreenReview = [
+    event({
+      type: "file_change",
+      changes: [{ path: "src/index.mjs", kind: "update" }],
+      status: "completed",
+    }),
+    event({
+      type: "command_execution",
+      command: "npm test",
+      exit_code: 0,
+      status: "completed",
+    }),
+    event({
+      type: "command_execution",
+      command: "npm test",
+      exit_code: 1,
+      status: "completed",
+    }),
+    ...spawnEvents("spawn-stale", "reviewer-stale"),
+    ...waitEvents("wait-stale", "reviewer-stale", pass),
+  ];
+  const staleReview = parse(
+    staleGreenReview,
+    new Map([["reviewer-stale", false]]),
+  );
+  assert.equal(
+    staleReview.quality_independent_review_current_validation_observed,
+    false,
+  );
+  const laterRecovery = parse(
+    [
+      ...staleGreenReview,
+      event({
+        type: "command_execution",
+        command: "npm test",
+        exit_code: 0,
+        status: "completed",
+      }),
+    ],
+    new Map([["reviewer-stale", false]]),
+  );
+  assert.equal(
+    laterRecovery.quality_independent_review_current_validation_observed,
+    false,
+  );
   assert.equal(valid.duplicate_strict_collab_call_id_observed, false);
   assert.equal(valid.unexpected_strict_collab_tool_observed, false);
   assert.equal(valid.strict_review_cycle_count, 2);
@@ -3775,6 +4107,9 @@ test("workflow declaration and risk classification are separate conformance evid
         workflow_trace: {
           capsule_stage: passingCapsuleStage("build"),
           independent_review_pass_observed: true,
+          quality_independent_review_pass_observed: true,
+          quality_independent_review_context_observed: true,
+          quality_independent_review_current_validation_observed: true,
           independent_review_contract_verbatim_observed: true,
           independent_review_skill_invoked: true,
           independent_review_sole_wait_target_observed: true,
@@ -3813,6 +4148,9 @@ test("workflow declaration and risk classification are separate conformance evid
         workflow_trace: {
           capsule_stage: passingCapsuleStage("build"),
           independent_review_pass_observed: true,
+          quality_independent_review_pass_observed: true,
+          quality_independent_review_context_observed: true,
+          quality_independent_review_current_validation_observed: true,
           independent_review_contract_verbatim_observed: true,
           independent_review_skill_invoked: true,
           independent_review_sole_wait_target_observed: true,
@@ -3851,10 +4189,8 @@ test("workflow declaration and risk classification are separate conformance evid
       status: "FAIL",
       reasons: [
         "current passing independent review was not observed",
-        "passing reviewer did not explicitly invoke leanpowers:review",
-        "strict wait did not target only the designated reviewer",
+        "passing independent review lacked current validation context",
         "reviewer workspace mutation check was not observed",
-        "strict review cycles violated the one-reviewer protocol",
       ],
     },
   );
@@ -3875,10 +4211,8 @@ test("workflow declaration and risk classification are separate conformance evid
       status: "FAIL",
       reasons: [
         "current passing independent review was not observed",
-        "passing reviewer did not explicitly invoke leanpowers:review",
-        "strict wait did not target only the designated reviewer",
+        "passing independent review lacked current validation context",
         "reviewer workspace mutation check was not observed",
-        "strict review cycles violated the one-reviewer protocol",
       ],
     },
   );
@@ -3895,6 +4229,9 @@ test("workflow declaration and risk classification are separate conformance evid
         workflow_trace: {
           capsule_stage: passingCapsuleStage("debug"),
           independent_review_pass_observed: true,
+          quality_independent_review_pass_observed: true,
+          quality_independent_review_context_observed: true,
+          quality_independent_review_current_validation_observed: true,
           independent_review_contract_verbatim_observed: true,
           independent_review_skill_invoked: true,
           independent_review_sole_wait_target_observed: true,
@@ -3946,6 +4283,9 @@ test("workflow declaration and risk classification are separate conformance evid
       telemetry: {
         workflow_trace: {
           independent_review_pass_observed: true,
+          quality_independent_review_pass_observed: true,
+          quality_independent_review_context_observed: false,
+          quality_independent_review_current_validation_observed: true,
           independent_review_contract_verbatim_observed: false,
           independent_review_skill_invoked: true,
           independent_review_sole_wait_target_observed: true,
@@ -3961,6 +4301,9 @@ test("workflow declaration and risk classification are separate conformance evid
   for (const [workflowTrace, expectedReason] of [
     [{
       independent_review_pass_observed: true,
+      quality_independent_review_pass_observed: true,
+      quality_independent_review_context_observed: true,
+      quality_independent_review_current_validation_observed: true,
       independent_review_contract_verbatim_observed: true,
       independent_review_skill_invoked: false,
       independent_review_sole_wait_target_observed: true,
@@ -3968,9 +4311,12 @@ test("workflow declaration and risk classification are separate conformance evid
       strict_review_protocol_observed: true,
       post_change_spawn_calls: 1,
       post_change_wait_calls: 1,
-    }, "passing reviewer did not explicitly invoke leanpowers:review"],
+    }, null],
     [{
       independent_review_pass_observed: true,
+      quality_independent_review_pass_observed: true,
+      quality_independent_review_context_observed: true,
+      quality_independent_review_current_validation_observed: true,
       independent_review_contract_verbatim_observed: true,
       independent_review_skill_invoked: true,
       independent_review_sole_wait_target_observed: true,
@@ -3978,9 +4324,12 @@ test("workflow declaration and risk classification are separate conformance evid
       strict_review_protocol_observed: false,
       post_change_spawn_calls: 2,
       post_change_wait_calls: 1,
-    }, "strict review cycles violated the one-reviewer protocol"],
+    }, null],
     [{
       independent_review_pass_observed: true,
+      quality_independent_review_pass_observed: true,
+      quality_independent_review_context_observed: true,
+      quality_independent_review_current_validation_observed: true,
       independent_review_contract_verbatim_observed: true,
       independent_review_skill_invoked: true,
       independent_review_sole_wait_target_observed: false,
@@ -3988,9 +4337,12 @@ test("workflow declaration and risk classification are separate conformance evid
       strict_review_protocol_observed: true,
       post_change_spawn_calls: 1,
       post_change_wait_calls: 1,
-    }, "strict wait did not target only the designated reviewer"],
+    }, null],
     [{
       independent_review_pass_observed: true,
+      quality_independent_review_pass_observed: true,
+      quality_independent_review_context_observed: true,
+      quality_independent_review_current_validation_observed: true,
       independent_review_contract_verbatim_observed: true,
       independent_review_skill_invoked: true,
       independent_review_sole_wait_target_observed: true,
@@ -4001,6 +4353,9 @@ test("workflow declaration and risk classification are separate conformance evid
     }, "reviewer workspace mutation check was not observed"],
     [{
       independent_review_pass_observed: true,
+      quality_independent_review_pass_observed: true,
+      quality_independent_review_context_observed: true,
+      quality_independent_review_current_validation_observed: true,
       independent_review_contract_verbatim_observed: true,
       independent_review_skill_invoked: true,
       independent_review_sole_wait_target_observed: true,
@@ -4026,7 +4381,12 @@ test("workflow declaration and risk classification are separate conformance evid
         },
       },
     });
-    assert.deepEqual(conformance, { status: "FAIL", reasons: [expectedReason] });
+    assert.deepEqual(
+      conformance,
+      expectedReason === null
+        ? { status: "PASS", reasons: [] }
+        : { status: "FAIL", reasons: [expectedReason] },
+    );
   }
 });
 
@@ -4052,35 +4412,41 @@ test("capsule stage telemetry independently gates workflow conformance", () => {
     [{ risk_monotonic_observed: false }, "route risk was downgraded after an upgrade"],
     [{ ledger_before_tools_observed: false }, "route ledger was not emitted before task tools"],
     [{ ledger_keys_after_initial_observed: true }, null],
-    [{ workflow_read_calls: 1 }, "capsule reloaded a Skill or reference"],
+    [{ workflow_read_calls: 1 }, null],
     [{
       pre_change_command_calls: 3,
       stage_retry_calls: 1,
       stage_attempts: { discover: 2, read: 1, reproduce: 0 },
     }, null],
-    [{ pre_change_stage_protocol_observed: false }, "quality-bearing pre-change stages with bounded evidence-backed retries were not observed"],
-    [{ discover_observed: false }, "content-aware DISCOVER was not observed"],
-    [{ read_observed: false }, "batched READ was not observed"],
-    [{ validation_metadata_read_observed: false }, "READ omitted discovered validation metadata"],
-    [{ patch_targets_read_observed: false }, "READ omitted discovered files that were later changed"],
-    [{ grounded_candidates_read_observed: false }, "READ omitted grounded implementation, caller, or test candidates"],
-    [{ pre_patch_clause_test_ledger_observed: false }, "pre-PATCH clause-to-test ledger was not observed"],
+    [{ pre_change_stage_protocol_observed: false }, null],
+    [{ discover_observed: false }, null],
+    [{ read_observed: false }, null],
+    [{ validation_metadata_read_observed: false }, null],
+    [{ patch_targets_read_observed: false }, null],
+    [{ grounded_candidates_read_observed: false }, null],
+    [{ quality_grounded_candidates_read_observed: false }, null],
+    [{ pre_patch_clause_test_ledger_observed: false }, null],
     [{ clause_coverage_observed: false }, null],
     [{ pre_patch_counterexample_observed: false }, null],
-    [{ post_patch_clause_test_ledger_observed: true }, "clause-to-test ledger was repeated after PATCH"],
-    [{ patch_batches: 2 }, "one contiguous multi-file PATCH batch was not observed"],
-    [{ implementation_patch_observed: false }, "one contiguous multi-file PATCH batch was not observed"],
-    [{ test_patch_observed: false }, "one contiguous multi-file PATCH batch was not observed"],
-    [{ multi_file_patch_observed: false }, "one contiguous multi-file PATCH batch was not observed"],
+    [{ post_patch_clause_test_ledger_observed: true }, null],
+    [{ patch_batches: 2 }, null],
+    [{ implementation_patch_observed: false }, null],
+    [{ test_patch_observed: false }, null],
+    [{ multi_file_patch_observed: false }, null],
     [{ post_change_command_calls: 2 }, null],
     [{
       validation_observed: false,
       ordinary_stop_observed: false,
-    }, "supported successful post-edit validation was not observed"],
+    }, null],
     [{
       post_validation_tool_calls: 1,
       ordinary_stop_observed: false,
-    }, "lean or standard capsule continued tooling after successful validation"],
+    }, null],
+    [{ quality_pre_change_evidence_observed: false }, "ordered pre-change source and reproduction evidence was not observed"],
+    [{ quality_read_observed: false }, "pre-change source READ evidence was not observed"],
+    [{ quality_patch_targets_read_observed: false }, "READ omitted discovered files that were later changed"],
+    [{ quality_patch_observed: false }, null],
+    [{ quality_validation_observed: false }, "supported successful post-edit validation was not observed"],
   ];
   for (const [mutation, expectedReason] of mutations) {
     const run = structuredClone(passing);
