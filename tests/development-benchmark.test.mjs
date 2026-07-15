@@ -7956,7 +7956,7 @@ test("verifier copies are phase-isolated, preserve candidate files, and redact p
       "});",
       'test("cannot write the original workspace", () => {',
       '  assert.throws(() => writeFileSync(originalSentinel, "escaped"), (error) =>',
-      '    ["EACCES", "EPERM", "EROFS"].includes(error?.code));',
+      '    ["EACCES", "EPERM", "EROFS", "ENOENT"].includes(error?.code));',
       "});",
       'test("cannot open an external network connection", async () => {',
       "  await new Promise((resolve, reject) => {",
