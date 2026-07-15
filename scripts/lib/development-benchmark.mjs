@@ -5577,16 +5577,16 @@ export function parseLeanRouteLedger(message) {
     return null;
   }
   const workflowMatches = [...routeAndFields.matchAll(
-    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|\b(?:and|per)\b|$))/giu,
+    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|\b(?:and|based|per)\b|$))/giu,
   )];
   const riskMatches = [...routeAndFields.matchAll(
-    /\brisk\s*(?:[:=]|\bis\b)\s*`?(lean|standard|strict)`?(?=\s*(?:[|;,.]|\b(?:and|per)\b|$))/giu,
+    /\brisk\s*(?:[:=]|\bis\b)\s*`?(lean|standard|strict)`?(?=\s*(?:[|;,.]|\b(?:and|based|per)\b|$))/giu,
   )];
   const workflowPresentations = [...routeAndFields.matchAll(
-    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(?!not\b|never\b)([\p{L}][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|\b(?:and|per)\b|$))/giu,
+    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(?!not\b|never\b)([\p{L}][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|\b(?:and|based|per)\b|$))/giu,
   )];
   const riskPresentations = [...routeAndFields.matchAll(
-    /\brisk\s*(?:[:=]|\bis\b)\s*`?(?!not\b|never\b)([\p{L}][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|\b(?:and|per)\b|$))/giu,
+    /\brisk\s*(?:[:=]|\bis\b)\s*`?(?!not\b|never\b)([\p{L}][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|\b(?:and|based|per)\b|$))/giu,
   )];
   const workflows = new Set(workflowMatches.map(
     (match) => match[1].toLocaleLowerCase("en-US"),
@@ -5595,10 +5595,10 @@ export function parseLeanRouteLedger(message) {
     (match) => match[1].toLocaleLowerCase("en-US"),
   ));
   const structuredWorkflowMatches = [...routeFieldText.matchAll(
-    /\b(?:workflow|owner)\s*[:=]\s*`?(?:shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|\b(?:and|per)\b|$))/giu,
+    /\b(?:workflow|owner)\s*[:=]\s*`?(?:shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|\b(?:and|based|per)\b|$))/giu,
   )];
   const structuredRiskMatches = [...routeFieldText.matchAll(
-    /\brisk\s*[:=]\s*`?(?:lean|standard|strict)`?(?=\s*(?:[|;,.]|\b(?:and|per)\b|$))/giu,
+    /\brisk\s*[:=]\s*`?(?:lean|standard|strict)`?(?=\s*(?:[|;,.]|\b(?:and|based|per)\b|$))/giu,
   )];
   const structuredWorkflowFields = structuredFields.filter((field) =>
     field === "workflow" || field === "owner"
@@ -5775,7 +5775,7 @@ function isAssertiveLeanRoutePrefix(value) {
     .replace(/[*_`]/gu, "")
     .trim()
     .replace(/\s+/gu, " ");
-  return /^(?:leanpowers:route|(?:(?:routing|route) selected|selected|using|following|invoking|activated|activating|entrypoint)\s*:?\s*leanpowers:route|starting (?:in workflow\s+|with (?:the\s+)?|using (?:the\s+)?)leanpowers:route|running in (?:the\s+)?leanpowers:route|I(?:'m|’m| am)?\s+(?:use|using|follow|following|select|selected|activate|activated|invoke|invoking)\s+leanpowers:route)$/iu
+  return /^(?:leanpowers:route|workflow decision\s*:\s*leanpowers:route|(?:(?:routing|route) selected|selected|using|following|invoking|activated|activating|entrypoint)\s*:?\s*leanpowers:route|starting (?:in workflow\s+|with (?:the\s+)?|using (?:the\s+)?)leanpowers:route|running in (?:the\s+)?leanpowers:route|I(?:'m|’m| am)?\s+(?:use|using|follow|following|select|selected|activate|activated|invoke|invoking)\s+leanpowers:route)$/iu
     .test(normalized);
 }
 

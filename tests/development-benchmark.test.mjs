@@ -790,7 +790,11 @@ test("development pilot declares three executable risk-calibrated scenario class
   assert.match(cacheTask, /vary the locale for one template/i);
   assert.match(cacheTask, /vary the template name for one locale/i);
   assert.match(cacheTask, /vary the component boundary/i);
-  assert.match(cacheTask, /identical concatenated text/i);
+  assert.match(
+    cacheTask,
+    /nameA \+ normalizedLocaleA === nameB \+ normalizedLocaleB/i,
+  );
+  assert.match(cacheTask, /direct string concatenation with no inserted separator/i);
   assert.deepEqual(
     suite.cases.find(({ id }) => id === "localized-template-cache")
       ?.artifact_regression_gates.map(({ id, policy, mutations }) => ({
@@ -1392,9 +1396,20 @@ test("LeanPowers route declaration accepts compact semantic and legacy forms", (
       required_gates: "[current_evidence]",
     },
   );
+  assert.deepEqual(
+    parseLeanRouteLedger(
+      "Workflow decision: `leanpowers:route` with `OWNER=debug` and `RISK=standard` based on user-provided reproducible/root-cause requirement.",
+    ),
+    {
+      workflow: "debug",
+      risk: "standard",
+      required_gates: "[current_evidence]",
+    },
+  );
   for (const nonActivation of [
     "Running in the `leanpowers:route` documentation with `OWNER=debug` and `RISK=standard` per the example.",
     "Running in the `leanpowers:route` example with `OWNER=debug` and `RISK=standard` per the documentation.",
+    "Workflow decision example: `leanpowers:route` with `OWNER=debug` and `RISK=standard` based on documentation.",
   ]) {
     assert.equal(parseLeanRouteLedger(nonActivation), null, nonActivation);
   }
