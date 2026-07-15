@@ -17,6 +17,7 @@ import {
   assertFrozenHeldoutRevisions,
   assertFrozenHeldoutSelection,
   buildCodexArgs,
+  buildCodexPermissionSelectionArgs,
   caseSnapshotContract,
   fingerprintBenchmarkWorkspace,
   loadDevelopmentSuite,
@@ -353,6 +354,14 @@ test("held-out Codex execution uses a strict minimal-read permissions profile", 
   );
   assert.equal(args.includes("--sandbox"), false);
   assert.equal(args.includes("workspace-write"), false);
+
+  const selectionArgs = buildCodexPermissionSelectionArgs();
+  assert.deepEqual(selectionArgs.slice(0, 2), [
+    "--profile",
+    HELDOUT_PERMISSION_PROFILE,
+  ]);
+  assert.deepEqual(selectionArgs.slice(2, 4), ["debug", "prompt-input"]);
+  assert.equal(selectionArgs.includes("--permissions-profile"), false);
 });
 
 test("held-out execution rejects every frozen-condition override", async () => {

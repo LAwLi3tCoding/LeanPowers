@@ -728,6 +728,16 @@ export function buildCodexArgs({
   return args;
 }
 
+export function buildCodexPermissionSelectionArgs() {
+  return [
+    "--profile",
+    HELDOUT_PERMISSION_PROFILE,
+    "debug",
+    "prompt-input",
+    "permission-profile-selection-probe",
+  ];
+}
+
 function heldoutAgentEnvironment(home, overrides = {}) {
   return benchmarkEnvironment(home, {
     HOME: path.join(home, "tmp", "home"),
@@ -810,6 +820,39 @@ export async function preflightHeldoutAgentReadIsolation({
       "}",
     ].join("\n");
     const env = heldoutAgentEnvironment(runHome, toolchain.environment);
+    const selectionProbe = await runProcess(
+      codexExecutable,
+      buildCodexPermissionSelectionArgs(),
+      { cwd: workspace, env, maxOutputBytes: 2_000_000, timeoutMs: 60_000 },
+    );
+    let selectionText = "";
+    try {
+      const promptInput = JSON.parse(selectionProbe.stdout);
+      selectionText = promptInput.flatMap((message) => message.content ?? [])
+        .filter(({ type, text: inputText }) =>
+          type === "input_text" && typeof inputText === "string"
+        )
+        .map(({ text: inputText }) => inputText)
+        .join("\n");
+    } catch {
+      selectionText = "";
+    }
+    const canonicalWorkspace = await realpath(workspace);
+    const canonicalScratch = await realpath(path.join(runHome, "tmp"));
+    const canonicalAuthFile = await realpath(path.join(runHome, "auth.json"));
+    if (
+      selectionProbe.exitCode !== 0 ||
+      selectionProbe.timedOut ||
+      selectionProbe.signal !== null ||
+      selectionProbe.outputLimitExceeded ||
+      !selectionText.includes("Network access is restricted.") ||
+      !selectionText.includes("Denied filesystem reads") ||
+      !selectionText.includes(canonicalWorkspace) ||
+      !selectionText.includes(canonicalScratch) ||
+      !selectionText.includes(canonicalAuthFile)
+    ) {
+      throw new Error("Held-out default-permissions selection probe failed");
+    }
     const runSandboxed = (command, args) => runProcess(
       codexExecutable,
       [

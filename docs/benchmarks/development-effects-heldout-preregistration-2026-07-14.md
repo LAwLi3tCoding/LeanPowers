@@ -21,7 +21,7 @@ Superpowers 6.1.1 is the upstream inspiration and comparison baseline. The purpo
 | Superpowers revision | `d884ae04edebef577e82ff7c4e143debd0bbec99` (`v6.1.1`) |
 | LeanPowers revision | the clean commit containing this frozen suite; the runner must record the same immutable revision for every run |
 
-The paired prompt, disposable workspace snapshot, hidden verifier, and semantic fault families are identical for both workflows. Each workflow is activated through its own installed top-level entrypoint before the shared task text. Before any live model task starts, the runner must fail closed unless a sandbox probe proves that Node, Git, workspace reads and writes, and installed skill reads work while the evaluator sentinel, authentication file, and hidden verifier remain unreadable to model-generated commands.
+The paired prompt, disposable workspace snapshot, hidden verifier, and semantic fault families are identical for both workflows. Each workflow is activated through its own installed top-level entrypoint before the shared task text. Before any live model task starts, the runner must fail closed unless (1) Codex's model-visible prompt rendered through the same `--profile benchmark` default-selection path reports the frozen workspace, scratch, network, and auth-denial boundary, and (2) a sandbox enforcement probe proves that Node, npm, Git, workspace reads and writes, and installed skill reads work while the evaluator sentinel, authentication file, and hidden verifier remain unreadable to model-generated commands.
 
 ## Frozen manifests
 
