@@ -1,10 +1,12 @@
 import { isDeepStrictEqual } from "node:util";
 
 import {
+  adjudicateDevelopmentResult,
   caseSnapshotContract,
-  evaluateRunOutcome,
-  evaluateWorkflowConformance,
+  hasDevelopmentInfrastructureFailure,
   renderDevelopmentReport,
+  validDevelopmentTokenTelemetry,
+  validDevelopmentWallTelemetry,
 } from "./development-benchmark.mjs";
 
 const LEAN_WORKFLOW = "leanpowers-0.2.0";
@@ -75,13 +77,15 @@ const LEGACY_SUITE = {
   ],
 };
 
-export function evaluateDevelopmentResultGate(result, { report, suite } = {}) {
+export function adjudicateDevelopmentResultGate(result, { suite } = {}) {
   const reasons = new Set();
   const advisories = new Set();
   const object = plainObject(result) ? result : {};
+  const adjudication = adjudicateDevelopmentResult(object);
   const contract = normalizeSuiteContract(suite ?? LEGACY_SUITE, reasons);
   const cases = Array.isArray(object.cases) ? object.cases : [];
   const runs = Array.isArray(object.runs) ? object.runs : [];
+  const adjudicatedRuns = adjudication.runs;
   const pairs = object.paired?.all_pairs;
   const tokenResult = object.token_target_result;
   const requiredPairCount = contract.cases.length * contract.repetitions;
@@ -94,13 +98,6 @@ export function evaluateDevelopmentResultGate(result, { report, suite } = {}) {
   if (object.completion !== "complete") reasons.add("completion");
   if (object.frozen_run_contract_verified !== true) reasons.add("frozen-contract");
   if (object.confirmatory_eligible !== true) reasons.add("confirmatory-eligibility");
-  if (
-    contract.report_contract === "categorized-exact-render-v1" &&
-    !matchesCanonicalReport(object, report)
-  ) {
-    reasons.add("report-artifact");
-  }
-
   const expectedCases = contract.cases.map(({ snapshot: _snapshot, ...metadata }) => metadata);
   if (!isDeepStrictEqual(cases, expectedCases)) {
     const observedIds = cases.map((entry) => entry?.id);
@@ -136,18 +133,20 @@ export function evaluateDevelopmentResultGate(result, { report, suite } = {}) {
   )) {
     reasons.add("run-integrity");
   }
-  if (runs.some(hasInfrastructureFailure)) reasons.add("infrastructure-failure");
+  if (runs.some(hasDevelopmentInfrastructureFailure)) {
+    reasons.add("infrastructure-failure");
+  }
 
-  for (const run of runs) {
+  for (const [index, run] of runs.entries()) {
     if (!plainObject(run)) {
       reasons.add("run-shape");
       reasons.add("task-outcome");
       continue;
     }
-    let recomputedOutcome;
-    try {
-      recomputedOutcome = evaluateRunOutcome(run);
-    } catch {
+    const adjudicatedRun = adjudicatedRuns[index];
+    if (adjudicatedRun?._malformed_run === true) reasons.add("run-shape");
+    const recomputedOutcome = adjudicatedRun?.outcome;
+    if (!plainObject(recomputedOutcome)) {
       reasons.add("run-shape");
       reasons.add("task-outcome");
       continue;
@@ -159,10 +158,8 @@ export function evaluateDevelopmentResultGate(result, { report, suite } = {}) {
       reasons.add("task-outcome");
     }
     if (run?.workflow === LEAN_WORKFLOW) {
-      let recomputedConformance;
-      try {
-        recomputedConformance = evaluateWorkflowConformance(run);
-      } catch {
+      const recomputedConformance = adjudicatedRun?.workflow_conformance;
+      if (!plainObject(recomputedConformance)) {
         reasons.add("run-shape");
         reasons.add("lean-conformance");
         continue;
@@ -179,7 +176,7 @@ export function evaluateDevelopmentResultGate(result, { report, suite } = {}) {
     }
   }
 
-  const leanRuns = runs.filter((run) => run?.workflow === LEAN_WORKFLOW);
+  const leanRuns = adjudicatedRuns.filter((run) => run?.workflow === LEAN_WORKFLOW);
   if (
     leanRuns.length !== requiredPairCount ||
     leanRuns.some((run) => run?.workflow_conformance?.status !== "PASS")
@@ -200,7 +197,7 @@ export function evaluateDevelopmentResultGate(result, { report, suite } = {}) {
   }
 
   const telemetryValid = runs.length === requiredPairCount * 2 &&
-    runs.every((run) => validTokenTelemetry(run?.telemetry?.tokens));
+    runs.every((run) => validDevelopmentTokenTelemetry(run?.telemetry?.tokens));
   if (!telemetryValid) reasons.add("token-telemetry");
   const recomputedTokens = telemetryValid ? aggregateTokenTelemetry(runs) : null;
   const observedTokenShare = finiteNumber(tokenResult?.observed_share_pct);
@@ -247,20 +244,7 @@ export function evaluateDevelopmentResultGate(result, { report, suite } = {}) {
   }
 
   const reportedWallReduction = finiteNumber(pairs?.median_wall_reduction_pct);
-  const runWallTelemetryValid = runs.every((run) =>
-    Number.isFinite(run?.wall_seconds) &&
-    run.wall_seconds > 0 &&
-    Number.isFinite(run?.final_attempt_wall_seconds) &&
-    run.final_attempt_wall_seconds === run.wall_seconds &&
-    Number.isSafeInteger(run?.attempt_count) &&
-    run.attempt_count >= 1 &&
-    run.attempt_count <= 2 &&
-    Number.isSafeInteger(run?.capacity_retry_count) &&
-    run.capacity_retry_count === run.attempt_count - 1 &&
-    Number.isFinite(run?.infrastructure_retry_wall_seconds) &&
-    run.infrastructure_retry_wall_seconds >= 0 &&
-    (run.attempt_count !== 1 || run.infrastructure_retry_wall_seconds === 0)
-  );
+  const runWallTelemetryValid = runs.every(validDevelopmentWallTelemetry);
   const recomputedWallReduction = runWallTelemetryValid
     ? aggregateMedianWallReduction(runs, contract)
     : null;
@@ -279,7 +263,7 @@ export function evaluateDevelopmentResultGate(result, { report, suite } = {}) {
     advisories.add("wall-not-improved");
   }
 
-  return {
+  const verdict = {
     status: reasons.size > 0
       ? "FAIL"
       : tokenTargetAssessment === "near-target" ? "REVIEW" : "PASS",
@@ -295,6 +279,23 @@ export function evaluateDevelopmentResultGate(result, { report, suite } = {}) {
       median_wall_reduction_pct: recomputedWallReduction,
     },
   };
+  return verdict;
+}
+
+export function evaluateDevelopmentResultGate(result, { report, suite } = {}) {
+  const verdict = adjudicateDevelopmentResultGate(result, { suite });
+  const source = suite ?? LEGACY_SUITE;
+  if (source?.report_contract !== "categorized-exact-render-v1") return verdict;
+  const object = plainObject(result) ? result : {};
+  const adjudication = adjudicateDevelopmentResult(object);
+  if (!matchesCanonicalReport(object, report, { adjudication, gateVerdict: verdict })) {
+    return {
+      ...verdict,
+      status: "FAIL",
+      reasons: [...new Set([...verdict.reasons, "report-artifact"])],
+    };
+  }
+  return verdict;
 }
 
 function normalizeSuiteContract(source, reasons) {
@@ -439,23 +440,6 @@ function validateMatrix(runs, contract, repetitions, reasons) {
   }
 }
 
-function validTokenTelemetry(tokens) {
-  return plainObject(tokens) &&
-    tokens.telemetry_complete === true &&
-    nonNegativeSafeInteger(tokens.input) &&
-    nonNegativeSafeInteger(tokens.cached_input) &&
-    tokens.cached_input <= tokens.input &&
-    nonNegativeSafeInteger(tokens.output) &&
-    Number.isSafeInteger(tokens.total) &&
-    tokens.total > 0 &&
-    tokens.total === tokens.input + tokens.output &&
-    Number.isSafeInteger(tokens.uncached_plus_output) &&
-    tokens.uncached_plus_output ===
-      tokens.input - tokens.cached_input + tokens.output &&
-    (tokens.reasoning_output === null || tokens.reasoning_output === undefined ||
-      nonNegativeSafeInteger(tokens.reasoning_output));
-}
-
 function aggregateTokenTelemetry(runs) {
   const baseline = safeTokenSum(runs, SUPERPOWERS_WORKFLOW);
   const candidate = safeTokenSum(runs, LEAN_WORKFLOW);
@@ -505,29 +489,6 @@ function aggregateMedianWallReduction(runs, contract) {
   return Math.round(value * 10) / 10;
 }
 
-function hasInfrastructureFailure(run) {
-  return run?.capacity_retry_exhausted === true ||
-    markedFailure(run?.capacity_failure) ||
-    markedFailure(run?.infrastructure_failure) ||
-    ["capacity", "capacity-failure", "infrastructure-failure"].includes(
-      run?.final_attempt_failure_kind,
-    ) ||
-    ["capacity-failure", "infrastructure-failure", "failed"].includes(
-      run?.final_attempt_status,
-    ) ||
-    ["capacity-failure", "infrastructure-failure", "failed"].includes(
-      run?.infrastructure_status,
-    );
-}
-
-function markedFailure(value) {
-  return value !== undefined && value !== null && value !== false;
-}
-
-function nonNegativeSafeInteger(value) {
-  return Number.isSafeInteger(value) && value >= 0;
-}
-
 function nearlyEqual(left, right) {
   return finiteNumber(left) !== null && finiteNumber(right) !== null &&
     Math.abs(left - right) < 1e-9;
@@ -541,10 +502,10 @@ function finiteNumber(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function matchesCanonicalReport(result, report) {
+function matchesCanonicalReport(result, report, { adjudication, gateVerdict }) {
   if (typeof report !== "string") return false;
   try {
-    return report === renderDevelopmentReport(result);
+    return report === renderDevelopmentReport(result, { adjudication, gateVerdict });
   } catch {
     return false;
   }

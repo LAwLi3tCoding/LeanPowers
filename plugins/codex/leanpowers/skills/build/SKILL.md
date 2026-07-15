@@ -7,7 +7,7 @@ description: Use when a software change has an executable scope and needs implem
 
 Implement one delivery slice at a time and keep the feedback loop proportional to its risk. Correctness comes from early evidence, not end-loaded testing.
 
-Inherit the routing ledger. If entered directly or the ledger is missing, read the [runtime contract](../../references/runtime-contract.md) once; do not reload it after transitions.
+Inherit the ledger. Routed entry makes the route capsule sole tool-order/budget authority; this Skill adds acceptance reasoning/output only. Without a ledger, read the [runtime contract](../../references/runtime-contract.md) once and use the direct-entry loop.
 
 If project learning is enabled, use `adapt` to query once at entry under the [learning policy](../../references/learning-policy.md) with this workflow, relevant paths, and tags; add at most three behavior-changing advisory rules to the task brief. Send explicit downstream outcome, correction, confirmation, or durable-preference feedback to `adapt`.
 
@@ -15,7 +15,7 @@ If project learning is enabled, use `adapt` to query once at entry under the [le
 
 Start only when goal, declared scope, acceptance evidence, and constraints are executable. If they are materially unclear, use `shape`. If the cause of a failure is unknown, use `debug`.
 
-## Slice loop
+## Direct-entry slice loop
 
 1. Batch-inspect the affected implementation and existing tests. Before editing, extract literal `must`, `only`, `exact`, `preserve`, and `reject` clauses plus their positive/negative boundaries. Preserve unrelated user changes.
 2. Choose the smallest slice that produces an independently useful outcome.

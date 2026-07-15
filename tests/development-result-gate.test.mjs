@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  adjudicateDevelopmentResult,
   caseSnapshotContract,
   evaluateRunOutcome,
   evaluateWorkflowConformance,
@@ -14,7 +15,10 @@ import {
   renderDevelopmentReport,
   summarizeArtifactRegressionEvidence,
 } from "../scripts/lib/development-benchmark.mjs";
-import { evaluateDevelopmentResultGate } from "../scripts/lib/development-result-gate.mjs";
+import {
+  adjudicateDevelopmentResultGate,
+  evaluateDevelopmentResultGate,
+} from "../scripts/lib/development-result-gate.mjs";
 
 const suitePath = new URL(
   "../evals/development-effects/performance-confirmatory-v2-suite.json",
@@ -453,6 +457,94 @@ test("categorized exact report contract requires the canonical rendered artifact
   );
 });
 
+test("canonical report renders the same recomputed decision and conformance causes as the gate", () => {
+  const result = passingResult();
+  const suite = structuredClone(frozenSuite);
+  suite.report_contract = "categorized-exact-render-v1";
+  const lean = result.runs.find(({ workflow }) => workflow === "leanpowers-0.2.0");
+  lean.telemetry.workflow_trace.capsule_stage.patch_protocol_observed = false;
+
+  const preliminary = adjudicateDevelopmentResultGate(result, { suite });
+  const report = renderDevelopmentReport(result, { gateVerdict: preliminary });
+  const final = evaluateDevelopmentResultGate(result, { report, suite });
+
+  assert.equal(preliminary.status, "FAIL");
+  assert.equal(final.status, "FAIL");
+  assert.ok(!final.reasons.includes("report-artifact"), JSON.stringify(final));
+  assert.match(report, /## Machine decision/u);
+  assert.match(report, /Status: \*\*FAIL\*\*/u);
+  assert.match(report, new RegExp(lean.run_id, "u"));
+  assert.match(report, /ordered TEST-PATCH, RED, and CODE-PATCH protocol was not observed/u);
+});
+
+test("canonical report explains a near-target REVIEW with category and pair token sources", () => {
+  const result = passingResult();
+  const suite = structuredClone(frozenSuite);
+  suite.report_contract = "categorized-exact-render-v1";
+  setCandidateTokenShare(result, 62);
+  for (const run of result.runs) {
+    run.telemetry.tool_calls = 2;
+    run.telemetry.tool_calls_by_type = { command_execution: 2 };
+    run.telemetry.agent_message_items = 3;
+  }
+  const preliminary = adjudicateDevelopmentResultGate(result, { suite });
+  const report = renderDevelopmentReport(result, { gateVerdict: preliminary });
+  const final = evaluateDevelopmentResultGate(result, { report, suite });
+
+  assert.equal(preliminary.status, "REVIEW");
+  assert.equal(final.status, "REVIEW");
+  assert.match(report, /## REVIEW explanation/u);
+  assert.match(report, /Category token sources/u);
+  assert.match(report, /Pair token excess/u);
+  assert.match(report, /Cached excess/u);
+  assert.match(report, /Fresh excess/u);
+  assert.match(report, /command_execution:2/u);
+  assert.match(report, /Agent messages/iu);
+});
+
+test("telemetry gaps invalidate the affected pair in the canonical report", () => {
+  const result = passingResult();
+  const suite = structuredClone(frozenSuite);
+  suite.report_contract = "categorized-exact-render-v1";
+  result.runs[0].telemetry.tokens.telemetry_complete = false;
+  const adjudication = adjudicateDevelopmentResult(result);
+  assert.equal(adjudication.pair_validity.invalid_pair_count, 1);
+  assert.equal(adjudication.paired.all_pairs.count, 5);
+  assert.equal(adjudication.paired.all_pairs.required_pair_count, 6);
+  assert.equal(adjudication.token_target_result.eligible, false);
+  assert.equal(adjudication.token_target_result.status, "INELIGIBLE");
+  const preliminary = adjudicateDevelopmentResultGate(result, { suite });
+  const report = renderDevelopmentReport(result, { gateVerdict: preliminary });
+  const final = evaluateDevelopmentResultGate(result, { report, suite });
+
+  assert.equal(final.status, "FAIL");
+  assert.ok(final.reasons.includes("token-telemetry"), JSON.stringify(final));
+  assert.match(report, /Invalid or excluded pairs: \*\*1\*\*/u);
+  assert.match(report, /token-telemetry/u);
+  assert.match(report, /collection-transform build \| 2000 \| 1190 \|/u);
+});
+
+test("wall-attempt metadata gaps invalidate the affected pair everywhere", () => {
+  const result = passingResult();
+  const suite = structuredClone(frozenSuite);
+  suite.report_contract = "categorized-exact-render-v1";
+  result.runs[0].final_attempt_wall_seconds += 1;
+
+  const adjudication = adjudicateDevelopmentResult(result);
+  assert.equal(adjudication.pair_validity.invalid_pair_count, 1);
+  assert.equal(adjudication.paired.all_pairs.count, 5);
+  assert.equal(adjudication.token_target_result.eligible, false);
+  const preliminary = adjudicateDevelopmentResultGate(result, { suite });
+  const report = renderDevelopmentReport(result, { gateVerdict: preliminary });
+  const final = evaluateDevelopmentResultGate(result, { report, suite });
+
+  assert.equal(final.status, "FAIL");
+  assert.ok(final.reasons.includes("wall-telemetry"), JSON.stringify(final));
+  assert.ok(!final.reasons.includes("report-artifact"), JSON.stringify(final));
+  assert.match(report, /Invalid or excluded pairs: \*\*1\*\*/u);
+  assert.match(report, /wall-telemetry/u);
+});
+
 test("explicit current v2 suite preserves the legacy no-suite verdict", () => {
   const passing = passingResult();
   assert.deepEqual(
@@ -467,14 +559,16 @@ test("explicit current v2 suite preserves the legacy no-suite verdict", () => {
 });
 
 test("malformed run entries fail closed without throwing", () => {
-  const result = passingResult();
-  result.runs[0] = null;
-  let verdict;
-  assert.doesNotThrow(() => {
-    verdict = evaluateDevelopmentResultGate(result);
-  });
-  assert.equal(verdict.status, "FAIL");
-  assert.ok(verdict.reasons.includes("run-shape"), JSON.stringify(verdict));
+  for (const malformed of [null, { workflow: "leanpowers-0.2.0" }]) {
+    const result = passingResult();
+    result.runs[0] = malformed;
+    let verdict;
+    assert.doesNotThrow(() => {
+      verdict = evaluateDevelopmentResultGate(result);
+    });
+    assert.equal(verdict.status, "FAIL");
+    assert.ok(verdict.reasons.includes("run-shape"), JSON.stringify(verdict));
+  }
 });
 
 test("every quality, token, and speed boundary fails closed independently", () => {

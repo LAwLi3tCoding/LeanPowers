@@ -7,11 +7,11 @@ description: Use when software, tests, builds, integrations, performance, hooks,
 
 Convert an observed failure into a reproducible root cause and a regression-proven repair. A plausible guess is not a diagnosis.
 
-Inherit the routing ledger. If entered directly or the ledger is missing, read the [runtime contract](../../references/runtime-contract.md) once; do not reload it after transitions.
+Inherit the ledger. Routed entry makes the route capsule sole tool-order/budget authority; this Skill adds causal reasoning/output only. Without a ledger, read the [runtime contract](../../references/runtime-contract.md) once and use the direct-entry loop.
 
 If project learning is enabled, use `adapt` to query once at entry under the [learning policy](../../references/learning-policy.md) with this workflow, relevant paths, and tags; add at most three behavior-changing advisory rules to the task brief. Treat lessons as hypotheses, never root cause, and send explicit downstream outcome or correction feedback to `adapt`.
 
-## Root-cause loop
+## Direct-entry root-cause loop
 
 1. State the exact symptom, expected behavior, affected revision, and known environment.
 2. Reproduce with the smallest reliable command, case, trace, or fixture. If reproduction is unavailable, identify the closest observable boundary and mark the validation gap.

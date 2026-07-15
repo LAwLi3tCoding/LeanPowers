@@ -2142,6 +2142,7 @@ test("Codex JSONL usage and completion are independently parsed", () => {
     final_message: "Done",
     first_progress_message: "Done",
     turns: 1,
+    agent_message_items: 1,
     tool_calls: 1,
     tokens: {
       input: 100,
@@ -2616,8 +2617,10 @@ test("development summary artifacts never write through pre-existing links", {
   for (const [fileName, linkKind] of [
     ["pilot-result.json", "symbolic"],
     ["pilot-report.md", "symbolic"],
+    ["gate-result.json", "symbolic"],
     ["pilot-result.json", "hard"],
     ["pilot-report.md", "hard"],
+    ["gate-result.json", "hard"],
   ]) {
     const root = await mkdtemp(path.join(os.tmpdir(), "lp-summary-link-"));
     const output = path.join(root, "output");
@@ -2635,6 +2638,7 @@ test("development summary artifacts never write through pre-existing links", {
       }
       await assert.rejects(
         materializeDevelopmentSummaryArtifacts(output, {
+          gateJson: "{}\n",
           reportMarkdown: "report",
           resultJson: "{}\n",
         }),
@@ -2647,8 +2651,29 @@ test("development summary artifacts never write through pre-existing links", {
   }
 });
 
+test("development summary artifacts persist the final machine decision", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "lp-summary-gate-"));
+  try {
+    await materializeDevelopmentSummaryArtifacts(root, {
+      gateJson: '{"status":"REVIEW"}\n',
+      reportMarkdown: "report",
+      resultJson: "{}\n",
+    });
+    assert.equal(
+      await readFile(path.join(root, "gate-result.json"), "utf8"),
+      '{"status":"REVIEW"}\n',
+    );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test("Codex trace records tool types and exact workflow file reads", () => {
   const parsed = parseCodexResult([
+    JSON.stringify({
+      type: "item.completed",
+      item: { type: "agent_message", text: "working" },
+    }),
     JSON.stringify({
       type: "item.completed",
       item: {
@@ -2668,6 +2693,7 @@ test("Codex trace records tool types and exact workflow file reads", () => {
   ].join("\n"));
 
   assert.deepEqual(parsed.tool_calls_by_type, { command_execution: 1, file_change: 1 });
+  assert.equal(parsed.agent_message_items, 1);
   assert.deepEqual(parsed.workflow_trace, {
     read_calls: 1,
     read_output_chars: 14,
@@ -6543,7 +6569,8 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
   assert.match(report, /capacity retries are isolated from workflow wall-time comparisons/iu);
   assert.match(report, new RegExp(`Suite manifest: ${suite.suite_sha256}`, "u"));
   assert.match(report, /Workspace snapshot \| Hidden verifier snapshot \| Fault-family snapshot/u);
-  assert.match(report, /eligible pairs: 1\/2/u);
+  assert.match(report, /eligible pairs: 0\/2/u);
+  assert.match(report, /Invalid or excluded pairs: \*\*2\*\*/u);
   const incompleteReport = renderDevelopmentReport({
     ...incomplete,
     activation_mode: "explicit-entrypoint",
@@ -6577,7 +6604,7 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
       },
     },
   });
-  assert.match(artifactReport, /superpowers-6\.1\.1 \| PASS \| PASS \| yes \| PASS/u);
+  assert.match(artifactReport, /superpowers-6\.1\.1 \| FAIL \| PASS \| yes \| PASS/u);
 });
 
 test("completion and pairing reject duplicate runs that mask a missing counterpart", async () => {

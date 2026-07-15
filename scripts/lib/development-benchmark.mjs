@@ -1083,6 +1083,9 @@ export function parseCodexResult(
     : null;
   const telemetryComplete = cacheValid && output !== null && total !== null;
   const completedItems = events.filter((event) => event?.type === "item.completed");
+  const agentMessageItems = completedItems.filter(
+    (event) => event?.item?.type === "agent_message",
+  );
   const toolItems = completedItems.filter(
     (event) => !["agent_message", "reasoning"].includes(event?.item?.type),
   );
@@ -1415,6 +1418,7 @@ export function parseCodexResult(
     first_progress_message:
       typeof firstProgressMessage?.item?.text === "string" ? firstProgressMessage.item.text : "",
     turns: events.filter((event) => event?.type === "turn.started").length,
+    agent_message_items: agentMessageItems.length,
     tool_calls: toolItems.length,
     tool_calls_by_type: toolCallsByType,
     workflow_trace: {
@@ -5177,9 +5181,29 @@ export async function runDevelopmentPilot({
     }
 
     const result = makePilotResult(suite, runtime, runs, runRepetitions, selectedCases);
+    const adjudication = adjudicateDevelopmentResult(result);
+    const {
+      adjudicateDevelopmentResultGate,
+      evaluateDevelopmentResultGate,
+    } = await import(
+      "./development-result-gate.mjs"
+    );
+    const preliminaryGateVerdict = adjudicateDevelopmentResultGate(result, { suite });
+    const reportMarkdown = renderDevelopmentReport(result, {
+      adjudication,
+      gateVerdict: preliminaryGateVerdict,
+    });
+    const gateVerdict = evaluateDevelopmentResultGate(result, {
+      report: reportMarkdown,
+      suite,
+    });
+    if (gateVerdict.reasons.includes("report-artifact")) {
+      throw new Error("Canonical development report did not match its gate decision");
+    }
     await materializeRunArtifacts(outputDirectory, pendingArtifacts);
     await materializeDevelopmentSummaryArtifacts(outputDirectory, {
-      reportMarkdown: renderDevelopmentReport(result),
+      gateJson: `${JSON.stringify(gateVerdict, null, 2)}\n`,
+      reportMarkdown,
       resultJson: `${JSON.stringify(result, null, 2)}\n`,
     });
     return result;
@@ -5258,18 +5282,359 @@ export async function runDevelopmentCaseWithCapacityRetry(runAttempt) {
   };
 }
 
-export function renderDevelopmentReport(result) {
-  const aggregate = aggregateRuns(result.runs);
-  const paired = aggregatePairedRuns(result.runs, {
-    matrixComplete: result.completion === "complete",
+export function adjudicateDevelopmentResult(result) {
+  const sourceRuns = Array.isArray(result?.runs) ? result.runs : [];
+  const runs = sourceRuns.map((run) => {
+    if (run === null || typeof run !== "object" || Array.isArray(run)) {
+      return {
+        _malformed_run: true,
+        case_id: null,
+        changes: { product: [], violations: [], workflow: [] },
+        outcome: { status: "FAIL", reasons: ["run evidence was malformed"] },
+        repetition: null,
+        telemetry: { tokens: {}, workflow_trace: {} },
+        workflow: null,
+        workflow_conformance: {
+          status: "FAIL",
+          reasons: ["workflow conformance evidence was malformed"],
+        },
+      };
+    }
+    const changes = run.changes !== null && typeof run.changes === "object" &&
+        !Array.isArray(run.changes)
+      ? run.changes
+      : {};
+    const telemetry = run.telemetry !== null && typeof run.telemetry === "object" &&
+        !Array.isArray(run.telemetry)
+      ? run.telemetry
+      : {};
+    const tokens = telemetry.tokens !== null &&
+        typeof telemetry.tokens === "object" &&
+        !Array.isArray(telemetry.tokens)
+      ? telemetry.tokens
+      : {};
+    const workflowTrace = telemetry.workflow_trace !== null &&
+        typeof telemetry.workflow_trace === "object" &&
+        !Array.isArray(telemetry.workflow_trace)
+      ? telemetry.workflow_trace
+      : {};
+    const verifier = run.verifier !== null && typeof run.verifier === "object" &&
+        !Array.isArray(run.verifier)
+      ? run.verifier
+      : {};
+    let malformedEvidence = !(
+      run.changes !== null &&
+      typeof run.changes === "object" &&
+      !Array.isArray(run.changes) &&
+      Array.isArray(run.changes.product) &&
+      Array.isArray(run.changes.violations) &&
+      Array.isArray(run.changes.workflow) &&
+      run.telemetry !== null &&
+      typeof run.telemetry === "object" &&
+      !Array.isArray(run.telemetry) &&
+      Object.hasOwn(run.telemetry, "tokens") &&
+      run.telemetry.workflow_trace !== null &&
+      typeof run.telemetry.workflow_trace === "object" &&
+      !Array.isArray(run.telemetry.workflow_trace) &&
+      run.verifier !== null &&
+      typeof run.verifier === "object" &&
+      !Array.isArray(run.verifier)
+    );
+    let outcome;
+    let workflowConformance;
+    try {
+      outcome = evaluateRunOutcome(run);
+    } catch {
+      malformedEvidence = true;
+      outcome = {
+        status: "FAIL",
+        reasons: ["run evidence was malformed"],
+      };
+    }
+    try {
+      workflowConformance = evaluateWorkflowConformance(run);
+    } catch {
+      malformedEvidence = true;
+      workflowConformance = {
+        status: "FAIL",
+        reasons: ["workflow conformance evidence was malformed"],
+      };
+    }
+    return {
+      ...run,
+      _malformed_run: malformedEvidence,
+      changes: {
+        ...changes,
+        product: Array.isArray(changes.product) ? changes.product : [],
+        violations: Array.isArray(changes.violations) ? changes.violations : [],
+        workflow: Array.isArray(changes.workflow) ? changes.workflow : [],
+      },
+      outcome,
+      telemetry: {
+        ...telemetry,
+        tokens,
+        workflow_trace: workflowTrace,
+      },
+      verifier,
+      workflow_conformance: workflowConformance,
+    };
   });
-  const tokenTarget = result.token_target ?? defaultDevelopmentTokenTarget();
-  const tokenTargetResult = result.token_target_result ??
-    assessDevelopmentTokenTarget(
+  const matrixComplete = result?.completion === "complete";
+  const pairValidity = classifyDevelopmentPairValidity(result, runs);
+  const validPairKeys = new Set(pairValidity.entries
+    .filter(({ status }) => status === "VALID")
+    .map(({ case_id: caseId, repetition }) =>
+      developmentPairKey(caseId, repetition)
+    ));
+  const paired = aggregatePairedRuns(runs, { matrixComplete, validPairKeys });
+  const tokenTarget = result?.token_target ?? defaultDevelopmentTokenTarget();
+  return {
+    aggregate: aggregateRuns(runs),
+    paired,
+    pair_token_diagnostics: pairTokenDiagnostics(runs),
+    pair_validity: pairValidity,
+    runs,
+    token_target_result: assessDevelopmentTokenTarget(
       tokenTarget,
       paired,
-      result.completion === "complete",
+      matrixComplete,
+    ),
+  };
+}
+
+export function validDevelopmentTokenTelemetry(tokens) {
+  return tokens !== null &&
+    typeof tokens === "object" &&
+    !Array.isArray(tokens) &&
+    tokens.telemetry_complete === true &&
+    Number.isSafeInteger(tokens.input) &&
+    tokens.input >= 0 &&
+    Number.isSafeInteger(tokens.cached_input) &&
+    tokens.cached_input >= 0 &&
+    tokens.cached_input <= tokens.input &&
+    Number.isSafeInteger(tokens.output) &&
+    tokens.output >= 0 &&
+    Number.isSafeInteger(tokens.total) &&
+    tokens.total > 0 &&
+    tokens.total === tokens.input + tokens.output &&
+    Number.isSafeInteger(tokens.uncached_plus_output) &&
+    tokens.uncached_plus_output ===
+      tokens.input - tokens.cached_input + tokens.output &&
+    (tokens.reasoning_output === null || tokens.reasoning_output === undefined ||
+      (Number.isSafeInteger(tokens.reasoning_output) && tokens.reasoning_output >= 0));
+}
+
+export function validDevelopmentWallTelemetry(run) {
+  return Number.isFinite(run?.wall_seconds) &&
+    run.wall_seconds > 0 &&
+    Number.isFinite(run?.final_attempt_wall_seconds) &&
+    run.final_attempt_wall_seconds === run.wall_seconds &&
+    Number.isSafeInteger(run?.attempt_count) &&
+    run.attempt_count >= 1 &&
+    run.attempt_count <= 2 &&
+    Number.isSafeInteger(run?.capacity_retry_count) &&
+    run.capacity_retry_count === run.attempt_count - 1 &&
+    Number.isFinite(run?.infrastructure_retry_wall_seconds) &&
+    run.infrastructure_retry_wall_seconds >= 0 &&
+    (run.attempt_count !== 1 || run.infrastructure_retry_wall_seconds === 0);
+}
+
+export function hasDevelopmentInfrastructureFailure(run) {
+  const markedFailure = (value) =>
+    value !== undefined && value !== null && value !== false;
+  return run?.capacity_retry_exhausted === true ||
+    markedFailure(run?.capacity_failure) ||
+    markedFailure(run?.infrastructure_failure) ||
+    ["capacity", "capacity-failure", "infrastructure-failure"].includes(
+      run?.final_attempt_failure_kind,
+    ) ||
+    ["capacity-failure", "infrastructure-failure", "failed"].includes(
+      run?.final_attempt_status,
+    ) ||
+    ["capacity-failure", "infrastructure-failure", "failed"].includes(
+      run?.infrastructure_status,
     );
+}
+
+function developmentPairKey(caseId, repetition) {
+  return `${caseId}\u0000${repetition}`;
+}
+
+function classifyDevelopmentPairValidity(result, runs) {
+  const cases = Array.isArray(result?.cases) ? result.cases : [];
+  const repetitions = Number.isSafeInteger(result?.repetitions)
+    ? result.repetitions
+    : 0;
+  const entries = [];
+  for (let repetition = 1; repetition <= repetitions; repetition += 1) {
+    for (const benchmarkCase of cases) {
+      const selected = runs.filter((run) =>
+        run?.case_id === benchmarkCase.id && run?.repetition === repetition
+      );
+      const reasons = [];
+      const byWorkflow = Object.fromEntries([...WORKFLOWS].map((workflow) => [
+        workflow,
+        selected.filter((run) => run?.workflow === workflow),
+      ]));
+      if ([...WORKFLOWS].some((workflow) => byWorkflow[workflow].length !== 1)) {
+        reasons.push("matrix-shape");
+      } else {
+        const pairRuns = [...WORKFLOWS].map((workflow) => byWorkflow[workflow][0]);
+        if (pairRuns.some(hasDevelopmentInfrastructureFailure)) {
+          reasons.push("infrastructure-failure");
+        }
+        if (pairRuns.some((run) =>
+          !validDevelopmentTokenTelemetry(run?.telemetry?.tokens)
+        )) {
+          reasons.push("token-telemetry");
+        }
+        if (pairRuns.some((run) => !validDevelopmentWallTelemetry(run))) {
+          reasons.push("wall-telemetry");
+        }
+      }
+      entries.push({
+        case_id: benchmarkCase.id,
+        repetition,
+        status: reasons.length === 0 ? "VALID" : "INVALID",
+        reasons,
+      });
+    }
+  }
+  return {
+    entries,
+    invalid_pair_count: entries.filter(({ status }) => status === "INVALID").length,
+    total_pair_count: entries.length,
+    valid_pair_count: entries.filter(({ status }) => status === "VALID").length,
+  };
+}
+
+function pairTokenDiagnostics(runs) {
+  const groups = new Map();
+  for (const run of runs) {
+    const key = developmentPairKey(run?.case_id, run?.repetition);
+    const group = groups.get(key) ?? Object.fromEntries(
+      [...WORKFLOWS].map((workflow) => [workflow, []]),
+    );
+    if (WORKFLOWS.has(run?.workflow)) group[run.workflow].push(run);
+    groups.set(key, group);
+  }
+  return [...groups.values()].flatMap((group) => {
+    if ([...WORKFLOWS].some((workflow) => group[workflow].length !== 1)) {
+      return [];
+    }
+    const baseline = group["superpowers-6.1.1"][0];
+    const candidate = group["leanpowers-0.2.0"][0];
+    if (
+      !baseline ||
+      !candidate ||
+      !validDevelopmentTokenTelemetry(baseline.telemetry?.tokens) ||
+      !validDevelopmentTokenTelemetry(candidate.telemetry?.tokens)
+    ) {
+      return [];
+    }
+    const baselineTokens = baseline.telemetry.tokens;
+    const candidateTokens = candidate.telemetry.tokens;
+    return [{
+      case_id: candidate.case_id,
+      repetition: candidate.repetition,
+      baseline_total: baselineTokens.total,
+      candidate_total: candidateTokens.total,
+      token_share_pct: candidateTokens.total / baselineTokens.total * 100,
+      total_excess: candidateTokens.total - baselineTokens.total,
+      baseline_cached: baselineTokens.cached_input,
+      candidate_cached: candidateTokens.cached_input,
+      cached_excess: candidateTokens.cached_input - baselineTokens.cached_input,
+      baseline_fresh: baselineTokens.uncached_plus_output,
+      candidate_fresh: candidateTokens.uncached_plus_output,
+      fresh_excess:
+        candidateTokens.uncached_plus_output - baselineTokens.uncached_plus_output,
+      baseline_tool_calls: finiteNumber(baseline.telemetry?.tool_calls),
+      candidate_tool_calls: finiteNumber(candidate.telemetry?.tool_calls),
+      baseline_tool_types: baseline.telemetry?.tool_calls_by_type ?? null,
+      candidate_tool_types: candidate.telemetry?.tool_calls_by_type ?? null,
+      baseline_agent_messages: finiteNumber(baseline.telemetry?.agent_message_items),
+      candidate_agent_messages: finiteNumber(candidate.telemetry?.agent_message_items),
+    }];
+  }).sort((left, right) =>
+    left.repetition - right.repetition ||
+    left.case_id.localeCompare(right.case_id)
+  );
+}
+
+function observedDevelopmentDecision(result, adjudication) {
+  const reasons = [];
+  const advisories = [];
+  if (adjudication.runs.some((run) => run?.outcome?.status !== "PASS")) {
+    reasons.push("task-outcome");
+  }
+  if (adjudication.runs.some((run) =>
+    run?.workflow === "leanpowers-0.2.0" &&
+    run?.workflow_conformance?.status !== "PASS"
+  )) {
+    reasons.push("lean-conformance");
+  }
+  if (adjudication.runs.some((run) =>
+    run?.workflow === "superpowers-6.1.1" && run?.activation_reported !== true
+  )) {
+    reasons.push("superpowers-activation");
+  }
+  const invalidReasons = new Set(adjudication.pair_validity.entries.flatMap(
+    ({ reasons: pairReasons }) => pairReasons,
+  ));
+  for (const reason of ["infrastructure-failure", "token-telemetry", "wall-telemetry"]) {
+    if (invalidReasons.has(reason)) reasons.push(reason);
+  }
+  const tokenResult = adjudication.token_target_result;
+  let tokenAssessment = "miss";
+  if (tokenResult.eligible === true && tokenResult.observed_share_pct <= 60) {
+    tokenAssessment = "met";
+  } else if (
+    tokenResult.eligible === true && tokenResult.observed_share_pct <= 65
+  ) {
+    tokenAssessment = "near-target";
+    advisories.push("token-near-target");
+  } else {
+    reasons.push("token-target");
+  }
+  const wallReduction = adjudication.paired.all_pairs.median_wall_reduction_pct;
+  if (Number.isFinite(wallReduction) && wallReduction < -20) {
+    reasons.push("wall-regression");
+  } else if (Number.isFinite(wallReduction) && wallReduction <= 0) {
+    advisories.push("wall-not-improved");
+  }
+  return {
+    status: reasons.length > 0
+      ? "FAIL"
+      : tokenAssessment === "near-target" ? "REVIEW" : "PASS",
+    reasons: [...new Set(reasons)],
+    advisories: [...new Set(advisories)],
+    evidence: {
+      case_count: Array.isArray(result?.cases) ? result.cases.length : 0,
+      repetition_count: Number.isSafeInteger(result?.repetitions)
+        ? result.repetitions
+        : null,
+      run_count: adjudication.runs.length,
+      pair_count: adjudication.paired.all_pairs.count,
+      aggregate_model_token_share_pct:
+        adjudication.paired.all_pairs.aggregate_model_token_share_pct,
+      token_target_assessment: tokenAssessment,
+      median_wall_reduction_pct: wallReduction,
+    },
+  };
+}
+
+export function renderDevelopmentReport(
+  result,
+  { adjudication = adjudicateDevelopmentResult(result), gateVerdict = null } = {},
+) {
+  const runs = adjudication.runs;
+  const aggregate = adjudication.aggregate;
+  const paired = adjudication.paired;
+  gateVerdict ??= observedDevelopmentDecision(result, adjudication);
+  const tokenTarget = result.token_target ?? defaultDevelopmentTokenTarget();
+  const tokenTargetResult = adjudication.token_target_result;
+  const pairValidity = adjudication.pair_validity;
+  const pairTokenSources = adjudication.pair_token_diagnostics;
   const performanceGoalAssessment =
     tokenTarget.metric === "aggregate-model-token-share" &&
     tokenTarget.population === "all-matched-pairs" &&
@@ -5282,7 +5647,7 @@ export function renderDevelopmentReport(result) {
           ? "REVIEW — near-target evidence requires categorized assessment"
           : "FAIL — target missed"
       : null;
-  const rows = result.runs.map((run) =>
+  const rows = runs.map((run) =>
     [
       run.case_id,
       run.risk_level,
@@ -5322,16 +5687,21 @@ export function renderDevelopmentReport(result) {
       String(metrics.scope_violations),
     ].join(" | ");
   });
-  const failures = result.runs
+  const failures = runs
     .filter((run) => run.outcome.status === "FAIL")
     .map((run) => `- ${run.run_id}: ${run.outcome.reasons.join("; ")}`);
-  const infrastructureFailures = result.runs.filter(
-    (run) => run.infrastructure_failure !== undefined,
-  );
-  const telemetryGaps = result.runs.filter((run) =>
-    run.telemetry?.tokens?.telemetry_complete !== true ||
-    !Number.isFinite(run.wall_seconds) ||
-    run.wall_seconds <= 0
+  const conformanceFailures = runs
+    .filter((run) =>
+      run.workflow === "leanpowers-0.2.0" &&
+      run.workflow_conformance?.status === "FAIL"
+    )
+    .map((run) =>
+      `- ${run.run_id}: ${run.workflow_conformance.reasons.join("; ")}`
+    );
+  const infrastructureFailures = runs.filter(hasDevelopmentInfrastructureFailure);
+  const telemetryGaps = runs.filter((run) =>
+    !validDevelopmentTokenTelemetry(run.telemetry?.tokens) ||
+    !validDevelopmentWallTelemetry(run)
   );
   const manifestRows = (Array.isArray(result.case_snapshots)
     ? result.case_snapshots
@@ -5357,16 +5727,20 @@ export function renderDevelopmentReport(result) {
       ? "This held-out result is incomplete or did not match the freeze contract, so it is diagnostic only and cannot support a confirmatory claim."
       : "This is real coding and independent executable verification, but it is not the full 11-scenario release benchmark.";
   const reportedCases = Array.isArray(result.cases) ? result.cases : [];
-  const requiredPairCount = Number.isSafeInteger(result.repetitions)
-    ? reportedCases.length * result.repetitions
-    : null;
-  const invalidOrExcludedPairCount = requiredPairCount === null
-    ? null
-    : Math.max(0, requiredPairCount - paired.all_pairs.count);
+  const invalidOrExcludedPairCount = pairValidity.invalid_pair_count;
+  const validPairKeys = new Set(pairValidity.entries
+    .filter(({ status }) => status === "VALID")
+    .map(({ case_id: caseId, repetition }) =>
+      developmentPairKey(caseId, repetition)
+    ));
   const categoryResult = (label, selectedRuns) => {
-    const workflowMetrics = categoryWorkflowMetrics(selectedRuns);
+    const metricRuns = selectedRuns.filter((run) =>
+      validPairKeys.has(developmentPairKey(run.case_id, run.repetition))
+    );
+    const workflowMetrics = categoryWorkflowMetrics(selectedRuns, { metricRuns });
     const categoryPaired = aggregatePairedRuns(selectedRuns, {
       matrixComplete: result.completion === "complete",
+      validPairKeys,
     }).all_pairs;
     return {
       label,
@@ -5376,7 +5750,7 @@ export function renderDevelopmentReport(result) {
   };
   const categoryResults = reportedCases.map((benchmarkCase) => categoryResult(
     benchmarkCase.reporting_category ?? developmentReportCategory(benchmarkCase.id),
-    result.runs.filter((run) => run.case_id === benchmarkCase.id),
+    runs.filter((run) => run.case_id === benchmarkCase.id),
   ));
   const ownerResults = [...new Set(reportedCases.map(
     ({ expected_workflow: owner }) => owner,
@@ -5386,7 +5760,7 @@ export function renderDevelopmentReport(result) {
       .map(({ id }) => id));
     return categoryResult(
       `${owner} owner aggregate`,
-      result.runs.filter((run) => caseIds.has(run.case_id)),
+      runs.filter((run) => caseIds.has(run.case_id)),
     );
   });
   const reportedCategoryResults = [...categoryResults, ...ownerResults];
@@ -5423,6 +5797,74 @@ export function renderDevelopmentReport(result) {
       ].join(" | ");
     }),
   );
+  const categoryTokenSourceRows = reportedCategoryResults.map(
+    ({ label, paired: metrics, workflowMetrics }) => {
+      const baseline = workflowMetrics["superpowers-6.1.1"];
+      const candidate = workflowMetrics["leanpowers-0.2.0"];
+      return [
+        label,
+        displayMetric(baseline.total_tokens),
+        displayMetric(candidate.total_tokens),
+        displayMetric(metricDelta(candidate.total_tokens, baseline.total_tokens)),
+        displayPercent(metricDelta(
+          metrics.aggregate_model_token_share_pct,
+          tokenTarget.max_share_pct,
+        )),
+        displayMetric(baseline.total_cached_tokens),
+        displayMetric(candidate.total_cached_tokens),
+        displayMetric(metricDelta(
+          candidate.total_cached_tokens,
+          baseline.total_cached_tokens,
+        )),
+        displayMetric(baseline.total_fresh_tokens),
+        displayMetric(candidate.total_fresh_tokens),
+        displayMetric(metricDelta(
+          candidate.total_fresh_tokens,
+          baseline.total_fresh_tokens,
+        )),
+        displayMetric(baseline.total_tool_calls),
+        displayMetric(candidate.total_tool_calls),
+        displayToolCallTypes(baseline.tool_calls_by_type),
+        displayToolCallTypes(candidate.tool_calls_by_type),
+        displayMetric(baseline.total_agent_messages),
+        displayMetric(candidate.total_agent_messages),
+      ].join(" | ");
+    },
+  );
+  const pairTokenSourceRows = pairTokenSources.map((source) => [
+    source.case_id,
+    String(source.repetition),
+    displayMetric(source.baseline_total),
+    displayMetric(source.candidate_total),
+    displayPercent(round(source.token_share_pct, 1)),
+    displayPercent(round(source.token_share_pct - tokenTarget.max_share_pct, 1)),
+    displayMetric(source.total_excess),
+    displayMetric(source.baseline_cached),
+    displayMetric(source.candidate_cached),
+    displayMetric(source.cached_excess),
+    displayMetric(source.baseline_fresh),
+    displayMetric(source.candidate_fresh),
+    displayMetric(source.fresh_excess),
+    displayMetric(source.baseline_tool_calls),
+    displayMetric(source.candidate_tool_calls),
+    displayToolCallTypes(source.baseline_tool_types),
+    displayToolCallTypes(source.candidate_tool_types),
+    displayMetric(source.baseline_agent_messages),
+    displayMetric(source.candidate_agent_messages),
+  ].join(" | "));
+  const invalidPairRows = pairValidity.entries
+    .filter(({ status }) => status === "INVALID")
+    .map(({ case_id: caseId, repetition, reasons }) =>
+      `- ${caseId} r${repetition}: ${reasons.join(", ")}`
+    );
+  const decisionReasons = Array.isArray(gateVerdict?.reasons) &&
+      gateVerdict.reasons.length > 0
+    ? gateVerdict.reasons.join(", ")
+    : "none";
+  const decisionAdvisories = Array.isArray(gateVerdict?.advisories) &&
+      gateVerdict.advisories.length > 0
+    ? gateVerdict.advisories.join(", ")
+    : "none";
   const caseScope = reportedCases.length === 1
     ? "the one reported fixture"
     : `the ${reportedCases.length} reported fixtures`;
@@ -5473,6 +5915,14 @@ export function renderDevelopmentReport(result) {
     "",
     "Superpowers 6.1.1 is the upstream baseline and inspiration for LeanPowers. This report measures a bounded tradeoff under the listed conditions; it is not a winner ranking.",
     "",
+    "## Machine decision",
+    "",
+    `Status: **${gateVerdict.status}**`,
+    "",
+    `Reasons: ${decisionReasons}.`,
+    "",
+    `Advisories: ${decisionAdvisories}.`,
+    "",
     "## Aggregate",
     "",
     "Workflow | Task PASS | Median model tokens | Median fresh tokens | Median wall seconds | Median tool calls | Median workflow reads | Declaration failures | Conformance failures | Scope violations",
@@ -5491,6 +5941,20 @@ export function renderDevelopmentReport(result) {
     "--- | --- | ---: | ---: | ---: | ---: | ---: | ---:",
     ...categoryDiagnosticRows,
     "",
+    "## Category token sources",
+    "",
+    "Category | Superpowers total | LeanPowers total | Total excess | Target excess | Superpowers cached | LeanPowers cached | Cached excess | Superpowers fresh | LeanPowers fresh | Fresh excess | Superpowers tool calls | LeanPowers tool calls | Superpowers tool types | LeanPowers tool types | Superpowers agent messages | LeanPowers agent messages",
+    "--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: | ---:",
+    ...categoryTokenSourceRows,
+    "",
+    "## Pair token excess",
+    "",
+    "Case | Rep | Superpowers total | LeanPowers total | Lean token share | Target excess | Total excess | Superpowers cached | LeanPowers cached | Cached excess | Superpowers fresh | LeanPowers fresh | Fresh excess | Superpowers tool calls | LeanPowers tool calls | Superpowers tool types | LeanPowers tool types | Superpowers agent messages | LeanPowers agent messages",
+    "--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: | ---:",
+    ...(pairTokenSourceRows.length > 0 ? pairTokenSourceRows : [
+      "No pairs have complete token telemetry.",
+    ]),
+    "",
     "## Token target",
     "",
     `Metric: **${tokenTarget.metric}** across **${tokenTarget.population}**; LeanPowers target: at most **${tokenTarget.max_share_pct}%** of Superpowers model tokens.`,
@@ -5504,6 +5968,14 @@ export function renderDevelopmentReport(result) {
           "",
           "Wall time is secondary: complete pair telemetry is mandatory; 0% through -20% is an advisory non-improvement, while a slowdown greater than 20% is a material regression.",
         ]),
+    ...(gateVerdict.status === "REVIEW"
+      ? [
+          "",
+          "## REVIEW explanation",
+          "",
+          `The aggregate LeanPowers token share is ${displayPercent(round(tokenTargetResult.observed_share_pct, 1))}, above the ${tokenTarget.max_share_pct}% target but within the preregistered 60–65% review band. Quality gates still pass; this is not an automatic PASS. The category and pair token-source tables identify whether the remaining distance comes from cached context, fresh tokens, tool-call mix, or a long-tail pair.`,
+        ]
+      : []),
     "",
     "## Paired reductions",
     "",
@@ -5529,15 +6001,20 @@ export function renderDevelopmentReport(result) {
     "",
     failures.length > 0 ? failures.join("\n") : "None.",
     "",
+    "## Workflow conformance reasons",
+    "",
+    conformanceFailures.length > 0 ? conformanceFailures.join("\n") : "None.",
+    "",
     "## Validity exclusions",
     "",
-    `Infrastructure failures: **${infrastructureFailures.length}**; telemetry-gap runs: **${telemetryGaps.length}**; invalid or excluded pairs: **${invalidOrExcludedPairCount ?? "n/a"}**. These observations are excluded from Token and wall-time conclusions.`,
+    `Infrastructure failures: **${infrastructureFailures.length}**; telemetry-gap runs: **${telemetryGaps.length}**; Invalid or excluded pairs: **${invalidOrExcludedPairCount}**. Invalid pairs are excluded from token and wall-time conclusions.`,
+    ...(invalidPairRows.length === 0 ? [] : ["", ...invalidPairRows]),
     ...(infrastructureFailures.length === 0
       ? []
       : [
           "",
           ...infrastructureFailures.map((run) =>
-            `- ${run.run_id}: ${run.infrastructure_failure.kind ?? "infrastructure"}`
+            `- ${run.run_id}: ${run.infrastructure_failure?.kind ?? run.final_attempt_failure_kind ?? "infrastructure"}`
           ),
         ]),
     "",
@@ -5558,30 +6035,44 @@ export function renderDevelopmentReport(result) {
   ].join("\n");
 }
 
-function categoryWorkflowMetrics(runs) {
+function categoryWorkflowMetrics(runs, { metricRuns = runs } = {}) {
   return Object.fromEntries([...WORKFLOWS].map((workflow) => {
     const selected = runs.filter((run) => run.workflow === workflow);
-    const tokenTotals = selected.map((run) => run.telemetry.tokens?.total);
-    const totalTokens = selected.length > 0 && tokenTotals.every((value) =>
-      Number.isFinite(value) && value > 0
-    )
-      ? tokenTotals.reduce((total, value) => total + value, 0)
-      : null;
+    const metricSelected = metricRuns.filter((run) => run.workflow === workflow);
+    const tokenTotals = metricSelected.map((run) => run.telemetry.tokens?.total);
     return [workflow, {
       total: selected.length,
       passed: selected.filter((run) => run.outcome.status === "PASS").length,
-      total_tokens: totalTokens,
+      total_tokens: completeMetricSum(tokenTotals, { positive: true }),
+      total_cached_tokens: completeMetricSum(
+        metricSelected.map((run) => run.telemetry.tokens?.cached_input),
+      ),
+      total_fresh_tokens: completeMetricSum(
+        metricSelected.map((run) => run.telemetry.tokens?.uncached_plus_output),
+      ),
+      total_tool_calls: completeMetricSum(
+        metricSelected.map((run) => run.telemetry.tool_calls),
+      ),
+      tool_calls_by_type: aggregateToolCallTypes(metricSelected),
+      total_agent_messages: completeMetricSum(
+        metricSelected.map((run) => run.telemetry.agent_message_items),
+      ),
       median_tokens: median(tokenTotals),
       median_fresh_tokens: median(
-        selected.map((run) => run.telemetry.tokens?.uncached_plus_output),
+        metricSelected.map((run) => run.telemetry.tokens?.uncached_plus_output),
       ),
       median_output_tokens: median(
-        selected.map((run) => run.telemetry.tokens?.output),
+        metricSelected.map((run) => run.telemetry.tokens?.output),
       ),
-      median_wall_seconds: round(median(selected.map((run) => run.wall_seconds)), 1),
-      median_tool_calls: median(selected.map((run) => run.telemetry.tool_calls)),
+      median_wall_seconds: round(
+        median(metricSelected.map((run) => run.wall_seconds)),
+        1,
+      ),
+      median_tool_calls: median(
+        metricSelected.map((run) => run.telemetry.tool_calls),
+      ),
       median_workflow_reads: median(
-        selected.map((run) => run.telemetry.workflow_trace?.read_calls),
+        metricSelected.map((run) => run.telemetry.workflow_trace?.read_calls),
       ),
       capacity_retries: selected.reduce(
         (total, run) => total + (run.capacity_retry_count ?? 0),
@@ -5593,6 +6084,58 @@ function categoryWorkflowMetrics(runs) {
       ), 1),
     }];
   }));
+}
+
+function completeMetricSum(values, { positive = false } = {}) {
+  if (
+    values.length === 0 ||
+    values.some((value) =>
+      !Number.isFinite(value) || value < 0 || (positive && value === 0)
+    )
+  ) {
+    return null;
+  }
+  const total = values.reduce((sum, value) => sum + value, 0);
+  return Number.isSafeInteger(total) ? total : null;
+}
+
+function aggregateToolCallTypes(runs) {
+  const totals = {};
+  for (const run of runs) {
+    const entries = run.telemetry?.tool_calls_by_type;
+    if (
+      entries === null ||
+      typeof entries !== "object" ||
+      Array.isArray(entries)
+    ) {
+      return null;
+    }
+    for (const [type, count] of Object.entries(entries)) {
+      if (!Number.isSafeInteger(count) || count < 0) return null;
+      totals[type] = (totals[type] ?? 0) + count;
+      if (!Number.isSafeInteger(totals[type])) return null;
+    }
+  }
+  return runs.length > 0
+    ? Object.fromEntries(Object.entries(totals).sort(([left], [right]) =>
+        left.localeCompare(right)
+      ))
+    : null;
+}
+
+function displayToolCallTypes(value) {
+  return value === null || typeof value !== "object" || Array.isArray(value)
+    ? "n/a"
+    : Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([type, count]) => `${type}:${count}`)
+      .join(", ") || "none";
+}
+
+function metricDelta(candidate, baseline) {
+  return Number.isFinite(candidate) && Number.isFinite(baseline)
+    ? round(candidate - baseline, 1)
+    : null;
 }
 
 function developmentReportCategory(caseId) {
@@ -6035,24 +6578,35 @@ function aggregateRuns(runs) {
   }));
 }
 
-function aggregatePairedRuns(runs, { matrixComplete }) {
+function aggregatePairedRuns(runs, { matrixComplete, validPairKeys } = {}) {
   const groups = new Map();
   for (const run of runs) {
-    const key = `${run.case_id}\u0000${run.repetition}`;
+    const key = developmentPairKey(run.case_id, run.repetition);
     const group = groups.get(key) ?? Object.fromEntries(
       [...WORKFLOWS].map((workflow) => [workflow, []]),
     );
     if (WORKFLOWS.has(run.workflow)) group[run.workflow].push(run);
     groups.set(key, group);
   }
-  const matchedPairs = [...groups.values()]
-    .filter((group) => [...WORKFLOWS].every((workflow) => group[workflow].length === 1))
-    .map((group) => Object.fromEntries(
-      [...WORKFLOWS].map((workflow) => [workflow, group[workflow][0]]),
-    ));
-  const pairs = matchedPairs.filter((pair) =>
-    [...WORKFLOWS].every((workflow) => pair[workflow].infrastructure_failure === undefined)
-  );
+  const matchedPairEntries = [...groups.entries()]
+    .filter(([, group]) =>
+      [...WORKFLOWS].every((workflow) => group[workflow].length === 1)
+    )
+    .map(([key, group]) => ({
+      key,
+      pair: Object.fromEntries(
+        [...WORKFLOWS].map((workflow) => [workflow, group[workflow][0]]),
+      ),
+    }));
+  const matchedPairs = matchedPairEntries.map(({ pair }) => pair);
+  const pairs = matchedPairEntries
+    .filter(({ key, pair }) =>
+      (validPairKeys === undefined || validPairKeys.has(key)) &&
+      [...WORKFLOWS].every((workflow) =>
+        !hasDevelopmentInfrastructureFailure(pair[workflow])
+      )
+    )
+    .map(({ pair }) => pair);
   const bothPass = pairs.filter((group) =>
     [...WORKFLOWS].every((workflow) => group[workflow].outcome.status === "PASS")
   );
@@ -6117,7 +6671,7 @@ function hasCompleteRunMatrix(runs, selectedCases, repetitions) {
     const key = `${run.case_id}\u0000${run.repetition}\u0000${run.workflow}`;
     if (
       !expected.has(key) ||
-      run.infrastructure_failure !== undefined ||
+      hasDevelopmentInfrastructureFailure(run) ||
       !isDeepStrictEqual(run.case_snapshot, caseSnapshots.get(run.case_id))
     ) {
       return false;
@@ -6601,9 +7155,9 @@ async function prospectiveCanonicalPath(target) {
 
 export async function materializeDevelopmentSummaryArtifacts(
   outputDirectory,
-  { reportMarkdown, resultJson },
+  { gateJson, reportMarkdown, resultJson },
 ) {
-  await Promise.all([
+  const writes = [
     writeFile(
       path.join(outputDirectory, "pilot-result.json"),
       resultJson,
@@ -6614,7 +7168,15 @@ export async function materializeDevelopmentSummaryArtifacts(
       reportMarkdown,
       { flag: "wx" },
     ),
-  ]);
+  ];
+  if (gateJson !== undefined) {
+    writes.push(writeFile(
+      path.join(outputDirectory, "gate-result.json"),
+      gateJson,
+      { flag: "wx" },
+    ));
+  }
+  await Promise.all(writes);
 }
 
 async function ensureArtifactChildDirectory(parentDirectory, name) {
