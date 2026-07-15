@@ -5505,7 +5505,7 @@ test("changed-path evaluation separates product changes, workflow artifacts, and
   );
 });
 
-test("a task passes only with agent completion, tests, and scope intact", () => {
+test("a task passes only with agent completion, tests, and scope intact", async (t) => {
   const passing = {
     agent_exit_code: 0,
     agent_timed_out: false,
@@ -5626,6 +5626,50 @@ test("a task passes only with agent completion, tests, and scope intact", () => 
     }],
   };
   assert.equal(evaluateRunOutcome(artifactPassing).status, "PASS");
+
+  const summarizedArtifactPassing = structuredClone(artifactPassing);
+  summarizedArtifactPassing.verifier.artifact_regression =
+    summarizeArtifactRegressionEvidence(
+      artifactPassing.verifier.artifact_regression,
+    );
+
+  await t.test(
+    "published artifact regression summaries round-trip through outcome evaluation",
+    () => {
+      assert.deepEqual(evaluateRunOutcome(summarizedArtifactPassing), {
+        status: "PASS",
+        reasons: [],
+      });
+    },
+  );
+
+  await t.test(
+    "published artifact regression summaries fail closed when tampered",
+    () => {
+      const tamperedSummaries = [
+        ["baseline count", (gate) => { gate.baseline_pass_count = 0; }],
+        ["candidate count", (gate) => { gate.candidate_complete_count = 0; }],
+        ["killed count", (gate) => { gate.killed_member_count = 0; }],
+        ["evidence hash", (gate) => { gate.evidence_sha256 = "not-a-sha256"; }],
+        ["unsafe changed path", (gate) => {
+          gate.changed_visible_test_paths = ["../outside.test.mjs"];
+        }],
+        ["unmatched candidate path", (gate) => {
+          gate.candidate_visible_test_paths = ["test/other.test.mjs"];
+        }],
+        ["retained reason", (gate) => { gate.reasons = ["tampered"]; }],
+      ];
+      for (const [label, mutate] of tamperedSummaries) {
+        const run = structuredClone(summarizedArtifactPassing);
+        mutate(run.verifier.artifact_regression.gates[0]);
+        assert.equal(
+          evaluateRunOutcome(run).status,
+          "FAIL",
+          label,
+        );
+      }
+    },
+  );
 
   const unexpectedArtifactField = structuredClone(artifactPassing);
   unexpectedArtifactField.verifier.artifact_regression.extra = true;

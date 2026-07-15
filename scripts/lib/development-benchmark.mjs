@@ -3550,7 +3550,7 @@ function isVerifierSandboxMode(value) {
 
 function artifactGateEvidenceProblems(gate, expectedGate) {
   const reasons = [];
-  if (!hasExactObjectKeys(gate, [
+  const hasLiveEvidence = hasExactObjectKeys(gate, [
     "candidate_visible_test_paths",
     "changed_visible_test_paths",
     "export_name",
@@ -3562,7 +3562,24 @@ function artifactGateEvidenceProblems(gate, expectedGate) {
     "reasons",
     "status",
     "target",
-  ])) {
+  ]);
+  const hasPublishedSummary = hasExactObjectKeys(gate, [
+    "baseline_pass_count",
+    "candidate_complete_count",
+    "candidate_visible_test_paths",
+    "changed_visible_test_paths",
+    "evidence_sha256",
+    "export_name",
+    "id",
+    "killed_member_count",
+    "member_count",
+    "mutation_manifest_sha256",
+    "policy",
+    "reasons",
+    "status",
+    "target",
+  ]);
+  if (!hasLiveEvidence && !hasPublishedSummary) {
     reasons.push("mutation family evidence contained unexpected fields");
   }
   if (
@@ -3615,6 +3632,32 @@ function artifactGateEvidenceProblems(gate, expectedGate) {
   }
   if (!Array.isArray(gate.reasons) || gate.reasons.length !== 0) {
     reasons.push("passing artifact gate retained failure reasons");
+  }
+  if (hasPublishedSummary) {
+    const counts = [
+      gate.baseline_pass_count,
+      gate.candidate_complete_count,
+      gate.killed_member_count,
+    ];
+    if (
+      gate.member_count !== expectedGate?.member_count ||
+      !Number.isInteger(gate.member_count) ||
+      gate.member_count <= 0 ||
+      counts.some((count) =>
+        !Number.isInteger(count) || count < 0 || count > gate.member_count
+      )
+    ) {
+      reasons.push("mutation family summary counts were missing or inconsistent");
+    } else if (
+      gate.status === "PASS" &&
+      counts.some((count) => count !== gate.member_count)
+    ) {
+      reasons.push("passing mutation family summary was incomplete");
+    }
+    if (!/^[a-f0-9]{64}$/u.test(String(gate.evidence_sha256 ?? ""))) {
+      reasons.push("mutation family summary hash was missing or malformed");
+    }
+    return reasons;
   }
   const members = Array.isArray(gate.members) ? gate.members : [];
   if (

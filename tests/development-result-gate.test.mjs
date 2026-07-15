@@ -12,6 +12,7 @@ import {
   evaluateWorkflowConformance,
   loadDevelopmentSuite,
   renderDevelopmentReport,
+  summarizeArtifactRegressionEvidence,
 } from "../scripts/lib/development-benchmark.mjs";
 import { evaluateDevelopmentResultGate } from "../scripts/lib/development-result-gate.mjs";
 
@@ -350,6 +351,19 @@ test("gate recomputes task outcome and Lean conformance instead of trusting PASS
     verdict.reasons.includes("lean-conformance-consistency"),
     JSON.stringify(verdict),
   );
+});
+
+test("gate accepts the exact published artifact summary without outcome drift", () => {
+  const result = passingResult();
+  for (const run of result.runs) {
+    run.verifier.artifact_regression = summarizeArtifactRegressionEvidence(
+      run.verifier.artifact_regression,
+    );
+  }
+
+  const verdict = evaluateDevelopmentResultGate(result);
+  assert.equal(verdict.status, "PASS", JSON.stringify(verdict));
+  assert.ok(!verdict.reasons.includes("outcome-consistency"));
 });
 
 test("gate rejects an exhausted capacity retry even when summaries claim success", () => {

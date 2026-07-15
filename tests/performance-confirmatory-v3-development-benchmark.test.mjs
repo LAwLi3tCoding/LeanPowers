@@ -436,3 +436,31 @@ test("performance v3 inputs contain only repository-relative public fixture data
     }
   }
 });
+
+test("performance v3 publication preserves the frozen result and privacy boundary", async () => {
+  const report = await readFile(
+    new URL(
+      "../docs/benchmarks/development-effects-performance-confirmatory-v3-2026-07-15.md",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const audit = await readFile(
+    new URL(
+      "../docs/benchmarks/development-effects-performance-confirmatory-v3-audit-2026-07-15.md",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  for (const publication of [report, audit]) {
+    assert.doesNotMatch(
+      publication,
+      /(?:file:\/\/|\/Users\/|\/home\/[^/\s]+\/|\/private\/(?:tmp|var)\/|[A-Za-z]:\\Users\\)/u,
+    );
+  }
+  assert.match(report, /Superpowers 6\.1\.1 is the upstream baseline and inspiration/u);
+  assert.match(report, /observed share: 111\.9%/u);
+  assert.match(audit, /outcome-consistency,task-outcome,lean-conformance,token-target/u);
+  assert.match(audit, /reasons=task-outcome,lean-conformance,token-target/u);
+  assert.match(audit, /no model calls and no result edits/u);
+});
