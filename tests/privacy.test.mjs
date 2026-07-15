@@ -31,6 +31,43 @@ const HISTORY_CANDIDATE_PATTERN = [
   DEPRECATED_IDENTITY,
 ].join("|");
 
+function isReservedExampleHost(hostname) {
+  return /(?:^|\.)(?:example|invalid)$/u.test(hostname.toLowerCase());
+}
+
+function isReservedUrlUserinfo(content, matchIndex, matchLength) {
+  const authorityMarker = content.lastIndexOf("//", matchIndex);
+  if (authorityMarker < 0) return false;
+
+  const authorityStart = authorityMarker + 2;
+  const beforeMatch = content.slice(authorityStart, matchIndex);
+  if (/[\s"'`<>/?#\\]/u.test(beforeMatch)) return false;
+
+  const authorityTail = content.slice(authorityStart);
+  const delimiterIndex = authorityTail.search(/[\s"'`<>/?#\\]/u);
+  const authorityEnd = delimiterIndex < 0
+    ? content.length
+    : authorityStart + delimiterIndex;
+  if (matchIndex + matchLength > authorityEnd) return false;
+
+  const authority = content.slice(authorityStart, authorityEnd);
+  if (!authority.includes("@")) return false;
+  try {
+    const url = new URL(`https://${authority}`);
+    const emailLikeMatch = content.slice(matchIndex, matchIndex + matchLength);
+    const matchedAt = matchIndex + emailLikeMatch.lastIndexOf("@");
+    const authorityAt = authorityStart + authority.lastIndexOf("@");
+    const matchedDomain = emailLikeMatch.slice(emailLikeMatch.lastIndexOf("@") + 1)
+      .toLowerCase();
+    return matchedAt === authorityAt
+      && matchedDomain === url.hostname.toLowerCase()
+      && (url.username.length > 0 || url.password.length > 0)
+      && isReservedExampleHost(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 function privacyFindings(content) {
   const findings = [];
   if (MACHINE_HOME.test(content)) {
@@ -46,7 +83,12 @@ function privacyFindings(content) {
     const isGitAddress = domain === "github.com"
       && (localPart === "git" || localPart === "token")
       && (nextCharacter === "/" || nextCharacter === ":");
-    if (!SAFE_EMAIL_DOMAINS.has(domain) && !isGitAddress) {
+    const isSyntheticUrlUserinfo = isReservedUrlUserinfo(
+      content,
+      match.index,
+      match[0].length,
+    );
+    if (!SAFE_EMAIL_DOMAINS.has(domain) && !isGitAddress && !isSyntheticUrlUserinfo) {
       findings.push("non-public email address");
     }
   }
@@ -103,6 +145,30 @@ test("privacy detector rejects private values but permits public and synthetic f
     [],
   );
   assert.deepEqual(privacyFindings("git@github.com:owner/repository.git"), []);
+  for (const syntheticUrl of [
+    "https://safe.example@evil.invalid/welcome",
+    "https://user@app.example/private",
+    "https://:secret@app.example/private",
+    "//user:secret@cdn.example/private",
+  ]) {
+    assert.deepEqual(privacyFindings(syntheticUrl), []);
+  }
+  assert.deepEqual(
+    privacyFindings(`https://example.invalid/contact?email=${privateEmail}`),
+    ["non-public email address"],
+  );
+  assert.deepEqual(
+    privacyFindings(["https://user", "github.com/private"].join("@")),
+    ["non-public email address"],
+  );
+  assert.deepEqual(
+    privacyFindings([
+      "https://real",
+      "private-company.test",
+      "app.example/private",
+    ].join("@")),
+    ["non-public email address"],
+  );
   assert.deepEqual(privacyFindings(publicSyntheticHome), []);
 });
 

@@ -1184,7 +1184,7 @@ if (args.includes("prompt-input")) {
   const text = ["Network access is restricted.", "Denied filesystem reads",
     workspace, path.join(home, "tmp"), path.join(home, "auth.json")].join("\\n");
   process.stdout.write(JSON.stringify([{ content: [{ type: "input_text", text }] }]));
-} else if (args[args.indexOf("-C") + 2] === process.execPath) {
+} else if (args[args.indexOf("-C") + 2] === process.env.EXPECTED_NODE_COMMAND) {
   const actualVerifier = args.at(-1);
   if (actualVerifier !== process.env.EXPECTED_VERIFIER_SENTINEL) process.exit(43);
   if (process.env.FAKE_SENTINEL_READABLE === "1") {
@@ -1193,13 +1193,16 @@ if (args.includes("prompt-input")) {
   }
 }
 `, { mode: 0o755 });
+    const fakeNodeCommand = path.join(root, "toolchain-node");
+    await symlink(process.execPath, fakeNodeCommand);
 
     const toolchain = {
       environment: {
+        EXPECTED_NODE_COMMAND: fakeNodeCommand,
         EXPECTED_VERIFIER_SENTINEL: expectedVerifier,
       },
       git: "git",
-      node: process.execPath,
+      node: fakeNodeCommand,
       npm: "npm",
       runtimeReadRoots: [],
     };
@@ -7921,19 +7924,19 @@ test("verifier copies are phase-isolated, preserve candidate files, and redact p
       "benchmark-hidden-01.test.mjs",
     );
     const hostReadSentinel = path.join(root, "host-read-sentinel.txt");
+    const hostUser = os.userInfo().username;
     await writeFile(hostReadSentinel, "host-only\n");
     const ownedHidden = [
       'import assert from "node:assert/strict";',
       'import test from "node:test";',
       'import { readFileSync, readdirSync, writeFileSync } from "node:fs";',
       'import net from "node:net";',
-      'import os from "node:os";',
       'import path from "node:path";',
       `const originalSentinel = ${JSON.stringify(path.join(workspace, "sandbox-escape.txt"))};`,
       `const hostReadSentinel = ${JSON.stringify(hostReadSentinel)};`,
       "console.log(process.cwd());",
       "console.log(process.env.HOME);",
-      "console.log(os.userInfo().username);",
+      `console.log(${JSON.stringify(hostUser)});`,
       "console.log(new URL(import.meta.url).href);",
       'test("candidate tests cannot mutate the verifier workspace", () => {',
       "  assert.throws(() => writeFileSync(path.join(process.cwd(), \"package.json\"), \"{}\"), (error) =>",
@@ -7989,7 +7992,7 @@ test("verifier copies are phase-isolated, preserve candidate files, and redact p
     const evidence = JSON.stringify(result);
     assert.ok(!evidence.includes(workspace));
     assert.ok(!evidence.includes(os.homedir()));
-    assert.ok(!evidence.includes(os.userInfo().username));
+    assert.ok(!evidence.includes(hostUser));
     assert.ok(!evidence.includes("file://"));
     assert.doesNotMatch(evidence, /\/private\/(?:tmp|var)\//u);
   } finally {
