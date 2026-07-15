@@ -784,6 +784,13 @@ test("development pilot declares three executable risk-calibrated scenario class
     suite.cases.find(({ id }) => id === "localized-template-cache")?.reproduction_contract,
     capsuleReproductionContract,
   );
+  const cacheTask = suite.cases.find(
+    ({ id }) => id === "localized-template-cache",
+  )?.task;
+  assert.match(cacheTask, /vary the locale for one template/i);
+  assert.match(cacheTask, /vary the template name for one locale/i);
+  assert.match(cacheTask, /vary the component boundary/i);
+  assert.match(cacheTask, /identical concatenated text/i);
   assert.deepEqual(
     suite.cases.find(({ id }) => id === "localized-template-cache")
       ?.artifact_regression_gates.map(({ id, policy, mutations }) => ({
@@ -1275,6 +1282,30 @@ test("LeanPowers activation requires an unambiguous first-progress route declara
   );
   assert.equal(
     reportsWorkflowActivation({
+      entrypoint: "$superpowers:using-superpowers",
+      message:
+        "Applying `superpowers:using-superpowers` first to follow repository workflow, then inspecting the defect.",
+      workflow: "superpowers-6.1.1",
+    }),
+    true,
+  );
+  for (const nonActivation of [
+    "Before applying `superpowers:using-superpowers`, inspect the repository.",
+    "Can we apply `superpowers:using-superpowers` here?",
+    "Applying a patch recommended by `superpowers:using-superpowers`.",
+  ]) {
+    assert.equal(
+      reportsWorkflowActivation({
+        entrypoint: "$superpowers:using-superpowers",
+        message: nonActivation,
+        workflow: "superpowers-6.1.1",
+      }),
+      false,
+      nonActivation,
+    );
+  }
+  assert.equal(
+    reportsWorkflowActivation({
       entrypoint: "$leanpowers:route",
       message: "leanpowers:route | workflow=build | risk=strict",
       workflow: "leanpowers-0.2.0",
@@ -1351,6 +1382,22 @@ test("LeanPowers route declaration accepts compact semantic and legacy forms", (
       required_gates: "[current_evidence]",
     },
   );
+  assert.deepEqual(
+    parseLeanRouteLedger(
+      "Running in the `leanpowers:route` workflow with `OWNER=debug` and `RISK=standard` per your trace/diff request.",
+    ),
+    {
+      workflow: "debug",
+      risk: "standard",
+      required_gates: "[current_evidence]",
+    },
+  );
+  for (const nonActivation of [
+    "Running in the `leanpowers:route` documentation with `OWNER=debug` and `RISK=standard` per the example.",
+    "Running in the `leanpowers:route` example with `OWNER=debug` and `RISK=standard` per the documentation.",
+  ]) {
+    assert.equal(parseLeanRouteLedger(nonActivation), null, nonActivation);
+  }
   for (const declaration of [
     "Using leanpowers:route with owner=debug and risk=standard.",
     "entrypoint: leanpowers:route\nworkflow: debug\nrisk: standard",

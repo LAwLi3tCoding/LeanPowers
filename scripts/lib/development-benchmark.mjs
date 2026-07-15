@@ -5536,6 +5536,12 @@ export function parseLeanRouteLedger(message) {
   );
   if (!isAssertiveLeanRoutePrefix(throughRoute)) return null;
   const afterRoute = firstLine.slice(routeMatch.index + routeMatch[0].length);
+  if (
+    /^\s*running in\b/iu.test(throughRoute) &&
+    !/^[*_`]*\s+workflow\s+with\b/iu.test(afterRoute)
+  ) {
+    return null;
+  }
   if (/^[*_`]*\s*\?/u.test(afterRoute)) return null;
   if (
     /\b(?:if|maybe|perhaps|possibly|tentatively|provisionally|assuming)\b[^.;]{0,80}\bleanpowers:route\b/iu.test(throughRoute) ||
@@ -5571,16 +5577,16 @@ export function parseLeanRouteLedger(message) {
     return null;
   }
   const workflowMatches = [...routeAndFields.matchAll(
-    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|\band\b|$))/giu,
+    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|\b(?:and|per)\b|$))/giu,
   )];
   const riskMatches = [...routeAndFields.matchAll(
-    /\brisk\s*(?:[:=]|\bis\b)\s*`?(lean|standard|strict)`?(?=\s*(?:[|;,.]|\band\b|$))/giu,
+    /\brisk\s*(?:[:=]|\bis\b)\s*`?(lean|standard|strict)`?(?=\s*(?:[|;,.]|\b(?:and|per)\b|$))/giu,
   )];
   const workflowPresentations = [...routeAndFields.matchAll(
-    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(?!not\b|never\b)([\p{L}][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|\band\b|$))/giu,
+    /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(?!not\b|never\b)([\p{L}][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|\b(?:and|per)\b|$))/giu,
   )];
   const riskPresentations = [...routeAndFields.matchAll(
-    /\brisk\s*(?:[:=]|\bis\b)\s*`?(?!not\b|never\b)([\p{L}][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|\band\b|$))/giu,
+    /\brisk\s*(?:[:=]|\bis\b)\s*`?(?!not\b|never\b)([\p{L}][\p{L}\p{N}_-]*)`?(?=\s*(?:[|;,.]|\b(?:and|per)\b|$))/giu,
   )];
   const workflows = new Set(workflowMatches.map(
     (match) => match[1].toLocaleLowerCase("en-US"),
@@ -5589,10 +5595,10 @@ export function parseLeanRouteLedger(message) {
     (match) => match[1].toLocaleLowerCase("en-US"),
   ));
   const structuredWorkflowMatches = [...routeFieldText.matchAll(
-    /\b(?:workflow|owner)\s*[:=]\s*`?(?:shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|\band\b|$))/giu,
+    /\b(?:workflow|owner)\s*[:=]\s*`?(?:shape|build|debug|review|verify|ship|adapt)`?(?=\s*(?:[|;,.]|\b(?:and|per)\b|$))/giu,
   )];
   const structuredRiskMatches = [...routeFieldText.matchAll(
-    /\brisk\s*[:=]\s*`?(?:lean|standard|strict)`?(?=\s*(?:[|;,.]|\band\b|$))/giu,
+    /\brisk\s*[:=]\s*`?(?:lean|standard|strict)`?(?=\s*(?:[|;,.]|\b(?:and|per)\b|$))/giu,
   )];
   const structuredWorkflowFields = structuredFields.filter((field) =>
     field === "workflow" || field === "owner"
@@ -5769,7 +5775,7 @@ function isAssertiveLeanRoutePrefix(value) {
     .replace(/[*_`]/gu, "")
     .trim()
     .replace(/\s+/gu, " ");
-  return /^(?:leanpowers:route|(?:(?:routing|route) selected|selected|using|following|invoking|activated|activating|entrypoint)\s*:?\s*leanpowers:route|starting (?:in workflow\s+|with (?:the\s+)?|using (?:the\s+)?)leanpowers:route|I(?:'m|’m| am)?\s+(?:use|using|follow|following|select|selected|activate|activated|invoke|invoking)\s+leanpowers:route)$/iu
+  return /^(?:leanpowers:route|(?:(?:routing|route) selected|selected|using|following|invoking|activated|activating|entrypoint)\s*:?\s*leanpowers:route|starting (?:in workflow\s+|with (?:the\s+)?|using (?:the\s+)?)leanpowers:route|running in (?:the\s+)?leanpowers:route|I(?:'m|’m| am)?\s+(?:use|using|follow|following|select|selected|activate|activated|invoke|invoking)\s+leanpowers:route)$/iu
     .test(normalized);
 }
 
@@ -6113,11 +6119,15 @@ export function reportsWorkflowActivation({ entrypoint, message, workflow }) {
     `(?:^|\\n)\\s*(?:[-*]\\s*)?(?:entrypoint|workflow|skill)\\s*[:=]\\s*(?:${target})(?:\\s|$)`,
     "iu",
   );
+  const applying = new RegExp(
+    `(?:^|\\n)\\s*Applying\\s+(?:${target})(?=\\s|[,.;:]|$)`,
+    "iu",
+  );
   const affirmative = new RegExp(
     `\\b(?:activat(?:e|ed|ing)|invok(?:e|ed|ing)|us(?:e|ed|ing)|follow(?:ed|ing)?|start(?:ed|ing)?(?:\\s+with)?)\\b[^\\n.]{0,64}(?:${target})`,
     "iu",
   );
-  return structured.test(text) || affirmative.test(text);
+  return structured.test(text) || applying.test(text) || affirmative.test(text);
 }
 
 function escapeRegex(value) {

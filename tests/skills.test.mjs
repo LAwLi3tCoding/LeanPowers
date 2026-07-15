@@ -141,11 +141,12 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /REPRODUCE runs ONE pre-edit failing path/i);
   assert.match(route, /showing failure and first wrong transition/i);
   assert.match(route, /inspection\/inference is not reproduction/i);
-  assert.match(route, /Regression tests must fail under a plausible shortcut/i);
+  assert.match(route, /Regression tests must fail under plausible shortcuts/i);
   assert.match(route, /For composite identities/i);
-  assert.match(route, /distinct inputs with identical concatenated text/i);
-  assert.match(route, /different component boundaries/i);
-  assert.match(route, /assert both reach the operation separately/i);
+  assert.match(route, /vary each component/i);
+  assert.match(route, /inputs with identical concatenated text/i);
+  assert.match(route, /different boundaries/i);
+  assert.match(route, /assert all reach the operation separately/i);
   assert.match(route, /PATCH: Codex ONE repository-relative `apply_patch` for code\/tests/i);
   assert.match(route, /Claude adjacent native `Edit`\/`Write` without prose\/inspection/i);
   assert.match(route, /Include failure-path tests/i);
