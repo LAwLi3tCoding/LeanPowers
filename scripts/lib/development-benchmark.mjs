@@ -42,6 +42,13 @@ const VERIFIER_SANDBOX_MODES = new Set([
   "macos-seatbelt-hermetic-v2",
 ]);
 const ARTIFACT_GATE_POLICIES = new Set(["all-kill"]);
+const DEVELOPMENT_EVIDENCE_LEVELS = new Set([
+  "paired-development-heldout",
+  "paired-development-pilot",
+]);
+export const HELDOUT_PERMISSION_PROFILE = "benchmark";
+export const HELDOUT_AGENT_READ_ISOLATION =
+  "codex-minimal-workspace-plugin-toolchain-read-v1";
 const REGEX_PREFIX_KEYWORDS = new Set([
   "await",
   "case",
@@ -119,8 +126,10 @@ export async function loadDevelopmentSuite(input) {
   const suiteRoot = await realpath(fileURLToPath(new URL(".", suiteUrl)));
 
   if (suite.schema_version !== 2) errors.push("schema_version must equal 2");
-  if (suite.evidence_level !== "paired-development-pilot") {
-    errors.push("evidence_level must equal paired-development-pilot");
+  if (!DEVELOPMENT_EVIDENCE_LEVELS.has(suite.evidence_level)) {
+    errors.push(
+      "evidence_level must equal paired-development-pilot or paired-development-heldout",
+    );
   }
   if (!Number.isInteger(suite.repetitions) || suite.repetitions < 1) {
     errors.push("repetitions must be a positive integer");
@@ -387,10 +396,85 @@ export async function loadDevelopmentSuite(input) {
     }
   }
 
+  if (suite.evidence_level === "paired-development-heldout") {
+    let freezeContractVerified = false;
+    try {
+      const caseSnapshots = Object.fromEntries(suite.cases.map((benchmarkCase) => [
+        benchmarkCase.id,
+        caseSnapshotContract(benchmarkCase),
+      ]));
+      const expectedFreezeContract = {
+        status: "frozen-before-live-run",
+        model_default: suite.model_default,
+        effort: suite.effort,
+        repetitions: suite.repetitions,
+        workflow_order: suite.workflow_order,
+        agent_read_isolation: HELDOUT_AGENT_READ_ISOLATION,
+        superpowers_revision: suite.freeze_contract?.superpowers_revision,
+        case_snapshots: caseSnapshots,
+      };
+      freezeContractVerified =
+        /^[a-f0-9]{40}$/u.test(String(
+          suite.freeze_contract?.superpowers_revision ?? "",
+        )) && isDeepStrictEqual(suite.freeze_contract, expectedFreezeContract);
+    } catch {
+      freezeContractVerified = false;
+    }
+    suite.freeze_contract_verified = freezeContractVerified;
+    if (!freezeContractVerified) {
+      errors.push(
+        "paired-development-heldout requires an exact frozen model, matrix, read-isolation policy, baseline revision, and case snapshot contract",
+      );
+    }
+  }
+
   if (errors.length > 0) {
     throw new Error(`Invalid development benchmark suite:\n${errors.join("\n")}`);
   }
   return suite;
+}
+
+export function assertFrozenHeldoutSelection(
+  suite,
+  { caseIds, model, repetitions } = {},
+) {
+  if (suite?.evidence_level !== "paired-development-heldout") return;
+  if (suite.freeze_contract_verified !== true) {
+    throw new Error("Held-out runs require a verified freeze contract");
+  }
+  if (model !== undefined && model !== suite.model_default) {
+    throw new Error("Held-out runs must use the frozen default model");
+  }
+  if (repetitions !== undefined && repetitions !== suite.repetitions) {
+    throw new Error("Held-out runs must execute every frozen repetition");
+  }
+  if (caseIds?.length) {
+    const requested = [...new Set(caseIds)].sort();
+    const frozen = suite.cases.map(({ id }) => id).sort();
+    if (
+      requested.length !== caseIds.length ||
+      !isDeepStrictEqual(requested, frozen)
+    ) {
+      throw new Error("Held-out runs must execute every frozen case exactly once");
+    }
+  }
+}
+
+export function assertFrozenHeldoutRevisions(
+  suite,
+  { evaluatorRevision, workflowRevisions } = {},
+) {
+  if (suite?.evidence_level !== "paired-development-heldout") return;
+  if (
+    !/^[a-f0-9]{40}$/u.test(String(evaluatorRevision ?? "")) ||
+    evaluatorRevision !== workflowRevisions?.["leanpowers-0.2.0"] ||
+    workflowRevisions?.["superpowers-6.1.1"] !==
+      suite.freeze_contract?.superpowers_revision
+  ) {
+    throw new Error(
+      "Held-out evaluator, LeanPowers plugin, or Superpowers baseline revision did not match the freeze contract",
+    );
+  }
 }
 
 async function snapshotWorkspaceDirectory(workspace) {
@@ -570,12 +654,63 @@ export function buildClaudeArgs({
   return args;
 }
 
-export function buildCodexArgs({ model, prompt, workspace, effort = "low" }) {
+export function renderHeldoutCodexProfile({
+  authFile,
+  pluginRoot,
+  runtimeReadRoots = [],
+}) {
+  const requiredPaths = [authFile, pluginRoot, ...runtimeReadRoots];
+  if (requiredPaths.some((entry) =>
+    typeof entry !== "string" || !path.isAbsolute(entry)
+  )) {
+    throw new Error("Held-out permission paths must be absolute");
+  }
+  const readRoots = [...new Set(runtimeReadRoots.map((entry) => path.resolve(entry)))]
+    .sort();
+  if (readRoots.some((entry) =>
+    entry === path.parse(entry).root ||
+    isSameOrAncestor(entry, PROJECT_ROOT) ||
+    isSameOrAncestor(entry, path.resolve(authFile))
+  )) {
+    throw new Error("Held-out toolchain read root is too broad");
+  }
   return [
+    `default_permissions = ${JSON.stringify(HELDOUT_PERMISSION_PROFILE)}`,
+    "",
+    `[permissions.${HELDOUT_PERMISSION_PROFILE}.filesystem]`,
+    '":minimal" = "read"',
+    '":workspace_roots" = "write"',
+    '":tmpdir" = "write"',
+    `${JSON.stringify(path.resolve(pluginRoot))} = "read"`,
+    ...readRoots.map((entry) => `${JSON.stringify(entry)} = "read"`),
+    `${JSON.stringify(path.resolve(authFile))} = "none"`,
+    "",
+    `[permissions.${HELDOUT_PERMISSION_PROFILE}.network]`,
+    "enabled = false",
+    "",
+  ].join("\n");
+}
+
+export function buildCodexArgs({
+  model,
+  prompt,
+  workspace,
+  effort = "low",
+  permissionProfile,
+}) {
+  const args = [
     "exec",
     "--json",
-    "--sandbox",
-    "workspace-write",
+  ];
+  if (permissionProfile === undefined) {
+    args.push("--sandbox", "workspace-write");
+  } else {
+    if (!/^[a-z][a-z0-9-]*$/u.test(permissionProfile)) {
+      throw new Error("Codex permission profile name is invalid");
+    }
+    args.push("--strict-config", "--profile", permissionProfile);
+  }
+  args.push(
     "-c",
     'approval_policy="never"',
     "-c",
@@ -589,7 +724,149 @@ export function buildCodexArgs({ model, prompt, workspace, effort = "low" }) {
     "-C",
     workspace,
     prompt,
-  ];
+  );
+  return args;
+}
+
+function heldoutAgentEnvironment(home, overrides = {}) {
+  return benchmarkEnvironment(home, {
+    HOME: path.join(home, "tmp", "home"),
+    OPENSSL_CONF: "/dev/null",
+    ...overrides,
+  });
+}
+
+async function configureHeldoutCodexHome(home, toolchain) {
+  const scratchHome = path.join(home, "tmp", "home");
+  await mkdir(scratchHome, { recursive: true });
+  await writeFile(
+    path.join(home, `${HELDOUT_PERMISSION_PROFILE}.config.toml`),
+    renderHeldoutCodexProfile({
+      authFile: path.join(home, "auth.json"),
+      pluginRoot: path.join(home, "plugins"),
+      runtimeReadRoots: toolchain.runtimeReadRoots,
+    }),
+  );
+}
+
+async function findFirstSkillFile(root) {
+  const entries = await readdir(root, { withFileTypes: true });
+  entries.sort((left, right) => left.name.localeCompare(right.name));
+  for (const entry of entries) {
+    const target = path.join(root, entry.name);
+    if (entry.isFile() && entry.name === "SKILL.md") return target;
+    if (entry.isDirectory()) {
+      const nested = await findFirstSkillFile(target);
+      if (nested !== null) return nested;
+    }
+  }
+  return null;
+}
+
+export async function preflightHeldoutAgentReadIsolation({
+  benchmarkCase,
+  codexExecutable,
+  codexHome,
+  toolchain,
+}) {
+  const runRoot = await mkdtemp(path.join(os.tmpdir(), "leanpowers-isolation-preflight-"));
+  const workspace = path.join(runRoot, "workspace");
+  const runHome = path.join(runRoot, "home");
+  try {
+    await materializeWorkspaceSnapshot(
+      benchmarkCase.workspace_snapshot,
+      workspace,
+    );
+    await cp(codexHome, runHome, { recursive: true });
+    await configureHeldoutCodexHome(runHome, toolchain);
+    await initializeGit(workspace, toolchain);
+    const skillFile = await findFirstSkillFile(path.join(runHome, "plugins"));
+    if (skillFile === null) {
+      throw new Error("Held-out read-isolation preflight could not locate an installed skill");
+    }
+    const evaluatorSentinel = path.join(PROJECT_ROOT, "package.json");
+    const hiddenVerifier = path.join(
+      PROJECT_ROOT,
+      "evals",
+      "development-effects",
+      benchmarkCase.verifier_files[0],
+    );
+    await access(hiddenVerifier, fsConstants.R_OK);
+    const probeTarget = path.join(workspace, ".leanpowers-permission-probe");
+    const probeScript = [
+      'const fs = require("node:fs");',
+      "const [workspaceFile, writeTarget, pluginFile, ...blockedFiles] = process.argv.slice(1);",
+      "fs.readFileSync(workspaceFile);",
+      "fs.readFileSync(pluginFile);",
+      'fs.writeFileSync(writeTarget, "probe\\n");',
+      "fs.unlinkSync(writeTarget);",
+      "for (const blockedFile of blockedFiles) {",
+      "  try {",
+      "    fs.readFileSync(blockedFile);",
+      "    process.exit(42);",
+      "  } catch (error) {",
+      "    if (error?.code === undefined) throw error;",
+      "  }",
+      "}",
+    ].join("\n");
+    const env = heldoutAgentEnvironment(runHome, toolchain.environment);
+    const runSandboxed = (command, args) => runProcess(
+      codexExecutable,
+      [
+        "sandbox",
+        "--permissions-profile",
+        HELDOUT_PERMISSION_PROFILE,
+        "--profile",
+        HELDOUT_PERMISSION_PROFILE,
+        "-C",
+        workspace,
+        command,
+        ...args,
+      ],
+      { cwd: workspace, env, timeoutMs: 60_000 },
+    );
+    const nodeProbe = await runSandboxed(toolchain.node, [
+      "--eval",
+      probeScript,
+      path.join(workspace, "package.json"),
+      probeTarget,
+      skillFile,
+      evaluatorSentinel,
+      path.join(runHome, "auth.json"),
+      hiddenVerifier,
+    ]);
+    if (
+      nodeProbe.exitCode !== 0 ||
+      nodeProbe.timedOut ||
+      nodeProbe.signal !== null
+    ) {
+      throw new Error("Held-out read-isolation filesystem probe failed");
+    }
+    const npmProbe = await runSandboxed(toolchain.npm, ["test"]);
+    if (
+      npmProbe.exitCode !== 0 ||
+      npmProbe.timedOut ||
+      npmProbe.signal !== null
+    ) {
+      throw new Error("Held-out read-isolation validation-command probe failed");
+    }
+    const gitProbe = await runSandboxed(toolchain.git, ["status", "--short"]);
+    if (
+      gitProbe.exitCode !== 0 ||
+      gitProbe.timedOut ||
+      gitProbe.signal !== null ||
+      gitProbe.stdout.trim() !== ""
+    ) {
+      throw new Error("Held-out read-isolation Git probe failed");
+    }
+    return {
+      agent_read_isolation: HELDOUT_AGENT_READ_ISOLATION,
+      permission_profile: HELDOUT_PERMISSION_PROFILE,
+      status: "PASS",
+    };
+  } finally {
+    await rm(runRoot, { force: true, recursive: true });
+  }
 }
 
 export function parseClaudeResult(raw) {
@@ -4264,6 +4541,8 @@ export async function runDevelopmentPilot({
   outputDirectory = resolveDevelopmentOutputDirectory(outputDirectory);
   const suiteUrl = toFileUrl(suitePath);
   const suite = await loadDevelopmentSuite(suiteUrl);
+  const heldout = suite.evidence_level === "paired-development-heldout";
+  assertFrozenHeldoutSelection(suite, { caseIds, model, repetitions });
   let selectedCases = caseIds?.length
     ? suite.cases.filter((benchmarkCase) => caseIds.includes(benchmarkCase.id))
     : suite.cases;
@@ -4290,6 +4569,13 @@ export async function runDevelopmentPilot({
       }),
       "leanpowers-0.2.0": await cleanGitRevision(leanpowersMarketplace),
     };
+    const evaluatorRevision = heldout
+      ? await cleanGitRevision(PROJECT_ROOT)
+      : null;
+    assertFrozenHeldoutRevisions(suite, {
+      evaluatorRevision,
+      workflowRevisions,
+    });
     const homes = await prepareCodexHomes({
       authFile,
       codexExecutable,
@@ -4298,15 +4584,34 @@ export async function runDevelopmentPilot({
       superpowersMarketplace,
       toolchain,
     });
+    let agentReadIsolationPreflight = null;
+    if (heldout) {
+      for (const benchmarkCase of selectedCases) {
+        for (const workflow of WORKFLOWS) {
+          await preflightHeldoutAgentReadIsolation({
+            benchmarkCase,
+            codexExecutable,
+            codexHome: homes[workflow],
+            toolchain,
+          });
+        }
+      }
+      agentReadIsolationPreflight = "PASS";
+    }
     const runtime = {
       codex_version: (
         await runProcess(codexExecutable, ["--version"], { timeoutMs: 30_000 })
       ).stdout.trim(),
       model: model ?? suite.model_default,
       effort: suite.effort,
-      sandbox: "workspace-write",
+      sandbox: heldout ? "permissions-profile" : "workspace-write",
+      permission_profile: heldout ? HELDOUT_PERMISSION_PROFILE : null,
+      agent_read_isolation: heldout ? HELDOUT_AGENT_READ_ISOLATION : null,
+      agent_read_isolation_preflight: agentReadIsolationPreflight,
       approval: "never",
       user_plugins: "isolated",
+      evaluator_revision: evaluatorRevision,
+      freeze_contract_verified: suite.freeze_contract_verified === true,
       workflow_revisions: workflowRevisions,
     };
     const runs = [];
@@ -4328,6 +4633,8 @@ export async function runDevelopmentPilot({
             runId,
             toolchain,
             workflow,
+            permissionProfile:
+              heldout ? HELDOUT_PERMISSION_PROFILE : undefined,
           });
           const { result, artifacts } = execution;
           runs.push(result);
@@ -4409,14 +4716,58 @@ export function renderDevelopmentReport(result) {
     snapshot.verifier_sha256,
     snapshot.mutants_sha256,
   ].join(" | "));
+  const heldout = result.evidence_level === "paired-development-heldout";
+  const confirmatory = heldout &&
+    result.confirmatory_eligible === true &&
+    result.completion === "complete";
+  const reportTitle = confirmatory
+    ? "# Frozen held-out development-effects comparison"
+    : heldout
+      ? "# Incomplete held-out development-effects diagnostic"
+      : "# Paired development-effects pilot";
+  const evidenceDescription = confirmatory
+    ? "This is frozen confirmatory coding evidence for the listed cases and revisions, but it is not the full 11-scenario release benchmark."
+    : heldout
+      ? "This held-out result is incomplete or did not match the freeze contract, so it is diagnostic only and cannot support a confirmatory claim."
+      : "This is real coding and independent executable verification, but it is not the full 11-scenario release benchmark.";
+  const reportedCases = Array.isArray(result.cases) ? result.cases : [];
+  const caseScope = reportedCases.length === 1
+    ? "the one reported fixture"
+    : `the ${reportedCases.length} reported fixtures`;
+  const scenarioScope = [...new Set(reportedCases.map(
+    ({ scenario_class: scenarioClass }) => scenarioClass,
+  ))].join(", ");
+  const caseSpecificBoundaries = [];
+  if (reportedCases.some(({ id }) => id === "localized-template-cache")) {
+    caseSpecificBoundaries.push(
+      "- The localized-cache hidden verifier samples representative single-, control-, repeated-, and multi-character separators. Passing those samples is not mathematical proof of collision freedom for every possible string; the task contract still requires an unambiguous structural identity.",
+    );
+  }
+  if (reportedCases.some(({ id }) => id === "transient-profile-load")) {
+    caseSpecificBoundaries.push(
+      "- The transient-profile-load verifier exercises the declared retry, same-ID overlap, fulfilled reuse, and cross-ID isolation sequences. It does not prove every possible cache lifecycle or concurrency interleaving.",
+    );
+  }
   return [
-    "# Paired development-effects pilot",
+    reportTitle,
     "",
-    `Evidence level: **${result.evidence_level}**. This is real coding and independent executable verification, but it is not the full 11-scenario release benchmark.`,
+    `Evidence level: **${result.evidence_level}**. ${evidenceDescription}`,
+    ...(heldout
+      ? [
+          "",
+          `Frozen run contract: **${result.frozen_run_contract_verified === true ? "verified" : "unverified"}**. Confirmatory eligibility: **${confirmatory ? "yes" : "no"}**.`,
+        ]
+      : []),
     "",
     `Run matrix: **${result.completion}**. Stable token-target conclusions are unavailable unless the declared matrix is complete.`,
     "",
     `Runtime: ${result.runtime.codex_version}; model: ${result.runtime.model}; effort: ${result.runtime.effort}.`,
+    ...(heldout
+      ? [
+          "",
+          `Agent read isolation: ${result.runtime.agent_read_isolation}; permission profile: ${result.runtime.permission_profile}; preflight: ${result.runtime.agent_read_isolation_preflight}.`,
+        ]
+      : []),
     "",
     `Revisions: Superpowers ${result.runtime.workflow_revisions["superpowers-6.1.1"]}; LeanPowers ${result.runtime.workflow_revisions["leanpowers-0.2.0"]}.`,
     "",
@@ -4463,14 +4814,14 @@ export function renderDevelopmentReport(result) {
     "## Interpretation boundary",
     "",
     "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, every case-owned semantic fault family policy to pass, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    "- LeanPowers quality-bearing conformance requires an unambiguous semantic route declaration before any task tool, rejects conflicting declarations, and forbids risk downgrade after an upgrade. Build/debug traces must show each later-edited existing file was successfully read before its own first edit, fixture-owned structured pre-edit reproduction for debug, and supported successful validation after the final edit. Discovery syntax, extra grounded-file reads, implementation/test patch composition, split versus batched reads, validation-manifest reads, Skill/reference reloads, exact command/call budgets, clause-ledger shape, repeated route or ledger presentation, contiguous versus split patch events, one-call versus two-call validation, and later non-mutating tooling remain efficiency or ceremony diagnostics rather than quality gates. Representation-boundary adequacy is measured workflow-neutrally in Task PASS: every pre-registered fault-family member must preserve baseline tests, every candidate counterfactual must complete, and every member must be killed by the candidate test delta. Replay telemetry proves only that the exact reproduction command ran, not that its diagnostic meaning changed. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Strict quality additionally requires a current independent PASS review with the complete task and current validation context, plus proof the reviewer did not mutate the workspace; exact Skill invocation, prompt/verdict surface, reviewer count, wait targeting, and cycle choreography remain diagnostics.",
+    `- LeanPowers quality-bearing conformance requires an unambiguous semantic route declaration before any task tool, rejects conflicting declarations, and forbids risk downgrade after an upgrade. Build/debug traces must show each later-edited existing file was successfully read before its own first edit, fixture-owned structured pre-edit reproduction for debug, and supported successful validation after the final edit. Discovery syntax, extra grounded-file reads, implementation/test patch composition, split versus batched reads, validation-manifest reads, Skill/reference reloads, exact command/call budgets, clause-ledger shape, repeated route or ledger presentation, contiguous versus split patch events, one-call versus two-call validation, and later non-mutating tooling remain efficiency or ceremony diagnostics rather than quality gates. Representation-boundary adequacy is measured workflow-neutrally in Task PASS: every pre-registered fault-family member must preserve baseline tests, every candidate counterfactual must complete, and every member must be killed by the candidate test delta. Replay telemetry proves only that the exact reproduction command ran, not that its diagnostic meaning changed. These observable checks are scoped to ${caseScope}, not universal semantic proof. Strict quality additionally requires a current independent PASS review with the complete task and current validation context, plus proof the reviewer did not mutate the workspace; exact Skill invocation, prompt/verdict surface, reviewer count, wait targeting, and cycle choreography remain diagnostics.`,
     "- Codex JSONL does not expose raw spawn arguments such as `fork_context`; observable spawn/wait behavior is checked dynamically, while exact argument shape is covered by static workflow tests and remains a runtime telemetry gap.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
     "- Paired reductions and Lean token shares are computed within each identical case and repetition before aggregation. The stable ≤60% target passes only when model-token telemetry exists for every pair in the population and every Lean/Superpowers share is at most 60%; a median cannot hide an over-target pair. Each other metric shows its own valid sample count. The task-PASS-and-conformant population is primary, so failing faster or skipping workflow gates never counts as an improvement.",
     "- Codex CLI does not expose a deterministic seed, so paired repetitions reduce noise but do not eliminate it.",
-    "- The three cases cover a small feature, an unknown-cause cache defect, and a security-compatible API extension. They do not establish universal non-inferiority.",
-    "- The localized-cache hidden verifier samples representative single-, control-, repeated-, and multi-character separators. Passing those samples is not mathematical proof of collision freedom for every possible string; the task contract still requires an unambiguous structural identity.",
+    `- The reported cases cover only these scenario classes: ${scenarioScope || "none"}. They do not establish universal non-inferiority.`,
+    ...caseSpecificBoundaries,
     "- Raw transcripts remain local and are written only after every run finishes. Disposable workspaces are destroyed after each run and are not publication artifacts.",
     "",
   ].join("\n");
@@ -4504,6 +4855,7 @@ async function runSingleCase({
   runId,
   toolchain,
   workflow,
+  permissionProfile,
 }) {
   const runRoot = await mkdtemp(path.join(os.tmpdir(), "leanpowers-development-run-"));
   const workspace = path.join(runRoot, "workspace");
@@ -4516,6 +4868,12 @@ async function runSingleCase({
     await cp(codexHome, runHome, { recursive: true });
     const baselineHead = await initializeGit(workspace, toolchain);
     await mkdir(path.join(runHome, "tmp"), { recursive: true });
+    if (permissionProfile !== undefined) {
+      if (permissionProfile !== HELDOUT_PERMISSION_PROFILE) {
+        throw new Error("Unsupported development benchmark permission profile");
+      }
+      await configureHeldoutCodexHome(runHome, toolchain);
+    }
 
     const prompt = [
       entrypoint,
@@ -4534,6 +4892,7 @@ async function runSingleCase({
       model,
       prompt,
       workspace,
+      permissionProfile,
     });
     const reviewerMutationTracker =
       tracksReviewerWorkspaceMutations(workflow)
@@ -4549,7 +4908,9 @@ async function runSingleCase({
     const startedAt = Date.now();
     const agent = await runProcess(codexExecutable, args, {
       cwd: workspace,
-      env: benchmarkEnvironment(runHome, toolchain.environment),
+      env: permissionProfile === undefined
+        ? benchmarkEnvironment(runHome, toolchain.environment)
+        : heldoutAgentEnvironment(runHome, toolchain.environment),
       onStdoutLine: reviewerMutationTracker?.onStdoutLine,
       timeoutMs: 600_000,
     });
@@ -4686,8 +5047,32 @@ export function makePilotResult(suite, runtime, runs, repetitions, selectedCases
     id: benchmarkCase.id,
     ...caseSnapshotContract(benchmarkCase),
   }));
+  const heldout = suite.evidence_level === "paired-development-heldout";
+  const frozenCaseIds = Array.isArray(suite.cases)
+    ? suite.cases.map(({ id }) => id).sort()
+    : [];
+  const selectedCaseIds = selectedCases.map(({ id }) => id).sort();
+  const heldoutContractVerified = !heldout || (
+    suite.freeze_contract_verified === true &&
+    runtime?.freeze_contract_verified === true &&
+    repetitions === suite.repetitions &&
+    isDeepStrictEqual(selectedCaseIds, frozenCaseIds) &&
+    runtime?.model === suite.model_default &&
+    runtime?.effort === suite.effort &&
+    runtime?.sandbox === "permissions-profile" &&
+    runtime?.permission_profile === HELDOUT_PERMISSION_PROFILE &&
+    runtime?.agent_read_isolation ===
+      suite.freeze_contract?.agent_read_isolation &&
+    runtime?.agent_read_isolation_preflight === "PASS" &&
+    /^[a-f0-9]{40}$/u.test(String(runtime?.evaluator_revision ?? "")) &&
+    runtime.evaluator_revision ===
+      runtime?.workflow_revisions?.["leanpowers-0.2.0"] &&
+    runtime?.workflow_revisions?.["superpowers-6.1.1"] ===
+      suite.freeze_contract?.superpowers_revision
+  );
   const matrixComplete = /^[a-f0-9]{64}$/u.test(String(suite.suite_sha256 ?? "")) &&
-    hasCompleteRunMatrix(runs, selectedCases, repetitions);
+    hasCompleteRunMatrix(runs, selectedCases, repetitions) &&
+    heldoutContractVerified;
   return {
     schema_version: 2,
     suite_id: suite.suite_id,
@@ -4695,6 +5080,8 @@ export function makePilotResult(suite, runtime, runs, repetitions, selectedCases
     evidence_level: suite.evidence_level,
     activation_mode: suite.activation_mode,
     completion: matrixComplete ? "complete" : "incomplete",
+    frozen_run_contract_verified: heldout ? heldoutContractVerified : null,
+    confirmatory_eligible: heldout ? matrixComplete : null,
     runtime,
     repetitions,
     cases: selectedCases.map(({ id, scenario_class, risk_level, expected_workflow }) => ({
@@ -5238,11 +5625,39 @@ async function resolveBenchmarkToolchain(codexExecutable) {
   return {
     codex,
     git,
+    node,
+    npm,
+    runtimeReadRoots: benchmarkToolchainRuntimeReadRoots([node, npm]),
     environment: {
       PATH: [...new Set([...executableDirectories, ...systemDirectories])].join(path.delimiter),
       SHELL: shell,
     },
   };
+}
+
+function benchmarkToolchainRuntimeReadRoots(executables) {
+  const roots = new Set();
+  for (const executable of executables) {
+    const resolved = realpathSync(executable);
+    const normalized = resolved.split(path.sep).join("/");
+    const cellarMarker = "/Cellar/";
+    const cellarIndex = normalized.indexOf(cellarMarker);
+    if (cellarIndex > 0) {
+      const prefix = normalized.slice(0, cellarIndex);
+      roots.add(path.join(prefix, "bin"));
+      roots.add(path.join(prefix, "Cellar"));
+      roots.add(path.join(prefix, "opt"));
+    }
+    const nodeModulesMarker = "/node_modules/";
+    const nodeModulesIndex = normalized.indexOf(nodeModulesMarker);
+    if (nodeModulesIndex > 0) {
+      const packageEnd = normalized.indexOf("/", nodeModulesIndex + nodeModulesMarker.length);
+      roots.add(
+        packageEnd === -1 ? normalized : normalized.slice(0, packageEnd),
+      );
+    }
+  }
+  return [...roots].sort();
 }
 
 async function resolveExecutable(command) {

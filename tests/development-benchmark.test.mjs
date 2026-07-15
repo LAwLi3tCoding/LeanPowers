@@ -992,6 +992,12 @@ test("artifact regression gate schema fails closed", async () => {
       ],
       [
         (candidate) => {
+          candidate.evidence_level = "unregistered-development-evidence";
+        },
+        /evidence_level must equal paired-development-pilot or paired-development-heldout/u,
+      ],
+      [
+        (candidate) => {
           candidate.cases[cacheCaseIndex].artifact_regression_gates[0].id =
             "not--kebab";
         },
