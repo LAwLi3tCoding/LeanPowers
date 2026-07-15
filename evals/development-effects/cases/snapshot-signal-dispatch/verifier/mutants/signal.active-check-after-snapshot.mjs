@@ -1,0 +1,21 @@
+export function createSignal() {
+  const listeners = [];
+  return {
+    subscribe(listener) {
+      if (typeof listener !== "function") throw new TypeError("listener must be a function");
+      const record = { active: true, listener };
+      listeners.push(record);
+      return () => {
+        if (!record.active) return;
+        record.active = false;
+        const index = listeners.indexOf(record);
+        if (index !== -1) listeners.splice(index, 1);
+      };
+    },
+    emit(value) {
+      for (const record of [...listeners]) {
+        if (record.active) record.listener(value);
+      }
+    },
+  };
+}

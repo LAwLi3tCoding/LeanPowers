@@ -1,0 +1,377 @@
+{
+  "schema_version": 2,
+  "suite_id": "development-effects-performance-confirmatory-2026-07-15",
+  "evidence_level": "paired-development-heldout",
+  "freeze_contract": {
+    "status": "frozen-before-live-run",
+    "model_default": "gpt-5.3-codex-spark",
+    "effort": "low",
+    "repetitions": 2,
+    "workflow_order": [
+      ["superpowers-6.1.1", "leanpowers-0.2.0"],
+      ["leanpowers-0.2.0", "superpowers-6.1.1"]
+    ],
+    "agent_read_isolation": "codex-minimal-workspace-plugin-toolchain-read-v1",
+    "superpowers_revision": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+    "case_snapshots": {
+      "utf8-byte-chunks": {
+        "mutants_sha256": "b6db71d5ee278796f44e2aca01c59d81550c166be448ca1a85ba37d003c015b0",
+        "verifier_sha256": "714be9a2dbdf51dc5865af435313852cf830ab8bbaadacfd7ffb4ee52f126a5e",
+        "workspace_sha256": "4516fac38ca74fe8e4be13d1dc14f20dffcaf4bbe7eadfb26b9b211243f307cd"
+      },
+      "simultaneous-text-edits": {
+        "mutants_sha256": "f547fdad209a11fe27fe24dc1b910dff10bd675b126f2d8e380c523038391896",
+        "verifier_sha256": "ea3fe47022dd379b2df90db37271cb43313a83c184f688f4f4b735c95f69f185",
+        "workspace_sha256": "50358b23561e72690434e36fa2077c40cee211191cb0ce90581953f0d42cd3d2"
+      },
+      "snapshot-signal-dispatch": {
+        "mutants_sha256": "76e77c8e25139fdb581a42fe63282b649305949cd6a8814d8d5a8bcf89e42d42",
+        "verifier_sha256": "2602475e58fe13c0e007039cae3b2d4f76ee89c3eb71397b90a87ee1396d6525",
+        "workspace_sha256": "e58ce66bdc9d43481c43cb271fd9b15cffa61ec198753b4be60012ba1a70b99d"
+      }
+    },
+    "token_target": {
+      "metric": "aggregate-model-token-share",
+      "population": "all-matched-pairs",
+      "max_share_pct": 60
+    }
+  },
+  "runtime": "codex-cli",
+  "model_default": "gpt-5.3-codex-spark",
+  "effort": "low",
+  "repetitions": 2,
+  "activation_mode": "explicit-entrypoint",
+  "token_target": {
+    "metric": "aggregate-model-token-share",
+    "population": "all-matched-pairs",
+    "max_share_pct": 60
+  },
+  "workflow_entrypoints": {
+    "superpowers-6.1.1": "$superpowers:using-superpowers",
+    "leanpowers-0.2.0": "$leanpowers:route"
+  },
+  "workflow_order": [
+    ["superpowers-6.1.1", "leanpowers-0.2.0"],
+    ["leanpowers-0.2.0", "superpowers-6.1.1"]
+  ],
+  "cases": [
+    {
+      "id": "utf8-byte-chunks",
+      "scenario_class": "small-explicit-feature",
+      "risk_level": "standard",
+      "expected_workflow": "build",
+      "workspace": "cases/utf8-byte-chunks/workspace",
+      "verifier_files": [
+        "cases/utf8-byte-chunks/verifier/utf8-chunks.hidden.mjs"
+      ],
+      "task": "Extend splitUtf8Chunks(text, maxBytes) so it greedily partitions a string into the longest possible non-empty chunks whose UTF-8 encoded byte length is at most maxBytes. maxBytes must be a positive safe integer. Preserve Unicode code points without splitting surrogate pairs; reject every unpaired UTF-16 surrogate with TypeError before returning any chunks. If one valid code point cannot fit by itself, throw RangeError. Return [] for an empty string, preserve exact-fit boundaries, keep concatenated output identical to the input, preserve the exact direct and public named export surfaces, and keep splitUtf8Chunks as a direct named export. Add focused regressions that independently prove UTF-8 byte accounting, Unicode code-point integrity, greedy and exact-fit boundaries, oversized-code-point rejection, and unpaired-surrogate rejection. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {
+          "id": "unicode-code-point-integrity",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "splitUtf8Chunks",
+              "target": "src/utf8-chunks.mjs",
+              "source": "cases/utf8-byte-chunks/verifier/mutants/utf8-chunks.utf16-slicing.mjs"
+            }
+          ]
+        },
+        {
+          "id": "utf8-byte-budget",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "splitUtf8Chunks",
+              "target": "src/utf8-chunks.mjs",
+              "source": "cases/utf8-byte-chunks/verifier/mutants/utf8-chunks.codepoint-budget.mjs"
+            },
+            {
+              "kind": "replace-callable-export",
+              "export_name": "splitUtf8Chunks",
+              "target": "src/utf8-chunks.mjs",
+              "source": "cases/utf8-byte-chunks/verifier/mutants/utf8-chunks.overflow-chunk.mjs"
+            }
+          ]
+        },
+        {
+          "id": "exact-fit-boundary",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "splitUtf8Chunks",
+              "target": "src/utf8-chunks.mjs",
+              "source": "cases/utf8-byte-chunks/verifier/mutants/utf8-chunks.exact-fit-rejected.mjs"
+            }
+          ]
+        },
+        {
+          "id": "oversized-code-point",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "splitUtf8Chunks",
+              "target": "src/utf8-chunks.mjs",
+              "source": "cases/utf8-byte-chunks/verifier/mutants/utf8-chunks.oversized-codepoint.mjs"
+            }
+          ]
+        },
+        {
+          "id": "unpaired-surrogate-validation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "splitUtf8Chunks",
+              "target": "src/utf8-chunks.mjs",
+              "source": "cases/utf8-byte-chunks/verifier/mutants/utf8-chunks.unpaired-surrogate.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "simultaneous-text-edits",
+      "scenario_class": "small-explicit-feature",
+      "risk_level": "standard",
+      "expected_workflow": "build",
+      "workspace": "cases/simultaneous-text-edits/workspace",
+      "verifier_files": [
+        "cases/simultaneous-text-edits/verifier/text-edits.hidden.mjs"
+      ],
+      "task": "Extend applyTextEdits(source, edits) so every edit is applied simultaneously against the original source. source must be a primitive string and edits must be a dense array of exact three-element [start, end, replacement] tuples. start and end are non-negative safe-integer UTF-16 code-unit offsets with start <= end <= source.length, and replacement is a string. Coordinates are half-open, input order is arbitrary, and each start offset must be unique. Sort a copy by start, allow adjacent edits and zero-length insertions, but reject overlapping ranges with TypeError; an insertion strictly inside a non-empty range overlaps while one at its boundary does not. Return the unchanged source for no edits, never mutate the collection or tuples, preserve the exact direct and public named export surfaces, and keep applyTextEdits as a direct named export. Add focused regressions that independently prove unordered original-coordinate application, half-open and adjacent boundaries, overlap and duplicate-start rejection, UTF-16 offsets, and input immutability. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {
+          "id": "unordered-edit-normalization",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "applyTextEdits",
+              "target": "src/text-edits.mjs",
+              "source": "cases/simultaneous-text-edits/verifier/mutants/text-edits.preserve-order.mjs"
+            }
+          ]
+        },
+        {
+          "id": "original-coordinate-application",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "applyTextEdits",
+              "target": "src/text-edits.mjs",
+              "source": "cases/simultaneous-text-edits/verifier/mutants/text-edits.sequential-coordinates.mjs"
+            }
+          ]
+        },
+        {
+          "id": "half-open-range-boundary",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "applyTextEdits",
+              "target": "src/text-edits.mjs",
+              "source": "cases/simultaneous-text-edits/verifier/mutants/text-edits.inclusive-end.mjs"
+            }
+          ]
+        },
+        {
+          "id": "adjacent-edit-boundary",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "applyTextEdits",
+              "target": "src/text-edits.mjs",
+              "source": "cases/simultaneous-text-edits/verifier/mutants/text-edits.reject-adjacent.mjs"
+            }
+          ]
+        },
+        {
+          "id": "overlap-rejection",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "applyTextEdits",
+              "target": "src/text-edits.mjs",
+              "source": "cases/simultaneous-text-edits/verifier/mutants/text-edits.allow-overlap.mjs"
+            }
+          ]
+        },
+        {
+          "id": "input-immutability",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "applyTextEdits",
+              "target": "src/text-edits.mjs",
+              "source": "cases/simultaneous-text-edits/verifier/mutants/text-edits.mutate-input.mjs"
+            }
+          ]
+        },
+        {
+          "id": "utf16-coordinate-semantics",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "applyTextEdits",
+              "target": "src/text-edits.mjs",
+              "source": "cases/simultaneous-text-edits/verifier/mutants/text-edits.codepoint-offsets.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "snapshot-signal-dispatch",
+      "scenario_class": "unknown-cause-defect",
+      "risk_level": "standard",
+      "expected_workflow": "debug",
+      "workspace": "cases/snapshot-signal-dispatch/workspace",
+      "verifier_files": [
+        "cases/snapshot-signal-dispatch/verifier/signal.hidden.mjs"
+      ],
+      "task": "Users report that a listener which unsubscribes itself during emit can cause the next listener to be skipped. Before editing, run the included node repro/snapshot-signal.mjs and use its structured output to identify the first incorrect transition. Fix createSignal() so emit(value) dispatches synchronously in subscription order over an independent listener snapshot captured at the start of that emit. Unsubscribing during an emit affects only later emits, listeners added during an emit begin with the next emit, duplicate subscriptions remain independent, and every returned unsubscribe function is scoped and idempotent. Listener exceptions must stop dispatch synchronously and propagate unchanged. A nested emit must capture its own current snapshot without changing the outer snapshot. Preserve TypeError validation for non-function listeners, preserve the exact signal method and direct/public named export surfaces, and keep createSignal as a direct named export. Add focused regressions for self- and cross-unsubscribe, delayed additions, duplicate subscriptions, synchronous exception flow, nested emits, and subscription order. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "reproduction_contract": {
+        "command": "node repro/snapshot-signal.mjs",
+        "expected_output": {
+          "scenario": "snapshot-signal-dispatch",
+          "observations": [
+            {
+              "emit": 1,
+              "expected": ["self:first", "next:first"],
+              "observed": ["self:first"]
+            },
+            {
+              "emit": 2,
+              "expected": ["next:second"],
+              "observed": ["next:second"]
+            }
+          ],
+          "first_incorrect_transition": {
+            "stage": "live-listener-iteration",
+            "emit": 1,
+            "mutation": "self-unsubscribe",
+            "skipped_listener": "next"
+          }
+        }
+      },
+      "artifact_regression_gates": [
+        {
+          "id": "self-unsubscribe-snapshot",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createSignal",
+              "target": "src/signal.mjs",
+              "source": "cases/snapshot-signal-dispatch/verifier/mutants/signal.live-array-self-removal.mjs"
+            }
+          ]
+        },
+        {
+          "id": "cross-unsubscribe-snapshot",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createSignal",
+              "target": "src/signal.mjs",
+              "source": "cases/snapshot-signal-dispatch/verifier/mutants/signal.active-check-after-snapshot.mjs"
+            }
+          ]
+        },
+        {
+          "id": "delayed-listener-addition",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createSignal",
+              "target": "src/signal.mjs",
+              "source": "cases/snapshot-signal-dispatch/verifier/mutants/signal.dynamic-add-visible.mjs"
+            }
+          ]
+        },
+        {
+          "id": "duplicate-subscription-independence",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createSignal",
+              "target": "src/signal.mjs",
+              "source": "cases/snapshot-signal-dispatch/verifier/mutants/signal.dedupe-callback.mjs"
+            },
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createSignal",
+              "target": "src/signal.mjs",
+              "source": "cases/snapshot-signal-dispatch/verifier/mutants/signal.unsubscribe-by-callback.mjs"
+            }
+          ]
+        },
+        {
+          "id": "synchronous-dispatch",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createSignal",
+              "target": "src/signal.mjs",
+              "source": "cases/snapshot-signal-dispatch/verifier/mutants/signal.async-delivery.mjs"
+            }
+          ]
+        },
+        {
+          "id": "subscription-order",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createSignal",
+              "target": "src/signal.mjs",
+              "source": "cases/snapshot-signal-dispatch/verifier/mutants/signal.reverse-order.mjs"
+            }
+          ]
+        },
+        {
+          "id": "nested-snapshot-independence",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createSignal",
+              "target": "src/signal.mjs",
+              "source": "cases/snapshot-signal-dispatch/verifier/mutants/signal.reuse-outer-snapshot.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    }
+  ]
+}
