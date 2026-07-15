@@ -414,6 +414,37 @@ test("held-out execution rejects every frozen-condition override", async () => {
       /did not match the freeze contract/u,
     );
   }
+
+  const pinnedSuite = structuredClone(suite);
+  Object.assign(pinnedSuite.freeze_contract, {
+    leanpowers_revision: "c".repeat(40),
+    evaluator_revision: "d".repeat(40),
+    runner_revision: "e".repeat(40),
+  });
+  const pinned = {
+    evaluatorRevision: pinnedSuite.freeze_contract.evaluator_revision,
+    runnerRevision: pinnedSuite.freeze_contract.runner_revision,
+    workflowRevisions: {
+      "leanpowers-0.2.0": pinnedSuite.freeze_contract.leanpowers_revision,
+      "superpowers-6.1.1": pinnedSuite.freeze_contract.superpowers_revision,
+    },
+  };
+  assert.doesNotThrow(() => assertFrozenHeldoutRevisions(pinnedSuite, pinned));
+  for (const invalid of [
+    { ...pinned, runnerRevision: "f".repeat(40) },
+    {
+      ...pinned,
+      workflowRevisions: {
+        ...pinned.workflowRevisions,
+        "leanpowers-0.2.0": "f".repeat(40),
+      },
+    },
+  ]) {
+    assert.throws(
+      () => assertFrozenHeldoutRevisions(pinnedSuite, invalid),
+      /did not match the freeze contract/u,
+    );
+  }
 });
 
 test("the checked-in preregistration matches every frozen manifest", async () => {
@@ -516,6 +547,12 @@ test("held-out reports identify confirmatory evidence and the actual case scope"
   assert.match(report, /scoped to the one reported fixture/u);
   assert.match(report, /scenario classes: unknown-cause-defect/u);
   assert.match(report, /transient-profile-load verifier exercises/u);
+  assert.match(report, /exactly one bounded recovery patch/u);
+  assert.match(report, /resolved structured output/u);
+  assert.match(report, /strict runs stop after the final passing review/u);
+  assert.match(report, /## Validity exclusions/u);
+  assert.match(report, /Infrastructure failures: \*\*0\*\*/u);
+  assert.doesNotMatch(report, /later non-mutating tooling remain/u);
   assert.doesNotMatch(report, /three pilot fixtures|The three cases|localized-cache hidden/u);
 
   const shortened = makePilotResult(

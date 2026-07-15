@@ -86,6 +86,27 @@ const capsuleReproductionContract = {
       distinct_normalized_locales_share_key: true,
     },
   },
+  resolved_output: {
+    scenario: "localized-template-cache",
+    requests: [
+      {
+        name: "welcome",
+        locale: "EN",
+        normalized_locale: "en",
+        cache_key: "welcome:en",
+        resolved: "welcome:en",
+      },
+      {
+        name: "welcome",
+        locale: "fr",
+        normalized_locale: "fr",
+        cache_key: "welcome:fr",
+        resolved: "welcome:fr",
+      },
+    ],
+    loader_calls: [["welcome", "en"], ["welcome", "fr"]],
+    first_incorrect_transition: null,
+  },
 };
 const cacheArtifactGateSchemas = [
   {
@@ -477,6 +498,8 @@ function passingCapsuleStage(workflow = "build") {
     quality_validation_observed: true,
     quality_validation_mode: workflow === "debug" ? "combined" : "canonical",
     post_change_validation_mode: workflow === "debug" ? "combined" : "canonical",
+    debug_recovery_count: 0,
+    debug_recovery_protocol_observed: workflow === "debug" ? true : null,
     final_validation_budget_observed: true,
     capsule_green_path_observed: true,
     post_change_reproduction_replayed: workflow === "debug",
@@ -484,6 +507,7 @@ function passingCapsuleStage(workflow = "build") {
     quality_post_validation_tool_calls: 0,
     quality_ordinary_stop_observed: true,
     ordinary_stop_observed: true,
+    final_stop_observed: true,
     protocol_observed: true,
   };
 }
@@ -526,6 +550,14 @@ function capsuleTraceEvents({
   patchBatches = 1,
   patchPaths = ["src/index.mjs", "test/index.test.mjs"],
   preserveBuildPatchOrder = false,
+  recoveryInterveningCommand = null,
+  recoveryInterveningToolType = null,
+  recoveryPatchPaths = null,
+  recoveryValidationCommand = null,
+  recoveryValidationExitCode = 0,
+  recoveryValidationOutput = null,
+  secondRecoveryPatchPaths = null,
+  secondRecoveryValidationExitCode = 0,
   prePatchProgress = [],
   prePatchLedger = [
     "Clause→test ledger:",
@@ -555,6 +587,7 @@ function capsuleTraceEvents({
   separatePostReproduction = false,
   validationExitCode = 0,
   validationCommand = null,
+  validationOutput = null,
   workflowRead = false,
 } = {}) {
   const ledger = [
@@ -571,6 +604,10 @@ function capsuleTraceEvents({
       ? `${reproduceCommand} && npm test`
       : "npm test"
   );
+  const successfulValidationOutput = expectedWorkflow === "debug" &&
+      resolvedValidationCommand.includes(" && ")
+    ? `${JSON.stringify(capsuleReproductionContract.resolved_output)}\npass`
+    : "pass";
   const completed = (item) => ({ type: "item.completed", item });
   const events = [];
   if (!ledgerAfterDiscover) {
@@ -791,10 +828,71 @@ function capsuleTraceEvents({
   events.push(completed({
     type: "command_execution",
     command: resolvedValidationCommand,
-    aggregated_output: validationExitCode === 0 ? "pass" : "fail",
+    aggregated_output: validationOutput ?? (
+      validationExitCode === 0 ? successfulValidationOutput : "fail"
+    ),
     exit_code: validationExitCode,
     status: "completed",
   }));
+  const appendRecoveryPatch = (paths, prefix) => {
+    for (const [index, changedPath] of paths.entries()) {
+      const item = {
+        id: `${prefix}-${index}`,
+        type: "file_change",
+        changes: [{
+          path: `/tmp/run/workspace/${changedPath}`,
+          kind: "update",
+        }],
+        status: "completed",
+      };
+      events.push({ type: "item.started", item: { ...item, status: "in_progress" } });
+      events.push(completed(item));
+    }
+  };
+  if (Array.isArray(recoveryPatchPaths)) {
+    if (recoveryInterveningCommand !== null) {
+      events.push(completed({
+        type: "command_execution",
+        command: recoveryInterveningCommand,
+        aggregated_output: "intervening output",
+        exit_code: 0,
+        status: "completed",
+      }));
+    }
+    if (recoveryInterveningToolType !== null) {
+      events.push(completed({
+        id: "recovery-intervening-tool",
+        type: recoveryInterveningToolType,
+        tool: recoveryInterveningToolType === "collab_tool_call"
+          ? "send_message"
+          : "inspect",
+        status: "completed",
+      }));
+    }
+    appendRecoveryPatch(recoveryPatchPaths, "recovery-patch");
+    const resolvedRecoveryCommand = recoveryValidationCommand ?? resolvedValidationCommand;
+    events.push(completed({
+      type: "command_execution",
+      command: resolvedRecoveryCommand,
+      aggregated_output: recoveryValidationOutput ?? (
+        recoveryValidationExitCode === 0 ? successfulValidationOutput : "fail again"
+      ),
+      exit_code: recoveryValidationExitCode,
+      status: "completed",
+    }));
+  }
+  if (Array.isArray(secondRecoveryPatchPaths)) {
+    appendRecoveryPatch(secondRecoveryPatchPaths, "second-recovery-patch");
+    events.push(completed({
+      type: "command_execution",
+      command: recoveryValidationCommand ?? resolvedValidationCommand,
+      aggregated_output: secondRecoveryValidationExitCode === 0
+        ? successfulValidationOutput
+        : "third failure",
+      exit_code: secondRecoveryValidationExitCode,
+      status: "completed",
+    }));
+  }
   if (postValidationReview) {
     events.push(completed({
       id: "ordinary-review-spawn",
@@ -886,9 +984,11 @@ test("development pilot declares three executable risk-calibrated scenario class
   );
   assert.ok(suite.cases.every(({ task }) => task.trim().length > 80));
   assert.ok(suite.cases.every(({ change_policy }) => change_policy.tests.includes("test/**")));
+  const { resolved_output: _resolvedOutput, ...legacyReproductionContract } =
+    capsuleReproductionContract;
   assert.deepEqual(
     suite.cases.find(({ id }) => id === "localized-template-cache")?.reproduction_contract,
-    capsuleReproductionContract,
+    legacyReproductionContract,
   );
   const cacheTask = suite.cases.find(
     ({ id }) => id === "localized-template-cache",
@@ -1029,6 +1129,45 @@ test("workspace snapshots use canonical global path order", async () => {
     );
     assert.deepEqual(paths, [...paths].sort());
     assert.ok(paths.indexOf("a-foo.txt") < paths.indexOf("a/child.txt"));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("resolved reproduction output is an optional object-only suite contract", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "lp-resolved-output-schema-"));
+  try {
+    const copiedRoot = path.join(root, "development-effects");
+    await cp(new URL("../evals/development-effects/", import.meta.url), copiedRoot, {
+      recursive: true,
+    });
+    const copiedSuitePath = path.join(copiedRoot, "pilot-suite.json");
+    const baseline = JSON.parse(await readFile(copiedSuitePath, "utf8"));
+    const cacheCaseIndex = baseline.cases.findIndex(
+      ({ id }) => id === "localized-template-cache",
+    );
+    assert.notEqual(cacheCaseIndex, -1);
+
+    const valid = structuredClone(baseline);
+    valid.cases[cacheCaseIndex].reproduction_contract.resolved_output =
+      capsuleReproductionContract.resolved_output;
+    await writeFile(copiedSuitePath, `${JSON.stringify(valid, null, 2)}\n`);
+    const loaded = await loadDevelopmentSuite(copiedSuitePath);
+    assert.deepEqual(
+      loaded.cases[cacheCaseIndex].reproduction_contract.resolved_output,
+      capsuleReproductionContract.resolved_output,
+    );
+
+    for (const invalidResolvedOutput of [null, [], "resolved"]) {
+      const invalid = structuredClone(baseline);
+      invalid.cases[cacheCaseIndex].reproduction_contract.resolved_output =
+        invalidResolvedOutput;
+      await writeFile(copiedSuitePath, `${JSON.stringify(invalid, null, 2)}\n`);
+      await assert.rejects(
+        loadDevelopmentSuite(copiedSuitePath),
+        /reproduction_contract\.resolved_output must be an object when provided/u,
+      );
+    }
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -2028,6 +2167,7 @@ test("Codex JSONL usage and completion are independently parsed", () => {
       reviewer_workspace_mutation_check_observed: false,
       reviewer_workspace_mutation_observed: false,
       strict_review_protocol_observed: false,
+      strict_final_stop_observed: false,
       strict_review_cycle_count: 0,
       duplicate_strict_collab_call_id_observed: false,
       unexpected_strict_collab_tool_observed: false,
@@ -2206,12 +2346,68 @@ test("capacity retry runs at most once and isolates infrastructure wall time", a
         };
   });
   assert.equal(repeatedCalls, 2);
-  assert.equal(failedTwice.result.outcome.status, "FAIL");
+  assert.equal(failedTwice.result.outcome.status, "INCOMPLETE");
+  assert.deepEqual(failedTwice.result.infrastructure_failure, {
+    kind: "model-capacity",
+    retry_exhausted: true,
+  });
   assert.equal(failedTwice.result.attempt_count, 2);
   assert.equal(failedTwice.result.capacity_retry_count, 1);
-  assert.equal(failedTwice.result.wall_seconds, 1.5);
-  assert.equal(failedTwice.result.final_attempt_wall_seconds, 1.5);
-  assert.equal(failedTwice.result.infrastructure_retry_wall_seconds, 1);
+  assert.equal(failedTwice.result.wall_seconds, null);
+  assert.equal(failedTwice.result.final_attempt_wall_seconds, null);
+  assert.equal(failedTwice.result.infrastructure_retry_wall_seconds, 2.5);
+});
+
+test("exhausted capacity remains an incomplete infrastructure run outside valid pairs", async () => {
+  const suite = await loadDevelopmentSuite(suitePath);
+  const selectedCases = [suite.cases[0]];
+  const base = {
+    case_id: selectedCases[0].id,
+    case_snapshot: caseSnapshotContract(selectedCases[0]),
+    repetition: 1,
+    risk_level: selectedCases[0].risk_level,
+    activation_reported: true,
+    changes: { product: [], violations: [], workflow: [] },
+    verifier: { artifact_regression: null },
+    workflow_conformance: { status: "PASS", reasons: [] },
+  };
+  const ordinary = {
+    ...base,
+    workflow: "superpowers-6.1.1",
+    outcome: { status: "PASS", reasons: [] },
+    telemetry: {
+      tokens: { total: 100, uncached_plus_output: 80 },
+      tool_calls: 2,
+      workflow_trace: { read_calls: 1 },
+    },
+    wall_seconds: 10,
+  };
+  const capacity = {
+    ...base,
+    workflow: "leanpowers-0.2.0",
+    infrastructure_failure: { kind: "model-capacity", retry_exhausted: true },
+    outcome: { status: "INCOMPLETE", reasons: ["model capacity retry exhausted"] },
+    telemetry: {
+      tokens: null,
+      tool_calls: null,
+      workflow_trace: { read_calls: null },
+    },
+    wall_seconds: null,
+  };
+
+  const result = makePilotResult(
+    suite,
+    {},
+    [ordinary, capacity],
+    1,
+    selectedCases,
+  );
+  assert.equal(result.completion, "incomplete");
+  assert.equal(result.paired.all_pairs.count, 0);
+  assert.equal(result.paired.all_pairs.required_pair_count, 1);
+  assert.equal(result.paired.all_pairs.token_pairs, 0);
+  assert.equal(result.paired.all_pairs.wall_pairs, 0);
+  assert.equal(result.token_target_result.status, "INELIGIBLE");
 });
 
 test("ordinary agent, test, verifier, and workflow failures never retry", async () => {
@@ -2486,6 +2682,7 @@ test("Codex trace records tool types and exact workflow file reads", () => {
     reviewer_workspace_mutation_check_observed: false,
     reviewer_workspace_mutation_observed: false,
     strict_review_protocol_observed: false,
+    strict_final_stop_observed: false,
     strict_review_cycle_count: 0,
     duplicate_strict_collab_call_id_observed: false,
     unexpected_strict_collab_tool_observed: false,
@@ -2596,12 +2793,15 @@ test("Codex trace observes the complete debug capsule stage protocol", () => {
     separateReproAndTestValidation.workflow_trace.capsule_stage,
     {
       ...passingCapsuleStage("debug"),
+      debug_recovery_protocol_observed: false,
       final_validation_budget_observed: false,
       capsule_green_path_observed: false,
+      patch_protocol_observed: false,
       post_change_command_calls: 2,
       post_change_reproduction_replayed: true,
       quality_validation_mode: "separate",
       post_change_validation_mode: "separate",
+      protocol_observed: false,
     },
   );
   const reproductionBeforeRead = parseCodexResult(
@@ -2612,6 +2812,162 @@ test("Codex trace observes the complete debug capsule stage protocol", () => {
   assert.equal(reproductionBeforeRead.ordered_reproduce_observed, true);
   assert.equal(reproductionBeforeRead.pre_change_stage_protocol_observed, true);
   assert.equal(reproductionBeforeRead.capsule_green_path_observed, true);
+});
+
+test("debug capsule permits one evidence-bounded recovery and then stops", () => {
+  const recovered = parseCodexResult(
+    capsuleTraceEvents({
+      validationExitCode: 1,
+      recoveryPatchPaths: ["src/index.mjs"],
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  );
+  const stage = recovered.workflow_trace.capsule_stage;
+
+  assert.equal(stage.debug_recovery_count, 1);
+  assert.equal(stage.debug_recovery_protocol_observed, true);
+  assert.equal(stage.patch_protocol_observed, true);
+  assert.equal(stage.quality_validation_observed, true);
+  assert.equal(stage.final_stop_observed, true);
+  assert.equal(stage.capsule_green_path_observed, false);
+  assert.deepEqual(evaluateWorkflowConformance({
+    activation_reported: true,
+    declared_risk: "standard",
+    declared_workflow: "debug",
+    expected_workflow: "debug",
+    risk_level: "standard",
+    route_ledger_reported: true,
+    telemetry: { workflow_trace: recovered.workflow_trace },
+    workflow: "leanpowers-0.2.0",
+  }), { status: "PASS", reasons: [] });
+});
+
+test("debug recovery fails closed on excess, changed, reopened, or post-final work", () => {
+  const invalid = [
+    {
+      name: "second correction",
+      options: {
+        validationExitCode: 1,
+        recoveryPatchPaths: ["src/index.mjs"],
+        recoveryValidationExitCode: 1,
+        secondRecoveryPatchPaths: ["src/index.mjs"],
+      },
+    },
+    {
+      name: "second failure",
+      options: {
+        validationExitCode: 1,
+        recoveryPatchPaths: ["src/index.mjs"],
+        recoveryValidationExitCode: 1,
+      },
+    },
+    {
+      name: "changed validation command",
+      options: {
+        validationExitCode: 1,
+        recoveryPatchPaths: ["src/index.mjs"],
+        recoveryValidationCommand:
+          `${capsuleReproductionContract.command} && node --test test/index.test.mjs`,
+      },
+    },
+    {
+      name: "reread",
+      options: {
+        validationExitCode: 1,
+        recoveryInterveningCommand: "tail -n +1 -- src/index.mjs test/index.test.mjs",
+        recoveryPatchPaths: ["src/index.mjs"],
+      },
+    },
+    {
+      name: "rediscover",
+      options: {
+        validationExitCode: 1,
+        recoveryInterveningCommand: "rg --files .; rg -n -- 'cache|locale' .",
+        recoveryPatchPaths: ["src/index.mjs"],
+      },
+    },
+    {
+      name: "collaboration tool in recovery window",
+      options: {
+        validationExitCode: 1,
+        recoveryInterveningToolType: "collab_tool_call",
+        recoveryPatchPaths: ["src/index.mjs"],
+      },
+    },
+    {
+      name: "MCP tool in recovery window",
+      options: {
+        validationExitCode: 1,
+        recoveryInterveningToolType: "mcp_tool_call",
+        recoveryPatchPaths: ["src/index.mjs"],
+      },
+    },
+    {
+      name: "unread correction path",
+      options: {
+        validationExitCode: 1,
+        recoveryPatchPaths: ["src/unread.mjs"],
+      },
+    },
+    {
+      name: "post-final command",
+      options: {
+        extraPostCommand: true,
+      },
+    },
+  ];
+
+  for (const { name, options } of invalid) {
+    const parsed = parseCodexResult(
+      capsuleTraceEvents(options).map(JSON.stringify).join("\n"),
+      capsuleTraceOptions("debug"),
+    );
+    const stage = parsed.workflow_trace.capsule_stage;
+    assert.equal(
+      stage.debug_recovery_protocol_observed && stage.final_stop_observed,
+      false,
+      name,
+    );
+    const conformance = evaluateWorkflowConformance({
+      activation_reported: true,
+      declared_risk: "standard",
+      declared_workflow: "debug",
+      expected_workflow: "debug",
+      risk_level: "standard",
+      route_ledger_reported: true,
+      telemetry: { workflow_trace: parsed.workflow_trace },
+      workflow: "leanpowers-0.2.0",
+    });
+    assert.equal(conformance.status, "FAIL", name);
+  }
+});
+
+test("resolved reproduction output is required only when the suite declares it", () => {
+  const parseStage = (validationOutput, reproductionContract = capsuleReproductionContract) =>
+    parseCodexResult(
+      capsuleTraceEvents({ validationOutput }).map(JSON.stringify).join("\n"),
+      {
+        ...capsuleTraceOptions("debug"),
+        reproductionContract,
+      },
+    ).workflow_trace.capsule_stage;
+
+  assert.equal(parseStage(
+    `${JSON.stringify(capsuleReproductionContract.resolved_output)}\npass`,
+  ).quality_validation_observed, true);
+  for (const stale of [
+    "pass",
+    "{malformed-json}\npass",
+    `${JSON.stringify(capsuleReproductionContract.expected_output)}\npass`,
+  ]) {
+    assert.equal(parseStage(stale).quality_validation_observed, false, stale);
+  }
+
+  const legacyContract = {
+    command: capsuleReproductionContract.command,
+    expected_output: capsuleReproductionContract.expected_output,
+  };
+  assert.equal(parseStage("pass", legacyContract).quality_validation_observed, true);
 });
 
 test("capsule clause-to-test ledger must appear before PATCH, not only in final", () => {
@@ -3504,7 +3860,11 @@ test("distilled real r2 route requires exact reproduction replay after patch", (
     workflow: "leanpowers-0.2.0",
   }), {
     status: "FAIL",
-    reasons: ["uninterrupted code-and-test mutation window was not observed"],
+    reasons: [
+      "uninterrupted code-and-test mutation window was not observed",
+      "bounded DEBUG recovery protocol was not observed",
+      "DEBUG did not stop after final successful validation",
+    ],
   });
 
   const missingReplayEvents = structuredClone(events);
@@ -3535,7 +3895,9 @@ test("distilled real r2 route requires exact reproduction replay after patch", (
     status: "FAIL",
     reasons: [
       "uninterrupted code-and-test mutation window was not observed",
+      "bounded DEBUG recovery protocol was not observed",
       "supported successful post-edit validation was not observed",
+      "DEBUG did not stop after final successful validation",
     ],
   });
 });
@@ -4378,6 +4740,7 @@ test("Codex trace proves independent review only after reviewer spawn and comple
   assert.equal(parsed.workflow_trace.post_change_spawn_calls, 1);
   assert.equal(parsed.workflow_trace.post_change_wait_calls, 1);
   assert.equal(parsed.workflow_trace.strict_review_protocol_observed, true);
+  assert.equal(parsed.workflow_trace.strict_final_stop_observed, true);
   assert.equal(parsed.workflow_trace.strict_review_cycle_count, 1);
   assert.deepEqual(
     evaluateWorkflowConformance({
@@ -4682,7 +5045,19 @@ test("strict review protocol accepts remediated fresh cycles and rejects one-pro
 
   const valid = parse(buildTrace());
   assert.equal(valid.strict_review_protocol_observed, true);
+  assert.equal(valid.strict_final_stop_observed, true);
   assert.equal(valid.quality_independent_review_current_validation_observed, true);
+  const postReviewCommand = parse([
+    ...buildTrace(),
+    event({
+      type: "command_execution",
+      command: "git diff --check",
+      exit_code: 0,
+      status: "completed",
+    }),
+  ]);
+  assert.equal(postReviewCommand.strict_review_protocol_observed, true);
+  assert.equal(postReviewCommand.strict_final_stop_observed, false);
   const compactBoundaryPacket = prompt.replace(
     `${contract}\n\nReviewer context:`,
     `${contract}\nReviewer context:`,
@@ -4719,6 +5094,8 @@ test("strict review protocol accepts remediated fresh cycles and rejects one-pro
     event({
       type: "command_execution",
       command: compositeValidation,
+      aggregated_output:
+        `${JSON.stringify(capsuleReproductionContract.resolved_output)}\npass`,
       exit_code: 0,
       status: "completed",
     }),
@@ -5426,6 +5803,7 @@ test("workflow declaration and risk classification are separate conformance evid
           independent_review_sole_wait_target_observed: true,
           reviewer_workspace_mutation_check_observed: true,
           strict_review_protocol_observed: true,
+          strict_final_stop_observed: true,
           post_change_spawn_calls: 1,
           post_change_wait_calls: 1,
         },
@@ -5467,6 +5845,7 @@ test("workflow declaration and risk classification are separate conformance evid
           independent_review_sole_wait_target_observed: true,
           reviewer_workspace_mutation_check_observed: true,
           strict_review_protocol_observed: true,
+          strict_final_stop_observed: true,
         },
       },
     }),
@@ -5502,6 +5881,7 @@ test("workflow declaration and risk classification are separate conformance evid
         "current passing independent review was not observed",
         "passing independent review lacked current validation context",
         "reviewer workspace mutation check was not observed",
+        "strict workflow did not stop after the final passing review",
       ],
     },
   );
@@ -5524,6 +5904,7 @@ test("workflow declaration and risk classification are separate conformance evid
         "current passing independent review was not observed",
         "passing independent review lacked current validation context",
         "reviewer workspace mutation check was not observed",
+        "strict workflow did not stop after the final passing review",
       ],
     },
   );
@@ -5548,6 +5929,7 @@ test("workflow declaration and risk classification are separate conformance evid
           independent_review_sole_wait_target_observed: true,
           reviewer_workspace_mutation_check_observed: true,
           strict_review_protocol_observed: true,
+          strict_final_stop_observed: true,
           post_change_spawn_calls: 1,
           post_change_wait_calls: 1,
         },
@@ -5602,6 +5984,7 @@ test("workflow declaration and risk classification are separate conformance evid
           independent_review_sole_wait_target_observed: true,
           reviewer_workspace_mutation_check_observed: true,
           strict_review_protocol_observed: true,
+          strict_final_stop_observed: true,
           post_change_spawn_calls: 1,
           post_change_wait_calls: 1,
         },
@@ -5676,6 +6059,20 @@ test("workflow declaration and risk classification are separate conformance evid
       post_change_spawn_calls: 1,
       post_change_wait_calls: 1,
     }, "designated reviewer mutated the workspace"],
+    [{
+      independent_review_pass_observed: true,
+      quality_independent_review_pass_observed: true,
+      quality_independent_review_context_observed: true,
+      quality_independent_review_current_validation_observed: true,
+      independent_review_contract_verbatim_observed: true,
+      independent_review_skill_invoked: true,
+      independent_review_sole_wait_target_observed: true,
+      reviewer_workspace_mutation_check_observed: true,
+      strict_review_protocol_observed: true,
+      strict_final_stop_observed: false,
+      post_change_spawn_calls: 1,
+      post_change_wait_calls: 1,
+    }, "strict workflow did not stop after the final passing review"],
   ]) {
     const conformance = evaluateWorkflowConformance({
       workflow: "leanpowers-0.2.0",
@@ -5687,6 +6084,7 @@ test("workflow declaration and risk classification are separate conformance evid
       risk_level: "strict",
       telemetry: {
         workflow_trace: {
+          strict_final_stop_observed: true,
           ...workflowTrace,
           capsule_stage: passingCapsuleStage("build"),
         },

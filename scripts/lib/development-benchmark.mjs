@@ -155,6 +155,12 @@ export async function loadDevelopmentSuite(input) {
   if (suite.activation_mode !== "explicit-entrypoint") {
     errors.push("activation_mode must equal explicit-entrypoint");
   }
+  if (
+    suite.report_contract !== undefined &&
+    suite.report_contract !== "categorized-exact-render-v1"
+  ) {
+    errors.push("report_contract must equal categorized-exact-render-v1 when provided");
+  }
   if (suite.token_target !== undefined) {
     const target = suite.token_target;
     if (
@@ -194,6 +200,17 @@ export async function loadDevelopmentSuite(input) {
       ids.add(benchmarkCase?.id);
       if (!benchmarkCase?.scenario_class || !benchmarkCase?.task) {
         errors.push(`cases[${index}] must declare scenario_class and task`);
+      }
+      if (
+        benchmarkCase?.reporting_category !== undefined &&
+        (
+          typeof benchmarkCase.reporting_category !== "string" ||
+          benchmarkCase.reporting_category.trim() !== benchmarkCase.reporting_category ||
+          benchmarkCase.reporting_category.length < 1 ||
+          benchmarkCase.reporting_category.length > 80
+        )
+      ) {
+        errors.push(`cases[${index}].reporting_category must be 1-80 trimmed characters`);
       }
       if (!["lean", "standard", "strict"].includes(benchmarkCase?.risk_level)) {
         errors.push(`cases[${index}].risk_level must be lean, standard, or strict`);
@@ -283,6 +300,14 @@ export async function loadDevelopmentSuite(input) {
           Array.isArray(contract?.expected_output)
         ) {
           errors.push(`cases[${index}].reproduction_contract.expected_output must be an object`);
+        }
+        if (
+          contract?.resolved_output !== undefined &&
+          (contract.resolved_output === null ||
+            typeof contract.resolved_output !== "object" ||
+            Array.isArray(contract.resolved_output))
+        ) {
+          errors.push(`cases[${index}].reproduction_contract.resolved_output must be an object when provided`);
         }
       }
       const artifactGates = benchmarkCase?.artifact_regression_gates;
@@ -438,15 +463,34 @@ export async function loadDevelopmentSuite(input) {
         workflow_order: suite.workflow_order,
         agent_read_isolation: HELDOUT_AGENT_READ_ISOLATION,
         superpowers_revision: suite.freeze_contract?.superpowers_revision,
+        ...(suite.freeze_contract?.leanpowers_revision === undefined
+          ? {}
+          : { leanpowers_revision: suite.freeze_contract.leanpowers_revision }),
+        ...(suite.freeze_contract?.evaluator_revision === undefined
+          ? {}
+          : { evaluator_revision: suite.freeze_contract.evaluator_revision }),
+        ...(suite.freeze_contract?.runner_revision === undefined
+          ? {}
+          : { runner_revision: suite.freeze_contract.runner_revision }),
         case_snapshots: caseSnapshots,
         ...(suite.token_target === undefined
           ? {}
           : { token_target: suite.token_target }),
       };
+      const pinnedRevisions = [
+        suite.freeze_contract?.leanpowers_revision,
+        suite.freeze_contract?.evaluator_revision,
+        suite.freeze_contract?.runner_revision,
+      ];
+      const pinnedRevisionContractValid =
+        pinnedRevisions.every((value) => value === undefined) ||
+        pinnedRevisions.every((value) => /^[a-f0-9]{40}$/u.test(String(value)));
       freezeContractVerified =
         /^[a-f0-9]{40}$/u.test(String(
           suite.freeze_contract?.superpowers_revision ?? "",
-        )) && isDeepStrictEqual(suite.freeze_contract, expectedFreezeContract);
+        )) &&
+        pinnedRevisionContractValid &&
+        isDeepStrictEqual(suite.freeze_contract, expectedFreezeContract);
     } catch {
       freezeContractVerified = false;
     }
@@ -492,14 +536,24 @@ export function assertFrozenHeldoutSelection(
 
 export function assertFrozenHeldoutRevisions(
   suite,
-  { evaluatorRevision, workflowRevisions } = {},
+  { evaluatorRevision, runnerRevision, workflowRevisions } = {},
 ) {
   if (suite?.evidence_level !== "paired-development-heldout") return;
+  const freeze = suite.freeze_contract ?? {};
+  const legacyRevisionContract = freeze.leanpowers_revision === undefined &&
+    freeze.evaluator_revision === undefined &&
+    freeze.runner_revision === undefined;
   if (
     !/^[a-f0-9]{40}$/u.test(String(evaluatorRevision ?? "")) ||
-    evaluatorRevision !== workflowRevisions?.["leanpowers-0.2.0"] ||
+    (!legacyRevisionContract &&
+      !/^[a-f0-9]{40}$/u.test(String(runnerRevision ?? ""))) ||
     workflowRevisions?.["superpowers-6.1.1"] !==
-      suite.freeze_contract?.superpowers_revision
+      freeze.superpowers_revision ||
+    (legacyRevisionContract
+      ? evaluatorRevision !== workflowRevisions?.["leanpowers-0.2.0"]
+      : workflowRevisions?.["leanpowers-0.2.0"] !== freeze.leanpowers_revision ||
+        evaluatorRevision !== freeze.evaluator_revision ||
+        runnerRevision !== freeze.runner_revision)
   ) {
     throw new Error(
       "Held-out evaluator, LeanPowers plugin, or Superpowers baseline revision did not match the freeze contract",
@@ -1007,7 +1061,11 @@ export function parseCodexResult(
 ) {
   const events = parseCodexEvents(raw);
   const parseCurrentValidationCommand = (command) =>
-    parsePostChangeValidation(command, expectedWorkflow, reproductionContract)?.command ?? null;
+    parsePostChangeValidationCommand(
+      command,
+      expectedWorkflow,
+      reproductionContract,
+    )?.command ?? null;
   const usageEvent = [...events].reverse().find((event) => event?.type === "turn.completed");
   const usage = usageEvent?.usage;
   const hasUsage = Boolean(usage) && [
@@ -1266,6 +1324,7 @@ export function parseCodexResult(
               (review) => review.workspace_mutation_observed,
             ),
             sole_wait_target: soleWaitTarget,
+            wait_index: index,
           };
         }
       }
@@ -1327,6 +1386,14 @@ export function parseCodexResult(
       }
       return review.verdict === "changes_required";
     });
+  const finalStrictReviewWaitIndex = latestIndependentReview?.wait_index ?? -1;
+  const strictFinalStopObserved =
+    latestIndependentReview?.quality_pass === true &&
+    finalStrictReviewWaitIndex >= 0 &&
+    countToolCallsAfter(
+      events.map((event, index) => ({ event, index })),
+      finalStrictReviewWaitIndex,
+    ) === 0;
   const finalMessage = [...events].reverse().find(
     (event) => event?.type === "item.completed" && event?.item?.type === "agent_message",
   );
@@ -1375,6 +1442,7 @@ export function parseCodexResult(
       reviewer_workspace_mutation_observed:
         latestIndependentReview?.workspace_mutation_observed === true,
       strict_review_protocol_observed: strictReviewProtocolObserved,
+      strict_final_stop_observed: strictFinalStopObserved,
       strict_review_cycle_count: reviewCycles.length,
       duplicate_strict_collab_call_id_observed:
         duplicateStrictCollabCallIdObserved,
@@ -1434,7 +1502,11 @@ function traceCapsuleStage(
 
   const indexed = events.map((event, index) => ({ event, index }));
   const parseCapsuleValidationCommand = (command) =>
-    parsePostChangeValidation(command, expectedWorkflow, reproductionContract)?.command ?? null;
+    parsePostChangeValidationCommand(
+      command,
+      expectedWorkflow,
+      reproductionContract,
+    )?.command ?? null;
   const firstToolIndex = indexed.find(({ event }) =>
     ["item.started", "item.completed"].includes(event?.type) &&
     !["agent_message", "reasoning"].includes(event?.item?.type)
@@ -1684,6 +1756,18 @@ function traceCapsuleStage(
           isBuildRedRetryAttempt(event.item)
         ))
     : null;
+  const validation = parsePostChangeValidationSequence(
+    postChangeCommands,
+    expectedWorkflow,
+    reproductionContract,
+  );
+  const validationObserved = validation !== null;
+  const qualityValidation = parseSupportedPostChangeValidation(
+    postChangeCommands,
+    expectedWorkflow,
+    reproductionContract,
+  );
+  const qualityValidationObserved = qualityValidation !== null;
   const qualityPreChangeEvidenceObserved =
     qualityReadObserved &&
     qualityPatchTargetsReadObserved &&
@@ -1698,6 +1782,70 @@ function traceCapsuleStage(
     patchBatches.length === 1 &&
     implementationPatchObserved &&
     testPatchObserved;
+  const debugInitialPatchBatch = expectedWorkflow === "debug"
+    ? patchBatches[0] ?? []
+    : [];
+  const debugInitialPatchPaths = debugInitialPatchBatch.flatMap(changePaths);
+  const debugInitialPatchObserved = expectedWorkflow === "debug"
+    ? debugInitialPatchPaths.some(isImplementationPath) &&
+      debugInitialPatchPaths.some(isTestPath) &&
+      debugInitialPatchPaths.every((changedPath) =>
+        isImplementationPath(changedPath) || isTestPath(changedPath)
+      )
+    : null;
+  const debugRecoveryCount = expectedWorkflow === "debug"
+    ? Math.max(0, patchBatches.length - 1)
+    : 0;
+  const debugRecoveryBatch = expectedWorkflow === "debug"
+    ? patchBatches[1] ?? []
+    : [];
+  const debugRecoveryPaths = debugRecoveryBatch.flatMap(changePaths);
+  const debugInitialPatchEndIndex = debugInitialPatchBatch.at(-1)?.index ?? -1;
+  const debugRecoveryPatchCompletedIndex = debugRecoveryBatch[0]?.index ?? -1;
+  const debugRecoveryPatchId = debugRecoveryBatch[0]?.event?.item?.id;
+  const debugRecoveryPatchStartIndex = debugRecoveryPatchCompletedIndex < 0
+    ? -1
+    : indexed.findLast(({ event, index }) =>
+        index <= debugRecoveryPatchCompletedIndex &&
+        event?.type === "item.started" &&
+        event?.item?.type === "file_change" &&
+        (debugRecoveryPatchId === undefined || event.item.id === debugRecoveryPatchId)
+      )?.index ?? debugRecoveryPatchCompletedIndex;
+  const debugRecoveryCommands = expectedWorkflow === "debug" &&
+    debugInitialPatchEndIndex >= 0 &&
+    debugRecoveryPatchStartIndex > debugInitialPatchEndIndex
+    ? taskCommands.filter(({ index }) =>
+        index > debugInitialPatchEndIndex && index < debugRecoveryPatchStartIndex
+      )
+    : [];
+  const failedDebugValidation = debugRecoveryCommands.length === 1
+    ? parseFailedDebugValidation(
+        debugRecoveryCommands[0].event.item,
+        reproductionContract,
+      )
+    : null;
+  const debugRecoveryToolCallCount = countToolCallsBetween(indexed, {
+    afterIndex: debugInitialPatchEndIndex,
+    beforeIndex: debugRecoveryPatchStartIndex,
+  });
+  const debugRecoveryPathsObserved = debugRecoveryPaths.length > 0 &&
+    debugRecoveryPaths.every((changedPath) =>
+      (isImplementationPath(changedPath) || isTestPath(changedPath)) &&
+      qualityReadEvidence.some(({ readPath }) => readPath === changedPath)
+    );
+  const debugRecoveryProtocolObserved = expectedWorkflow === "debug"
+    ? debugRecoveryCount === 0
+      ? patchBatches.length === 1 &&
+        debugInitialPatchObserved &&
+        validation?.mode === "combined"
+      : debugRecoveryCount === 1 &&
+        debugInitialPatchObserved &&
+        debugRecoveryToolCallCount === 1 &&
+        debugRecoveryPathsObserved &&
+        failedDebugValidation !== null &&
+        validation?.mode === "combined" &&
+        failedDebugValidation.command === validation.command
+    : null;
   const patchProtocolObserved = expectedWorkflow === "build"
     ? [2, 3].includes(patchBatches.length) &&
       buildRedObserved &&
@@ -1707,20 +1855,8 @@ function traceCapsuleStage(
       redTestPathsPreservedObserved &&
       implementationPatchObserved &&
       testPatchObserved
-    : multiFilePatchObserved;
+    : debugRecoveryProtocolObserved;
   const qualityPatchObserved = implementationPatchObserved && testPatchObserved;
-  const validation = parsePostChangeValidationSequence(
-    postChangeCommands,
-    expectedWorkflow,
-    reproductionContract,
-  );
-  const validationObserved = validation !== null;
-  const qualityValidation = parseSupportedPostChangeValidation(
-    postChangeCommands,
-    expectedWorkflow,
-    reproductionContract,
-  );
-  const qualityValidationObserved = qualityValidation !== null;
   const postValidationToolCalls = validationObserved
     ? countToolCallsAfter(indexed, validation.final_index)
     : 0;
@@ -1733,6 +1869,9 @@ function traceCapsuleStage(
   const qualityOrdinaryStopObserved = declaredRisk === "strict"
     ? null
     : qualityValidationObserved && qualityPostValidationToolCalls === 0;
+  const finalStopObserved = declaredRisk === "strict"
+    ? null
+    : qualityOrdinaryStopObserved;
   const protocolObserved =
     routeDeclarationsConsistent &&
     riskMonotonicObserved &&
@@ -1816,12 +1955,15 @@ function traceCapsuleStage(
     quality_validation_observed: qualityValidationObserved,
     quality_validation_mode: qualityValidation?.mode ?? null,
     post_change_validation_mode: validation?.mode ?? null,
+    debug_recovery_count: debugRecoveryCount,
+    debug_recovery_protocol_observed: debugRecoveryProtocolObserved,
     final_validation_budget_observed:
       validationObserved && postChangeCommands.length === 1,
     capsule_green_path_observed:
       protocolObserved &&
       preChangeStage.retry_calls === 0 &&
       (expectedWorkflow !== "build" || buildRedCycleRestarts === 0) &&
+      (expectedWorkflow !== "debug" || debugRecoveryCount === 0) &&
       postChangeCommands.length === 1 &&
       (expectedWorkflow !== "debug" || validation?.mode === "combined"),
     post_change_reproduction_replayed:
@@ -1830,6 +1972,7 @@ function traceCapsuleStage(
     quality_post_validation_tool_calls: qualityPostValidationToolCalls,
     quality_ordinary_stop_observed: qualityOrdinaryStopObserved,
     ordinary_stop_observed: ordinaryStopObserved,
+    final_stop_observed: finalStopObserved,
     protocol_observed: protocolObserved,
   };
 }
@@ -2087,10 +2230,18 @@ function ledgerContentTokens(value) {
 }
 
 function countToolCallsAfter(indexed, afterIndex) {
+  return countToolCallsBetween(indexed, { afterIndex });
+}
+
+function countToolCallsBetween(
+  indexed,
+  { afterIndex, beforeIndex = Number.POSITIVE_INFINITY },
+) {
   const calls = new Set();
   for (const { event, index } of indexed) {
     if (
       index <= afterIndex ||
+      index >= beforeIndex ||
       !["item.started", "item.completed"].includes(event?.type) ||
       ["agent_message", "reasoning"].includes(event?.item?.type) ||
       !event?.item?.type
@@ -2098,7 +2249,7 @@ function countToolCallsAfter(indexed, afterIndex) {
       continue;
     }
     calls.add(typeof event.item.id === "string"
-      ? event.item.id
+      ? `${event.item.type}:${event.item.id}`
       : `${event.type}:${index}`);
   }
   return calls.size;
@@ -2814,7 +2965,11 @@ function parseValidationEvidence(evidence, parseValidationCommand = canonicalVal
   return testCommand === null ? null : { test_command: testCommand };
 }
 
-function parsePostChangeValidation(command, expectedWorkflow, reproductionContract) {
+function parsePostChangeValidationCommand(
+  command,
+  expectedWorkflow,
+  reproductionContract,
+) {
   const direct = expectedWorkflow === "build"
     ? canonicalBuildValidationCommand(command)
     : canonicalTestValidationCommand(command);
@@ -2843,6 +2998,61 @@ function parsePostChangeValidation(command, expectedWorkflow, reproductionContra
   return { command: text, reproduction_replayed: true };
 }
 
+function parsePostChangeValidation(item, expectedWorkflow, reproductionContract) {
+  const validation = parsePostChangeValidationCommand(
+    item?.command,
+    expectedWorkflow,
+    reproductionContract,
+  );
+  if (
+    validation === null ||
+    !validation.reproduction_replayed ||
+    reproductionContract?.resolved_output === undefined
+  ) {
+    return validation;
+  }
+  return resolvedReproductionOutputObserved(
+      item?.aggregated_output,
+      reproductionContract.resolved_output,
+    )
+    ? validation
+    : null;
+}
+
+function resolvedReproductionOutputObserved(output, expected) {
+  const firstLine = String(output ?? "")
+    .split(/\r?\n/u)
+    .find((line) => line.trim().length > 0);
+  if (firstLine === undefined) return false;
+  try {
+    return isDeepStrictEqual(JSON.parse(firstLine), expected);
+  } catch {
+    return false;
+  }
+}
+
+function parseFailedDebugValidation(item, reproductionContract) {
+  const validation = parsePostChangeValidationCommand(
+    item?.command,
+    "debug",
+    reproductionContract,
+  );
+  if (
+    validation === null ||
+    validation.reproduction_replayed !== true ||
+    !["completed", "failed"].includes(item?.status) ||
+    item?.timed_out === true ||
+    !Number.isInteger(item?.exit_code) ||
+    item.exit_code < 1 ||
+    item.exit_code > 255 ||
+    String(item?.aggregated_output ?? "").trim().length === 0 ||
+    hasFatalShellDiagnostic(item?.aggregated_output)
+  ) {
+    return null;
+  }
+  return validation;
+}
+
 function parsePostChangeValidationSequence(
   commands,
   expectedWorkflow,
@@ -2850,7 +3060,7 @@ function parsePostChangeValidationSequence(
 ) {
   if (commands.length === 1 && commands[0].event.item.exit_code === 0) {
     const validation = parsePostChangeValidation(
-      commands[0].event.item.command,
+      commands[0].event.item,
       expectedWorkflow,
       reproductionContract,
     );
@@ -2899,7 +3109,7 @@ function parseSupportedPostChangeValidation(
   const reproductionAttempts = [];
   const validationAttempts = commands.flatMap(({ event, index }) => {
     const parsed = parsePostChangeValidation(
-      event.item.command,
+      event.item,
       expectedWorkflow,
       reproductionContract,
     );
@@ -3560,8 +3770,26 @@ export function evaluateWorkflowConformance(run) {
             ? "ordered TEST-PATCH, RED, and CODE-PATCH protocol was not observed"
             : "uninterrupted code-and-test mutation window was not observed");
         }
+        if (
+          run.expected_workflow === "debug" &&
+          (
+            !Number.isInteger(capsule.debug_recovery_count) ||
+            capsule.debug_recovery_count < 0 ||
+            capsule.debug_recovery_count > 1 ||
+            capsule.debug_recovery_protocol_observed !== true
+          )
+        ) {
+          reasons.push("bounded DEBUG recovery protocol was not observed");
+        }
         if (!capsule.quality_validation_observed) {
           reasons.push("supported successful post-edit validation was not observed");
+        }
+        if (
+          run.expected_workflow === "debug" &&
+          capsule.highest_presented_risk !== "strict" &&
+          capsule.final_stop_observed !== true
+        ) {
+          reasons.push("DEBUG did not stop after final successful validation");
         }
       }
     }
@@ -3597,6 +3825,12 @@ export function evaluateWorkflowConformance(run) {
       run.telemetry?.workflow_trace?.reviewer_workspace_mutation_observed
     ) {
       reasons.push("designated reviewer mutated the workspace");
+    }
+    if (
+      strictRequired &&
+      run.telemetry?.workflow_trace?.strict_final_stop_observed !== true
+    ) {
+      reasons.push("strict workflow did not stop after the final passing review");
     }
   }
   return { status: reasons.length === 0 ? "PASS" : "FAIL", reasons };
@@ -4818,11 +5052,13 @@ export async function runDevelopmentPilot({
       }),
       "leanpowers-0.2.0": await cleanGitRevision(leanpowersMarketplace),
     };
-    const evaluatorRevision = heldout
+    const runnerRevision = heldout
       ? await cleanGitRevision(PROJECT_ROOT)
       : null;
+    const evaluatorRevision = runnerRevision;
     assertFrozenHeldoutRevisions(suite, {
       evaluatorRevision,
+      runnerRevision,
       workflowRevisions,
     });
     const homes = await prepareCodexHomes({
@@ -4860,6 +5096,7 @@ export async function runDevelopmentPilot({
       approval: "never",
       user_plugins: "isolated",
       evaluator_revision: evaluatorRevision,
+      runner_revision: runnerRevision,
       freeze_contract_verified: suite.freeze_contract_verified === true,
       workflow_revisions: workflowRevisions,
     };
@@ -4923,7 +5160,12 @@ export async function runDevelopmentCaseWithCapacityRetry(runAttempt) {
   }
 
   const finalAttempt = attempts.at(-1);
-  if (finalAttempt?.result === null || finalAttempt?.result === undefined) {
+  const capacityRetryExhausted =
+    attempts.length === 2 && finalAttempt?.capacity_retry_eligible === true;
+  if (
+    !capacityRetryExhausted &&
+    (finalAttempt?.result === null || finalAttempt?.result === undefined)
+  ) {
     throw new Error("Final development benchmark attempt did not produce a result");
   }
   const attemptWallSeconds = attempts.map((attempt) => {
@@ -4933,9 +5175,27 @@ export async function runDevelopmentCaseWithCapacityRetry(runAttempt) {
     return attempt.wall_seconds;
   });
   const finalAttemptWallSeconds = attemptWallSeconds.at(-1);
-  const infrastructureRetryWallSeconds = attemptWallSeconds
-    .slice(0, -1)
+  const infrastructureRetryWallSeconds = (
+    capacityRetryExhausted ? attemptWallSeconds : attemptWallSeconds.slice(0, -1)
+  )
     .reduce((total, value) => total + value, 0);
+  const finalResult = capacityRetryExhausted
+    ? {
+        ...(finalAttempt.result ?? {}),
+        infrastructure_failure: {
+          kind: "model-capacity",
+          retry_exhausted: true,
+        },
+        outcome: {
+          status: "INCOMPLETE",
+          reasons: ["model capacity retry exhausted"],
+        },
+        telemetry: {
+          ...(finalAttempt.result?.telemetry ?? {}),
+          tokens: null,
+        },
+      }
+    : finalAttempt.result;
   return {
     artifacts: finalAttempt.artifacts,
     priorAttempts: attempts.slice(0, -1).map((attempt, index) => ({
@@ -4943,19 +5203,21 @@ export async function runDevelopmentCaseWithCapacityRetry(runAttempt) {
       attemptNumber: index + 1,
     })),
     result: {
-      ...finalAttempt.result,
+      ...finalResult,
       attempt_count: attempts.length,
       capacity_retry_count: attempts.length - 1,
-      final_attempt_wall_seconds: finalAttemptWallSeconds,
+      final_attempt_wall_seconds: capacityRetryExhausted
+        ? null
+        : finalAttemptWallSeconds,
       infrastructure_retry_wall_seconds: infrastructureRetryWallSeconds,
-      wall_seconds: finalAttemptWallSeconds,
+      wall_seconds: capacityRetryExhausted ? null : finalAttemptWallSeconds,
     },
   };
 }
 
 export function renderDevelopmentReport(result) {
   const aggregate = aggregateRuns(result.runs);
-  const paired = result.paired ?? aggregatePairedRuns(result.runs, {
+  const paired = aggregatePairedRuns(result.runs, {
     matrixComplete: result.completion === "complete",
   });
   const tokenTarget = result.token_target ?? defaultDevelopmentTokenTarget();
@@ -4966,7 +5228,9 @@ export function renderDevelopmentReport(result) {
       result.completion === "complete",
     );
   const performanceGoalAssessment =
-    result.suite_id === "development-effects-performance-confirmatory-v2-2026-07-15" &&
+    tokenTarget.metric === "aggregate-model-token-share" &&
+    tokenTarget.population === "all-matched-pairs" &&
+    tokenTarget.max_share_pct === 60 &&
     tokenTargetResult.eligible === true &&
     Number.isFinite(tokenTargetResult.observed_share_pct)
       ? tokenTargetResult.observed_share_pct <= 60
@@ -5018,6 +5282,14 @@ export function renderDevelopmentReport(result) {
   const failures = result.runs
     .filter((run) => run.outcome.status === "FAIL")
     .map((run) => `- ${run.run_id}: ${run.outcome.reasons.join("; ")}`);
+  const infrastructureFailures = result.runs.filter(
+    (run) => run.infrastructure_failure !== undefined,
+  );
+  const telemetryGaps = result.runs.filter((run) =>
+    run.telemetry?.tokens?.telemetry_complete !== true ||
+    !Number.isFinite(run.wall_seconds) ||
+    run.wall_seconds <= 0
+  );
   const manifestRows = (Array.isArray(result.case_snapshots)
     ? result.case_snapshots
     : []
@@ -5042,6 +5314,12 @@ export function renderDevelopmentReport(result) {
       ? "This held-out result is incomplete or did not match the freeze contract, so it is diagnostic only and cannot support a confirmatory claim."
       : "This is real coding and independent executable verification, but it is not the full 11-scenario release benchmark.";
   const reportedCases = Array.isArray(result.cases) ? result.cases : [];
+  const requiredPairCount = Number.isSafeInteger(result.repetitions)
+    ? reportedCases.length * result.repetitions
+    : null;
+  const invalidOrExcludedPairCount = requiredPairCount === null
+    ? null
+    : Math.max(0, requiredPairCount - paired.all_pairs.count);
   const categoryResult = (label, selectedRuns) => {
     const workflowMetrics = categoryWorkflowMetrics(selectedRuns);
     const categoryPaired = aggregatePairedRuns(selectedRuns, {
@@ -5054,7 +5332,7 @@ export function renderDevelopmentReport(result) {
     };
   };
   const categoryResults = reportedCases.map((benchmarkCase) => categoryResult(
-    developmentReportCategory(benchmarkCase.id),
+    benchmarkCase.reporting_category ?? developmentReportCategory(benchmarkCase.id),
     result.runs.filter((run) => run.case_id === benchmarkCase.id),
   ));
   const ownerResults = [...new Set(reportedCases.map(
@@ -5140,7 +5418,7 @@ export function renderDevelopmentReport(result) {
         ]
       : []),
     "",
-    `Revisions: Superpowers ${result.runtime.workflow_revisions["superpowers-6.1.1"]}; LeanPowers ${result.runtime.workflow_revisions["leanpowers-0.2.0"]}.`,
+    `Revisions: Superpowers ${result.runtime.workflow_revisions["superpowers-6.1.1"]}; LeanPowers ${result.runtime.workflow_revisions["leanpowers-0.2.0"]}; evaluator ${result.runtime.evaluator_revision ?? "n/a"}; runner ${result.runtime.runner_revision ?? "n/a"}.`,
     "",
     `Suite manifest: ${result.suite_sha256}.`,
     "",
@@ -5208,10 +5486,22 @@ export function renderDevelopmentReport(result) {
     "",
     failures.length > 0 ? failures.join("\n") : "None.",
     "",
+    "## Validity exclusions",
+    "",
+    `Infrastructure failures: **${infrastructureFailures.length}**; telemetry-gap runs: **${telemetryGaps.length}**; invalid or excluded pairs: **${invalidOrExcludedPairCount ?? "n/a"}**. These observations are excluded from Token and wall-time conclusions.`,
+    ...(infrastructureFailures.length === 0
+      ? []
+      : [
+          "",
+          ...infrastructureFailures.map((run) =>
+            `- ${run.run_id}: ${run.infrastructure_failure.kind ?? "infrastructure"}`
+          ),
+        ]),
+    "",
     "## Interpretation boundary",
     "",
     "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, every case-owned semantic fault family policy to pass, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    `- LeanPowers quality-bearing conformance requires an unambiguous semantic route declaration before any task tool, rejects conflicting declarations, and forbids risk downgrade after an upgrade. Build/debug traces must show each later-edited existing file was successfully read before its own first edit and supported successful validation after the final edit. Build additionally requires a test-only patch, exactly one nonfatal failing supported test command before product edits, preservation of those RED test paths, and a later product patch; one invalidated test cycle may restart before the final conformant cycle. Debug requires fixture-owned structured pre-edit reproduction and one uninterrupted code-and-test mutation window before validation; narration between adjacent file edits is ceremony, while any intervening command or other tool closes the window. Discovery syntax, extra grounded-file reads, split versus batched reads, validation-manifest reads, Skill/reference reloads, exact command/call budgets, clause-ledger shape, repeated route or ledger presentation, one-call versus two-call validation, and later non-mutating tooling remain efficiency or ceremony diagnostics rather than quality gates. Representation-boundary adequacy is measured workflow-neutrally in Task PASS: every pre-registered fault-family member must preserve baseline tests, every candidate counterfactual must complete, and every member must be killed by the candidate test delta. Replay telemetry proves only that the exact reproduction command ran, not that its diagnostic meaning changed. These observable checks are scoped to ${caseScope}, not universal semantic proof. Strict quality additionally requires a current independent PASS review with the complete task and current validation context, plus proof the reviewer did not mutate the workspace; exact Skill invocation, prompt/verdict surface, reviewer count, wait targeting, and cycle choreography remain diagnostics.`,
+    `- LeanPowers quality-bearing conformance requires an unambiguous semantic route declaration before any task tool, rejects conflicting declarations, and forbids risk downgrade after an upgrade. Build/debug traces must show each later-edited existing file was successfully read before its own first edit and supported successful validation after the final edit. Build additionally requires a test-only patch, exactly one nonfatal failing supported test command before product edits, preservation of those RED test paths, and a later product patch; one invalidated test cycle may restart before the final conformant cycle. Debug requires fixture-owned structured pre-edit reproduction and an initial uninterrupted code-and-test mutation window. A failed combined validation may open exactly one bounded recovery patch only when no other tool intervenes, every recovery path was already read and remains in scope, and the final rerun uses the identical command; a second failure or recovery is incomplete. When the fixture declares resolved output, the successful reproduction replay must emit that exact JSON. Lean and standard runs stop after successful validation; strict runs stop after the final passing review. Discovery syntax, extra grounded-file reads, split versus batched reads, validation-manifest reads, Skill/reference reloads, exact pre-validation command/call budgets, clause-ledger shape, repeated route or ledger presentation, and one-call versus two-call validation remain efficiency or ceremony diagnostics rather than quality gates. Representation-boundary adequacy is measured workflow-neutrally in Task PASS: every pre-registered fault-family member must preserve baseline tests, every candidate counterfactual must complete, and every member must be killed by the candidate test delta. Reproduction telemetry proves the exact command and, when declared, resolved structured output; it is not universal semantic proof. These observable checks are scoped to ${caseScope}, not universal semantic proof. Strict quality additionally requires a current independent PASS review with the complete task and current validation context, proof the reviewer did not mutate the workspace, and no subsequent tool call; exact Skill invocation, prompt/verdict surface, reviewer count, wait targeting, and cycle choreography remain diagnostics.`,
     "- Codex JSONL does not expose raw spawn arguments such as `fork_context`; observable spawn/wait behavior is checked dynamically, while exact argument shape is covered by static workflow tests and remains a runtime telemetry gap.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
@@ -5369,13 +5659,17 @@ async function runSingleCase({
       raw: agent.stdout,
       telemetry,
     });
-    if (allowCapacityRetry && capacityRetryEligible) {
+    if (capacityRetryEligible) {
       const gitState = await inspectBenchmarkGitState({
         baselineHead,
         environment: toolchain.environment,
         gitExecutable: toolchain.git,
         workspace,
       });
+      const changes = evaluateChangedPaths(
+        gitState.changed_paths,
+        benchmarkCase.change_policy,
+      );
       return {
         artifacts: {
           agent_stderr: agent.stderr,
@@ -5385,7 +5679,44 @@ async function runSingleCase({
           workspace_patch: gitState.workspace_patch,
         },
         capacity_retry_eligible: true,
-        result: null,
+        result: allowCapacityRetry
+          ? null
+          : {
+              run_id: runId,
+              workflow,
+              case_id: benchmarkCase.id,
+              scenario_class: benchmarkCase.scenario_class,
+              risk_level: benchmarkCase.risk_level,
+              expected_workflow: benchmarkCase.expected_workflow,
+              declared_risk: null,
+              declared_workflow: null,
+              route_ledger_reported:
+                workflow === "leanpowers-0.2.0" ? false : null,
+              repetition,
+              agent_exit_code: agent.exitCode,
+              agent_timed_out: agent.timedOut,
+              agent_completed: false,
+              activation_reported: false,
+              case_snapshot: caseSnapshotContract(benchmarkCase),
+              head_unchanged: gitState.final_head === baselineHead,
+              telemetry: {
+                turns: telemetry.turns,
+                tool_calls: telemetry.tool_calls,
+                tool_calls_by_type: telemetry.tool_calls_by_type,
+                workflow_trace: telemetry.workflow_trace,
+                tokens: null,
+              },
+              changes,
+              required_artifact_regression_gate_ids:
+                benchmarkCase.artifact_regression_gates.map(({ id }) => id),
+              required_artifact_regression_gates: [],
+              verifier: { artifact_regression: null },
+              verifier_workspace_unchanged: null,
+              workflow_conformance: {
+                status: "INCOMPLETE",
+                reasons: ["agent run unavailable due model capacity"],
+              },
+            },
         wall_seconds: wallSeconds,
       };
     }
@@ -5521,6 +5852,23 @@ export function makePilotResult(suite, runtime, runs, repetitions, selectedCases
     ? suite.cases.map(({ id }) => id).sort()
     : [];
   const selectedCaseIds = selectedCases.map(({ id }) => id).sort();
+  const freeze = suite.freeze_contract ?? {};
+  const legacyRevisionContract = freeze.leanpowers_revision === undefined &&
+    freeze.evaluator_revision === undefined &&
+    freeze.runner_revision === undefined;
+  const heldoutRevisionsVerified =
+    /^[a-f0-9]{40}$/u.test(String(runtime?.evaluator_revision ?? "")) &&
+    (legacyRevisionContract ||
+      /^[a-f0-9]{40}$/u.test(String(runtime?.runner_revision ?? ""))) &&
+    runtime?.workflow_revisions?.["superpowers-6.1.1"] ===
+      freeze.superpowers_revision &&
+    (legacyRevisionContract
+      ? runtime.evaluator_revision ===
+        runtime?.workflow_revisions?.["leanpowers-0.2.0"]
+      : runtime?.workflow_revisions?.["leanpowers-0.2.0"] ===
+          freeze.leanpowers_revision &&
+        runtime.evaluator_revision === freeze.evaluator_revision &&
+        runtime.runner_revision === freeze.runner_revision);
   const heldoutContractVerified = !heldout || (
     suite.freeze_contract_verified === true &&
     runtime?.freeze_contract_verified === true &&
@@ -5533,11 +5881,7 @@ export function makePilotResult(suite, runtime, runs, repetitions, selectedCases
     runtime?.agent_read_isolation ===
       suite.freeze_contract?.agent_read_isolation &&
     runtime?.agent_read_isolation_preflight === "PASS" &&
-    /^[a-f0-9]{40}$/u.test(String(runtime?.evaluator_revision ?? "")) &&
-    runtime.evaluator_revision ===
-      runtime?.workflow_revisions?.["leanpowers-0.2.0"] &&
-    runtime?.workflow_revisions?.["superpowers-6.1.1"] ===
-      suite.freeze_contract?.superpowers_revision
+    heldoutRevisionsVerified
   );
   const matrixComplete = /^[a-f0-9]{64}$/u.test(String(suite.suite_sha256 ?? "")) &&
     hasCompleteRunMatrix(runs, selectedCases, repetitions) &&
@@ -5555,11 +5899,18 @@ export function makePilotResult(suite, runtime, runs, repetitions, selectedCases
     confirmatory_eligible: heldout ? matrixComplete : null,
     runtime,
     repetitions,
-    cases: selectedCases.map(({ id, scenario_class, risk_level, expected_workflow }) => ({
+    cases: selectedCases.map(({
       id,
       scenario_class,
       risk_level,
       expected_workflow,
+      reporting_category,
+    }) => ({
+      id,
+      scenario_class,
+      risk_level,
+      expected_workflow,
+      ...(reporting_category === undefined ? {} : { reporting_category }),
     })),
     case_snapshots: caseSnapshots,
     runs,
@@ -5651,11 +6002,14 @@ function aggregatePairedRuns(runs, { matrixComplete }) {
     if (WORKFLOWS.has(run.workflow)) group[run.workflow].push(run);
     groups.set(key, group);
   }
-  const pairs = [...groups.values()]
+  const matchedPairs = [...groups.values()]
     .filter((group) => [...WORKFLOWS].every((workflow) => group[workflow].length === 1))
     .map((group) => Object.fromEntries(
       [...WORKFLOWS].map((workflow) => [workflow, group[workflow][0]]),
     ));
+  const pairs = matchedPairs.filter((pair) =>
+    [...WORKFLOWS].every((workflow) => pair[workflow].infrastructure_failure === undefined)
+  );
   const bothPass = pairs.filter((group) =>
     [...WORKFLOWS].every((workflow) => group[workflow].outcome.status === "PASS")
   );
@@ -5665,35 +6019,39 @@ function aggregatePairedRuns(runs, { matrixComplete }) {
     )
   );
   const byRisk = Object.fromEntries(["lean", "standard", "strict"].map((risk) => {
+    const required = matchedPairs.filter(
+      (pair) => pair["leanpowers-0.2.0"].risk_level === risk,
+    ).length;
     const selected = pairs.filter((pair) => pair["leanpowers-0.2.0"].risk_level === risk);
     return [risk, {
       all_pairs: summarizePairs(selected, {
         matrixComplete,
-        requiredPairCount: selected.length,
+        requiredPairCount: required,
       }),
       both_pass_pairs: summarizePairs(selected.filter((pair) =>
         [...WORKFLOWS].every((workflow) => pair[workflow].outcome.status === "PASS")
-      ), { matrixComplete, requiredPairCount: selected.length }),
+      ), { matrixComplete, requiredPairCount: required }),
       conformant_pass_pairs: summarizePairs(selected.filter((pair) =>
         [...WORKFLOWS].every((workflow) =>
           pair[workflow].outcome.status === "PASS" &&
           pair[workflow].workflow_conformance?.status === "PASS"
         )
-      ), { matrixComplete, requiredPairCount: selected.length }),
+      ), { matrixComplete, requiredPairCount: required }),
     }];
   }));
+  const requiredPairCount = matchedPairs.length;
   return {
     all_pairs: summarizePairs(pairs, {
       matrixComplete,
-      requiredPairCount: pairs.length,
+      requiredPairCount,
     }),
     both_pass_pairs: summarizePairs(bothPass, {
       matrixComplete,
-      requiredPairCount: pairs.length,
+      requiredPairCount,
     }),
     conformant_pass_pairs: summarizePairs(conformantPass, {
       matrixComplete,
-      requiredPairCount: pairs.length,
+      requiredPairCount,
     }),
     by_risk: byRisk,
   };
@@ -5716,6 +6074,7 @@ function hasCompleteRunMatrix(runs, selectedCases, repetitions) {
     const key = `${run.case_id}\u0000${run.repetition}\u0000${run.workflow}`;
     if (
       !expected.has(key) ||
+      run.infrastructure_failure !== undefined ||
       !isDeepStrictEqual(run.case_snapshot, caseSnapshots.get(run.case_id))
     ) {
       return false;

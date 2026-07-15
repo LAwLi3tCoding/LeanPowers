@@ -156,7 +156,7 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /Green capsule order is mandatory/i);
   assert.match(route, /One call\/stage/i);
   assert.match(route, /narrate only risk changes, failures, blockers, authorization/i);
-  assert.match(route, /Never repeat an unchanged failed\/no-output command/i);
+  assert.match(route, /Only DEBUG recovery repeats the failed validation command/i);
   assert.match(route, /BUILD permits one test-only RED correction before product; otherwise block\/debug/i);
   assert.match(route, /Destructive\/irreversible\/credential-gated\/production action requires prior explicit authorization/i);
   assert.match(route, /`build` DISCOVER\(1\)→READ-BATCH\(1\)→TEST-PATCH\(1\)→RED\(1\)→CODE-PATCH\(1\)→VALIDATE-COMBINED\(1\)/i);
@@ -217,6 +217,7 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /strict continues/i);
   assert.doesNotMatch(route, /tool_search\(query="wait_agent targets spawn_agent fork_context"/i);
   assert.match(route, /STRICT only after green VALIDATE/i);
+  assert.match(route, /Mandatory strict review protocol, then stop/i);
   assert.match(route, /Lean\/standard never read it/i);
   route = `${route}\n${strictPolicy}`;
   assert.match(route, /Mandatory strict review protocol/i);
