@@ -36,6 +36,21 @@ test("normalizes locale before both caching and loading", async () => {
   ]);
 });
 
+test("keeps different templates isolated in the same locale", async () => {
+  const calls = [];
+  const resolve = createTemplateResolver(async (name, locale) => {
+    calls.push([name, locale]);
+    return `${name}:${locale}`;
+  });
+
+  assert.equal(await resolve("welcome", "en"), "welcome:en");
+  assert.equal(await resolve("receipt", "en"), "receipt:en");
+  assert.deepEqual(calls, [
+    ["welcome", "en"],
+    ["receipt", "en"],
+  ]);
+});
+
 test("keeps composite cache identity collision-free", async () => {
   for (const separator of [":", "|", "/", "\u001f", "::", "<->"]) {
     const calls = [];
@@ -44,8 +59,10 @@ test("keeps composite cache identity collision-free", async () => {
       return JSON.stringify([name, locale]);
     });
 
-    const first = [`a${separator}b`, "c"];
-    const second = ["a", `b${separator}c`];
+    const first = [`a${separator}`, "b"];
+    const second = ["a", `${separator}b`];
+    assert.notDeepEqual(first, second);
+    assert.equal(first.join(""), second.join(""));
     assert.equal(await resolve(...first), JSON.stringify(first));
     assert.equal(await resolve(...second), JSON.stringify(second));
     assert.deepEqual(calls, [first, second]);

@@ -41,6 +41,7 @@ import {
   runArtifactRegressionGates,
   runProcess,
   runVerifier,
+  summarizeArtifactRegressionEvidence,
   tracksReviewerWorkspaceMutations,
 } from "../scripts/lib/development-benchmark.mjs";
 
@@ -80,15 +81,39 @@ const capsuleReproductionContract = {
     },
   },
 };
-const cacheArtifactGateSchema = {
-  id: "naive-colon-cache-key",
-  mutation: {
-    kind: "replace-file",
-    target: "src/cache-key.mjs",
-    source:
-      "cases/localized-template-cache/verifier/mutants/cache-key.naive-colon.mjs",
+const cacheArtifactGateSchemas = [
+  {
+    id: "component-inclusion",
+    policy: "all-kill",
+    mutations: [
+      {
+        kind: "replace-callable-export",
+        export_name: "templateCacheKey",
+        target: "src/cache-key.mjs",
+        source:
+          "cases/localized-template-cache/verifier/mutants/cache-key.component-omission.mjs",
+      },
+      {
+        kind: "replace-callable-export",
+        export_name: "templateCacheKey",
+        target: "src/cache-key.mjs",
+        source:
+          "cases/localized-template-cache/verifier/mutants/cache-key.name-omission.mjs",
+      },
+    ],
   },
-};
+  {
+    id: "collision-free-composition",
+    policy: "all-kill",
+    mutations: [{
+      kind: "replace-callable-export",
+      export_name: "templateCacheKey",
+      target: "src/cache-key.mjs",
+      source:
+        "cases/localized-template-cache/verifier/mutants/cache-key.boundary-erasure.mjs",
+    }],
+  },
+];
 const cacheFixtureRoot = fileURLToPath(new URL(
   "../evals/development-effects/cases/localized-template-cache/workspace/",
   import.meta.url,
@@ -105,36 +130,143 @@ assert.deepEqual(
   capsuleReproductionContract.expected_output,
 );
 
-async function hydratedCacheArtifactGate() {
-  const replacement = await readFile(
-    new URL(cacheArtifactGateSchema.mutation.source, suitePath),
-    "utf8",
-  );
-  return {
-    ...cacheArtifactGateSchema,
-    mutation: {
-      ...cacheArtifactGateSchema.mutation,
-      replacement,
-      replacement_sha256:
-        createHash("sha256").update(replacement).digest("hex"),
-    },
+async function hydratedCacheArtifactGates() {
+  const suite = await loadDevelopmentSuite(suitePath);
+  return suite.cases.find(
+    ({ id }) => id === "localized-template-cache",
+  ).artifact_regression_gates;
+}
+
+function testFingerprintSha256(entries) {
+  const hash = createHash("sha256");
+  const update = (label, contents) => {
+    const labelBytes = Buffer.from(label);
+    const contentBytes = Buffer.from(contents);
+    hash.update(`${labelBytes.length}:`);
+    hash.update(labelBytes);
+    hash.update(`${contentBytes.length}:`);
+    hash.update(contentBytes);
   };
+  for (const [label, contents] of entries) update(label, contents);
+  return hash.digest("hex");
+}
+
+function testArtifactFamilyManifestSha256({
+  id,
+  policy,
+  target,
+  exportName,
+  digests,
+}) {
+  const entries = [];
+  const update = (label, contents) => entries.push([label, contents]);
+  update(`fault-family:${id}:policy`, policy);
+  update(`fault-family:${id}:target`, target);
+  update(`fault-family:${id}:export`, exportName);
+  for (const [index, digest] of digests.entries()) {
+    update(`fault-family:${id}:member:${index + 1}`, digest);
+  }
+  return testFingerprintSha256(entries);
+}
+
+function testArtifactGateContractManifestSha256(contracts) {
+  return testFingerprintSha256(contracts.map((contract, index) => [
+    `fault-family:${index + 1}:${contract.id}:${contract.policy}:${contract.target}:${contract.export_name}:${contract.member_count}`,
+    contract.mutation_manifest_sha256,
+  ]));
 }
 
 const collisionRegressionBlock = [
+  'test("keeps locale components in cache identity", async () => {',
+  "  const calls = [];",
+  "  const resolve = createTemplateResolver(async (name, locale) => {",
+  "    calls.push([name, locale]);",
+  "    return JSON.stringify([name, locale]);",
+  "  });",
+  '  assert.equal(await resolve("welcome", "en"), JSON.stringify(["welcome", "en"]));',
+  '  assert.equal(await resolve("welcome", "fr"), JSON.stringify(["welcome", "fr"]));',
+  '  assert.equal(await resolve("receipt", "en"), JSON.stringify(["receipt", "en"]));',
+  '  assert.deepEqual(calls, [["welcome", "en"], ["welcome", "fr"], ["receipt", "en"]]);',
+  "});",
+  "",
   'test("keeps delimiter-colliding tuples isolated", async () => {',
   "  const calls = [];",
   "  const resolve = createTemplateResolver(async (name, locale) => {",
   "    calls.push([name, locale]);",
   "    return JSON.stringify([name, locale]);",
   "  });",
-  '  const first = ["a:b", "c"];',
-  '  const second = ["a", "b:c"];',
+  '  const first = ["a:", "b"];',
+  '  const second = ["a", ":b"];',
+  "  assert.notDeepEqual(first, second);",
+  '  assert.equal(first.join(""), second.join(""));',
   "  assert.equal(await resolve(...first), JSON.stringify(first));",
   "  assert.equal(await resolve(...second), JSON.stringify(second));",
   "  assert.deepEqual(calls, [first, second]);",
   "});",
   "",
+].join("\n");
+
+const componentOnlyRegressionBlock = [
+  'test("keeps locale components in cache identity", async () => {',
+  "  const calls = [];",
+  "  const resolve = createTemplateResolver(async (name, locale) => {",
+  "    calls.push([name, locale]);",
+  "    return JSON.stringify([name, locale]);",
+  "  });",
+  '  await resolve("welcome", "en");',
+  '  await resolve("welcome", "fr");',
+  '  await resolve("receipt", "en");',
+  '  assert.deepEqual(calls, [["welcome", "en"], ["welcome", "fr"], ["receipt", "en"]]);',
+  "});",
+  "",
+].join("\n");
+
+function collisionRegressionBlockFor(separator) {
+  return collisionRegressionBlock
+    .replaceAll('"a:"', JSON.stringify(`a${separator}`))
+    .replaceAll('":b"', JSON.stringify(`${separator}b`));
+}
+
+const nonBoundaryAnagramRegressionBlock = [
+  'test("keeps name anagrams isolated", async () => {',
+  "  const calls = [];",
+  "  const resolve = createTemplateResolver(async (name, locale) => {",
+  "    calls.push([name, locale]);",
+  "    return JSON.stringify([name, locale]);",
+  "  });",
+  '  const first = ["abc", "en"];',
+  '  const second = ["acb", "en"];',
+  "  assert.equal(await resolve(...first), JSON.stringify(first));",
+  "  assert.equal(await resolve(...second), JSON.stringify(second));",
+  "  assert.deepEqual(calls, [first, second]);",
+  "});",
+  "",
+].join("\n");
+
+const delimiterOnlyRegressionBlock = [
+  'test("keeps delimiter-colliding tuples isolated", async () => {',
+  "  const calls = [];",
+  "  const resolve = createTemplateResolver(async (name, locale) => {",
+  "    calls.push([name, locale]);",
+  "    return JSON.stringify([name, locale]);",
+  "  });",
+  '  const first = ["a:", "b"];',
+  '  const second = ["a", ":b"];',
+  "  assert.notDeepEqual(first, second);",
+  '  assert.equal(first.join(""), second.join(""));',
+  "  await resolve(...first);",
+  "  await resolve(...second);",
+  "  assert.deepEqual(calls, [first, second]);",
+  "});",
+  "",
+].join("\n");
+
+const delimiterOnlyRegressionSource = [
+  'import assert from "node:assert/strict";',
+  'import test from "node:test";',
+  'import { createTemplateResolver } from "../src/resolver.mjs";',
+  "",
+  delimiterOnlyRegressionBlock,
 ].join("\n");
 
 const collisionRegressionSource = [
@@ -149,6 +281,88 @@ const collisionFreeCacheKeySource = [
   "export function templateCacheKey(name, locale) {",
   "  return JSON.stringify([name, locale]);",
   "}",
+  "",
+].join("\n");
+
+const collisionFreeCacheKeyConstExportSource = [
+  "export const templateCacheKey = (name, locale) =>",
+  "  JSON.stringify([name, locale]);",
+  "",
+].join("\n");
+
+const collisionFreeCacheKeyWithExtraExportSource = [
+  collisionFreeCacheKeySource.trimEnd(),
+  "export const candidateOnlyMarker = true;",
+  "",
+].join("\n");
+
+const collisionFreeCacheKeyWithDefaultExportSource = [
+  collisionFreeCacheKeySource.trimEnd(),
+  'export default "candidate-default";',
+  "",
+].join("\n");
+
+const collisionFreeCacheKeyWithRegexSource = [
+  "export function templateCacheKey(name, locale) {",
+  "  const closingBracePattern = /[}]/u;",
+  '  if (!closingBracePattern.test("}")) throw new Error("unreachable");',
+  "  return JSON.stringify([name, locale]);",
+  "}",
+  "",
+].join("\n");
+
+const collisionFreeCacheKeyWithNestedTemplateSource = [
+  "export function templateCacheKey(name, locale) {",
+  "  const nestedTemplateMarker = `outer:${`export function templateCacheKey(){}`}`;",
+  "  void nestedTemplateMarker;",
+  "  return JSON.stringify([name, locale]);",
+  "}",
+  "",
+].join("\n");
+
+const baselineWithoutTargetImportSource = [
+  'import assert from "node:assert/strict";',
+  'import test from "node:test";',
+  "",
+  'test("baseline arithmetic", () => {',
+  "  assert.equal(2 + 2, 4);",
+  "});",
+  "",
+].join("\n");
+
+const candidateOnlyExportTestSource = [
+  'import assert from "node:assert/strict";',
+  'import test from "node:test";',
+  'import { candidateOnlyMarker } from "../src/cache-key.mjs";',
+  "",
+  'test("retains an unrelated candidate export", () => {',
+  "  assert.equal(candidateOnlyMarker, true);",
+  "});",
+  "",
+].join("\n");
+
+const candidateOnlyDefaultExportTestSource = [
+  'import assert from "node:assert/strict";',
+  'import test from "node:test";',
+  'import candidateDefault from "../src/cache-key.mjs";',
+  "",
+  'test("retains the candidate default export", () => {',
+  '  assert.equal(candidateDefault, "candidate-default");',
+  "});",
+  "",
+].join("\n");
+
+const candidateLayoutProbeSource = [
+  'import assert from "node:assert/strict";',
+  'import { readdirSync } from "node:fs";',
+  'import test from "node:test";',
+  "",
+  'test("artifact phase preserves the ordinary source layout", () => {',
+  "  assert.deepEqual(",
+  '    readdirSync(new URL("../src/", import.meta.url)).sort(),',
+  '    ["cache-key.mjs", "locale.mjs", "resolver.mjs"],',
+  "  );",
+  "});",
   "",
 ].join("\n");
 
@@ -539,7 +753,7 @@ function capsuleTraceEvents({
 test("development pilot declares three executable risk-calibrated scenario classes", async () => {
   const suite = await loadDevelopmentSuite(suitePath);
 
-  assert.equal(suite.schema_version, 1);
+  assert.equal(suite.schema_version, 2);
   assert.equal(suite.evidence_level, "paired-development-pilot");
   assert.equal(suite.repetitions, 2);
   assert.match(suite.suite_sha256, /^[a-f0-9]{64}$/u);
@@ -572,27 +786,36 @@ test("development pilot declares three executable risk-calibrated scenario class
   );
   assert.deepEqual(
     suite.cases.find(({ id }) => id === "localized-template-cache")
-      ?.artifact_regression_gates.map(({ id, mutation }) => ({
+      ?.artifact_regression_gates.map(({ id, policy, mutations }) => ({
         id,
-        mutation: {
-          kind: mutation.kind,
-          source: mutation.source,
-          target: mutation.target,
-        },
+        policy,
+        mutations: mutations.map(({ kind, export_name, source, target }) => ({
+          kind,
+          export_name,
+          source,
+          target,
+        })),
       })),
-    [cacheArtifactGateSchema],
+    cacheArtifactGateSchemas,
   );
-  const hydratedGate = suite.cases.find(
+  const hydratedGates = suite.cases.find(
     ({ id }) => id === "localized-template-cache",
-  ).artifact_regression_gates[0];
-  assert.equal(
-    hydratedGate.mutation.replacement,
-    await readFile(new URL(cacheArtifactGateSchema.mutation.source, suitePath), "utf8"),
-  );
-  assert.match(hydratedGate.mutation.replacement_sha256, /^[a-f0-9]{64}$/u);
+  ).artifact_regression_gates;
+  for (const gate of hydratedGates) {
+    assert.equal(gate.target, "src/cache-key.mjs");
+    assert.equal(gate.export_name, "templateCacheKey");
+    assert.match(gate.mutation_manifest_sha256, /^[a-f0-9]{64}$/u);
+    for (const mutation of gate.mutations) {
+      assert.equal(
+        mutation.replacement,
+        (await readFile(new URL(mutation.source, suitePath), "utf8")).trim(),
+      );
+      assert.match(mutation.replacement_sha256, /^[a-f0-9]{64}$/u);
+    }
+  }
 });
 
-test("suite input snapshots pin workspace, hidden verifier, and mutant bytes", async () => {
+test("suite input snapshots pin workspace, hidden verifier, and applied fault fragments", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "lp-suite-snapshot-"));
   try {
     const copiedRoot = path.join(root, "development-effects");
@@ -623,11 +846,15 @@ test("suite input snapshots pin workspace, hidden verifier, and mutant bytes", a
     );
     const mutantPath = path.join(
       copiedRoot,
-      benchmarkCase.artifact_regression_gates[0].mutation.source,
+      benchmarkCase.artifact_regression_gates[1].mutations[0].source,
     );
+    const originalMutantSource = await readFile(mutantPath, "utf8");
     await writeFile(workspaceSourcePath, "export const changed = true;\n");
     await writeFile(verifierPath, 'throw new Error("changed verifier");\n');
-    await writeFile(mutantPath, "export const changedMutant = true;\n");
+    await writeFile(
+      mutantPath,
+      'export function templateCacheKey() { return "changed"; }\n',
+    );
 
     const materialized = path.join(root, "materialized");
     await materializeWorkspaceSnapshot(
@@ -644,6 +871,22 @@ test("suite input snapshots pin workspace, hidden verifier, and mutant bytes", a
       ({ id }) => id === "localized-template-cache",
     );
     assert.notDeepEqual(caseSnapshotContract(reloadedCase), contractBefore);
+
+    await writeFile(mutantPath, originalMutantSource);
+    const rawSuite = JSON.parse(await readFile(copiedSuitePath, "utf8"));
+    const rawCacheCase = rawSuite.cases.find(
+      ({ id }) => id === "localized-template-cache",
+    );
+    rawCacheCase.artifact_regression_gates[0].mutations.reverse();
+    await writeFile(copiedSuitePath, `${JSON.stringify(rawSuite, null, 2)}\n`);
+    const reordered = await loadDevelopmentSuite(copiedSuitePath);
+    assert.notDeepEqual(
+      caseSnapshotContract(reordered.cases.find(
+        ({ id }) => id === "localized-template-cache",
+      )),
+      contractBefore,
+    );
+
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -687,8 +930,55 @@ test("artifact regression gate schema fails closed", async () => {
       ({ id }) => id === "localized-template-cache",
     );
     assert.notEqual(cacheCaseIndex, -1);
+    const duplicateMutationSource = path.join(
+      copiedRoot,
+      "cases/localized-template-cache/verifier/mutants/cache-key.duplicate.mjs",
+    );
+    await writeFile(
+      duplicateMutationSource,
+      await readFile(path.join(
+        copiedRoot,
+        "cases/localized-template-cache/verifier/mutants/cache-key.component-omission.mjs",
+      ), "utf8"),
+    );
+    const invalidMutationSource = path.join(
+      copiedRoot,
+      "cases/localized-template-cache/verifier/mutants/cache-key.invalid-shape.mjs",
+    );
+    await writeFile(
+      invalidMutationSource,
+      "export const templateCacheKey = (name, locale) => `${name}:${locale}`;\n",
+    );
+    const invalidSyntaxMutationSource = path.join(
+      copiedRoot,
+      "cases/localized-template-cache/verifier/mutants/cache-key.invalid-syntax.mjs",
+    );
+    await writeFile(
+      invalidSyntaxMutationSource,
+      'export function templateCacheKey(name, locale) { return name + locale; }\n"unterminated\n',
+    );
+    const commentOnlyDuplicateMutationSource = path.join(
+      copiedRoot,
+      "cases/localized-template-cache/verifier/mutants/cache-key.comment-duplicate.mjs",
+    );
+    await writeFile(
+      commentOnlyDuplicateMutationSource,
+      `// Different file comment, identical applied function.\n${await readFile(
+        path.join(
+          copiedRoot,
+          "cases/localized-template-cache/verifier/mutants/cache-key.component-omission.mjs",
+        ),
+        "utf8",
+      )}`,
+    );
 
     const invalidCases = [
+      [
+        (candidate) => {
+          candidate.schema_version = 1;
+        },
+        /schema_version must equal 2/u,
+      ],
       [
         (candidate) => {
           candidate.cases[cacheCaseIndex].artifact_regression_gates[0].id =
@@ -705,57 +995,156 @@ test("artifact regression gate schema fails closed", async () => {
       ],
       [
         (candidate) => {
-          candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
-            .mutation.kind = "run-command";
+          candidate.cases[cacheCaseIndex].artifact_regression_gates[0].policy =
+            "majority-kill";
         },
-        /safe replace-file target and source paths/u,
+        /policy must be all-kill/u,
+      ],
+      [
+        (candidate) => {
+          candidate.cases[cacheCaseIndex].artifact_regression_gates[1].mutations = [];
+        },
+        /mutations must be a non-empty policy-valid array/u,
+      ],
+      [
+        (candidate) => {
+          const gate = candidate.cases[cacheCaseIndex].artifact_regression_gates[0];
+          gate.mutation = gate.mutations[0];
+          delete gate.mutations;
+        },
+        /mutations must be a non-empty policy-valid array/u,
+      ],
+      [
+        (candidate) => {
+          candidate.cases[cacheCaseIndex].artifact_regression_gates[1].policy =
+            "any-kill";
+        },
+        /policy must be all-kill/u,
       ],
       [
         (candidate) => {
           candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
-            .mutation.target = "../src/cache-key.mjs";
+            .mutations[0].kind = "run-command";
         },
-        /safe replace-file target and source paths/u,
+        /safe replace-callable-export target, source, and export name/u,
       ],
       [
         (candidate) => {
           candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
-            .mutation.source = path.resolve(copiedRoot, "mutant.mjs");
+            .mutations[0].export_name = "not-valid()";
         },
-        /safe replace-file target and source paths/u,
+        /safe replace-callable-export target, source, and export name/u,
       ],
       [
         (candidate) => {
           candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
-            .mutation.target = "test/resolver.test.mjs";
+            .mutations[0].export_name = "default";
+        },
+        /safe replace-callable-export target, source, and export name/u,
+      ],
+      [
+        (candidate) => {
+          candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
+            .mutations[0].target = "../src/cache-key.mjs";
+        },
+        /safe replace-callable-export target, source, and export name/u,
+      ],
+      [
+        (candidate) => {
+          candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
+            .mutations[0].source = path.resolve(copiedRoot, "mutant.mjs");
+        },
+        /safe replace-callable-export target, source, and export name/u,
+      ],
+      [
+        (candidate) => {
+          candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
+            .mutations[0].target = "test/resolver.test.mjs";
         },
         /must address product code/u,
       ],
       [
         (candidate) => {
           candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
-            .mutation.target = "README.md";
+            .mutations[0].target = "README.md";
         },
         /must address product code/u,
       ],
       [
         (candidate) => {
           candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
-            .mutation.source = "cases/localized-template-cache/workspace/src/cache-key.mjs";
+            .mutations[1].target = "src/resolver.mjs";
+        },
+        /must replace one shared product target/u,
+      ],
+      [
+        (candidate) => {
+          candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
+            .mutations[1].export_name = "otherExport";
+        },
+        /must replace one shared named export/u,
+      ],
+      [
+        (candidate) => {
+          candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
+            .mutations[1].source = candidate.cases[cacheCaseIndex]
+              .artifact_regression_gates[0].mutations[0].source;
+        },
+        /must use unique source files/u,
+      ],
+      [
+        (candidate) => {
+          candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
+            .mutations[1].source =
+              "cases/localized-template-cache/verifier/mutants/cache-key.duplicate.mjs";
+        },
+        /must have unique replacement content/u,
+      ],
+      [
+        (candidate) => {
+          candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
+            .mutations[1].source =
+              "cases/localized-template-cache/verifier/mutants/cache-key.comment-duplicate.mjs";
+        },
+        /must have unique replacement content/u,
+      ],
+      [
+        (candidate) => {
+          candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
+            .mutations[0].source =
+              "cases/localized-template-cache/workspace/src/cache-key.mjs";
         },
         /must stay outside the candidate workspace/u,
       ],
       [
         (candidate) => {
           candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
-            .mutation.source = "cases/localized-template-cache/verifier/missing.mjs";
+            .mutations[0].source =
+              "cases/localized-template-cache/verifier/missing.mjs";
         },
         /must be a readable regular file/u,
       ],
       [
         (candidate) => {
           candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
-            .mutation.source = "cases/localized-template-cache/verifier/mutants";
+            .mutations[0].source =
+              "cases/localized-template-cache/verifier/mutants/cache-key.invalid-shape.mjs";
+        },
+        /must contain only one direct named function export/u,
+      ],
+      [
+        (candidate) => {
+          candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
+            .mutations[0].source =
+              "cases/localized-template-cache/verifier/mutants/cache-key.invalid-syntax.mjs";
+        },
+        /must be syntactically valid/u,
+      ],
+      [
+        (candidate) => {
+          candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
+            .mutations[0].source =
+              "cases/localized-template-cache/verifier/mutants";
         },
         /must be a regular file/u,
       ],
@@ -788,7 +1177,7 @@ test("artifact regression gate schema fails closed", async () => {
       );
       await symlink("workspace", path.join(fixtureRoot, "workspace-link"));
       await symlink(
-        "cache-key.naive-colon.mjs",
+        "cache-key.boundary-erasure.mjs",
         path.join(fixtureRoot, "verifier", "mutants", "mutant-link.mjs"),
       );
       invalidCases.push(
@@ -802,10 +1191,10 @@ test("artifact regression gate schema fails closed", async () => {
         [
           (candidate) => {
             candidate.cases[cacheCaseIndex].artifact_regression_gates[0]
-              .mutation.source =
+              .mutations[0].source =
                 "cases/localized-template-cache/verifier/mutants/mutant-link.mjs";
           },
-          /mutation.source must be a regular file/u,
+          /mutations\[0\]\.source must be a regular file/u,
         ],
       );
     }
@@ -1052,6 +1441,8 @@ test("LeanPowers route declaration accepts compact semantic and legacy forms", (
   for (const declaration of [
     "Following leanpowers:route | workflow=debug | risk=standard",
     "Invoking leanpowers:route | workflow=debug | risk=standard",
+    "leanpowers:route workflow: debug, risk: standard",
+    "Starting with the `leanpowers:route` workflow: owner=`debug`, risk=`standard`.",
   ]) {
     assert.deepEqual(parseLeanRouteLedger(declaration), {
       workflow: "debug",
@@ -2421,11 +2812,13 @@ test("distilled real r1 trace preserves quality and capsule budget", () => {
   }), { status: "PASS", reasons: [] });
 });
 
-test("distilled real r2 trace preserves quality without claiming capsule budget", () => {
+test("distilled real r2 route requires exact reproduction replay after patch", () => {
   const events = capsuleTraceEvents({
     discoverCommand: "rg -n -- 'cache|locale' src test",
     extraPostCommand: true,
     patchBatches: 2,
+    routeDeclaration:
+      "Starting with the `leanpowers:route` workflow: owner=`debug`, risk=`standard`.",
   });
   const readIndex = events.findIndex(({ item }) =>
     item?.type === "command_execution" &&
@@ -2499,6 +2892,35 @@ test("distilled real r2 trace preserves quality without claiming capsule budget"
     telemetry: { workflow_trace: parsed.workflow_trace },
     workflow: "leanpowers-0.2.0",
   }), { status: "PASS", reasons: [] });
+
+  const missingReplayEvents = structuredClone(events);
+  const combinedValidation = missingReplayEvents.find(({ item }) =>
+    item?.type === "command_execution" &&
+    String(item.command).includes(" && npm test")
+  );
+  assert.ok(combinedValidation);
+  combinedValidation.item.command = "npm test";
+  const missingReplay = parseCodexResult(
+    missingReplayEvents.map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  );
+  assert.equal(
+    missingReplay.workflow_trace.capsule_stage.quality_validation_observed,
+    false,
+  );
+  assert.deepEqual(evaluateWorkflowConformance({
+    activation_reported: true,
+    declared_risk: "standard",
+    declared_workflow: "debug",
+    expected_workflow: "debug",
+    risk_level: "standard",
+    route_ledger_reported: true,
+    telemetry: { workflow_trace: missingReplay.workflow_trace },
+    workflow: "leanpowers-0.2.0",
+  }), {
+    status: "FAIL",
+    reasons: ["supported successful post-edit validation was not observed"],
+  });
 });
 
 test("capsule READ accepts one boundary-preserving tail batch and requires grounded paths", () => {
@@ -3898,7 +4320,7 @@ test("a task passes only with agent completion, tests, and scope intact", () => 
     agent_completed: true,
     activation_reported: true,
     case_snapshot: {
-      mutants_sha256: "a".repeat(64),
+      mutants_sha256: testArtifactGateContractManifestSha256([]),
       verifier_sha256: "b".repeat(64),
       workspace_sha256: "c".repeat(64),
     },
@@ -3953,42 +4375,72 @@ test("a task passes only with agent completion, tests, and scope intact", () => 
   );
 
   const artifactPassing = structuredClone(passing);
+  const replacementSha256 = "d".repeat(64);
+  const mutationManifestSha256 = testArtifactFamilyManifestSha256({
+    id: "seeded-defect",
+    policy: "all-kill",
+    target: "src/index.mjs",
+    exportName: "targetFunction",
+    digests: [replacementSha256],
+  });
   artifactPassing.required_artifact_regression_gate_ids = ["seeded-defect"];
   artifactPassing.required_artifact_regression_gates = [{
     id: "seeded-defect",
+    policy: "all-kill",
     target: "src/index.mjs",
-    replacement_sha256: "a".repeat(64),
+    export_name: "targetFunction",
+    member_count: 1,
+    mutation_manifest_sha256: mutationManifestSha256,
   }];
+  artifactPassing.case_snapshot.mutants_sha256 =
+    testArtifactGateContractManifestSha256(
+      artifactPassing.required_artifact_regression_gates,
+    );
   artifactPassing.verifier.artifact_regression = {
     required_gate_ids: ["seeded-defect"],
     status: "PASS",
     gates: [{
       id: "seeded-defect",
+      policy: "all-kill",
       status: "PASS",
       target: "src/index.mjs",
-      replacement_sha256: "a".repeat(64),
+      export_name: "targetFunction",
+      member_count: 1,
+      mutation_manifest_sha256: mutationManifestSha256,
       changed_visible_test_paths: ["test/index.test.mjs"],
       candidate_visible_test_paths: ["test/index.test.mjs"],
-      baseline_tests_mutant_visible: {
-        exit_code: 0,
-        output_limited: false,
-        sandbox: "macos-seatbelt-hermetic-v2",
-        timed_out: false,
-        signal: null,
-        output: "pass",
-      },
-      candidate_tests_mutant_visible: {
-        exit_code: 1,
-        output_limited: false,
-        sandbox: "macos-seatbelt-hermetic-v2",
-        timed_out: false,
-        signal: null,
-        output: "failed regression",
-      },
+      members: [{
+        index: 1,
+        replacement_sha256: replacementSha256,
+        baseline_tests_mutant_visible: {
+          exit_code: 0,
+          output_limited: false,
+          sandbox: "macos-seatbelt-hermetic-v2",
+          timed_out: false,
+          signal: null,
+          output: "pass",
+        },
+        candidate_tests_mutant_visible: {
+          exit_code: 1,
+          output_limited: false,
+          sandbox: "macos-seatbelt-hermetic-v2",
+          timed_out: false,
+          signal: null,
+          output: "failed regression",
+        },
+        killed: true,
+      }],
       reasons: [],
     }],
   };
   assert.equal(evaluateRunOutcome(artifactPassing).status, "PASS");
+
+  const unexpectedArtifactField = structuredClone(artifactPassing);
+  unexpectedArtifactField.verifier.artifact_regression.extra = true;
+  assert.deepEqual(evaluateRunOutcome(unexpectedArtifactField), {
+    status: "FAIL",
+    reasons: ["artifact regression evidence contained unexpected fields"],
+  });
 
   for (const artifactRegression of [
     null,
@@ -4047,10 +4499,22 @@ test("a task passes only with agent completion, tests, and scope intact", () => 
     },
     (run) => delete run.required_artifact_regression_gates[0].target,
     (run) => {
-      run.required_artifact_regression_gates[0].replacement_sha256 = "short";
+      run.required_artifact_regression_gates[0].extra = true;
+    },
+    (run) => {
+      run.required_artifact_regression_gates[0].policy = "majority-kill";
+    },
+    (run) => {
+      run.required_artifact_regression_gates[0].member_count = 0;
+    },
+    (run) => {
+      run.required_artifact_regression_gates[0].mutation_manifest_sha256 = "short";
     },
     (run) => {
       run.verifier.artifact_regression.required_gate_ids = null;
+    },
+    (run) => {
+      run.verifier.artifact_regression.private_member_details = [];
     },
     (run) => {
       run.verifier.artifact_regression.gates = null;
@@ -4058,17 +4522,49 @@ test("a task passes only with agent completion, tests, and scope intact", () => 
     (run) => {
       run.verifier.artifact_regression.gates = [null];
     },
-    (run) => delete run.verifier.artifact_regression.gates[0]
+    (run) => {
+      run.verifier.artifact_regression.gates[0].member_count = 2;
+    },
+    (run) => {
+      run.verifier.artifact_regression.gates[0].mutation_manifest_sha256 =
+        "e".repeat(64);
+    },
+    (run) => delete run.verifier.artifact_regression.gates[0].members[0]
       .baseline_tests_mutant_visible,
     (run) => {
-      run.verifier.artifact_regression.gates[0]
+      run.verifier.artifact_regression.gates[0].members[0]
         .candidate_tests_mutant_visible.exit_code = 0;
+    },
+    (run) => {
+      run.verifier.artifact_regression.gates[0].members[0]
+        .candidate_tests_mutant_visible.exit_code = -1;
+      run.verifier.artifact_regression.gates[0].members[0].killed = true;
+    },
+    (run) => {
+      run.verifier.artifact_regression.gates[0].members[0]
+        .candidate_tests_mutant_visible.sandbox = "claimed";
+    },
+    (run) => {
+      run.verifier.artifact_regression.gates[0].members[0].index = 2;
+    },
+    (run) => {
+      run.verifier.artifact_regression.gates[0].members[0]
+        .replacement_sha256 = "f".repeat(64);
+    },
+    (run) => {
+      run.verifier.artifact_regression.gates[0].members[0].replacement_text =
+        "private mutation";
     },
     (run) => {
       run.verifier.artifact_regression.gates[0].candidate_visible_test_paths = [];
     },
     (run) => {
-      run.verifier.artifact_regression.gates[0].replacement = "private mutant";
+      run.verifier.artifact_regression.gates[0].mutations = ["private mutant"];
+    },
+    (run) => {
+      run.required_artifact_regression_gate_ids = [];
+      run.required_artifact_regression_gates = [];
+      run.verifier.artifact_regression = null;
     },
     (run) => delete run.verifier.visible.output,
     (run) => delete run.verifier.visible.output_limited,
@@ -4733,7 +5229,7 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
   assert.match(report, /Max Lean token share/u);
   assert.match(report, /Run matrix: \*\*complete\*\*/u);
   assert.match(report, new RegExp(`Suite manifest: ${suite.suite_sha256}`, "u"));
-  assert.match(report, /Workspace snapshot \| Hidden verifier snapshot \| Mutant snapshot/u);
+  assert.match(report, /Workspace snapshot \| Hidden verifier snapshot \| Fault-family snapshot/u);
   assert.match(report, /1\/2 \| no/u);
   const incompleteReport = renderDevelopmentReport({
     ...incomplete,
@@ -4888,13 +5384,13 @@ test("staged test renames restore both sides of the baseline counterfactual", as
     const result = await runArtifactRegressionGates({
       baselineHead,
       changedPaths: state.changed_paths,
-      gates: [await hydratedCacheArtifactGate()],
+      gates: await hydratedCacheArtifactGates(),
       testGlobs: benchmarkCase.change_policy.tests,
       workspace,
     });
     assert.equal(result.status, "FAIL");
     assert.deepEqual(result.gates[0].reasons, [
-      "baseline-test counterfactual already killed the mutant",
+      "baseline-test counterfactual already killed a semantic fault",
     ]);
   } finally {
     await rm(root, { force: true, recursive: true });
@@ -4997,7 +5493,37 @@ test("localized cache hidden acceptance rejects sampled delimiter-composite keys
   }
 });
 
-test("localized cache regression adequacy must kill a valid delimiter mutant", async () => {
+test("localized cache hidden acceptance rejects either omitted identity component", async () => {
+  const suite = await loadDevelopmentSuite(suitePath);
+  const benchmarkCase = suite.cases.find(({ id }) => id === "localized-template-cache");
+  assert.ok(benchmarkCase);
+
+  for (const [index, expression] of ["name", "locale"].entries()) {
+    const root = await mkdtemp(path.join(os.tmpdir(), `leanpowers-cache-omission-${index}-`));
+    try {
+      const workspace = path.join(root, "workspace");
+      await cp(new URL(benchmarkCase.workspace, suitePath), workspace, {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(workspace, "src", "cache-key.mjs"),
+        `export function templateCacheKey(name, locale) {\n  return ${expression};\n}\n`,
+      );
+      const result = await runVerifier({
+        workspace,
+        verifierFiles: benchmarkCase.verifier_files.map((file) =>
+          new URL(file, suitePath)
+        ),
+      });
+      assert.equal(result.visible.exit_code, 0);
+      assert.notEqual(result.hidden.exit_code, 0);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  }
+});
+
+test("localized cache regression adequacy satisfies pre-registered semantic fault families", async () => {
   const suite = await loadDevelopmentSuite(suitePath);
   const benchmarkCase = suite.cases.find(({ id }) => id === "localized-template-cache");
   assert.ok(benchmarkCase?.artifact_regression_gates);
@@ -5014,7 +5540,7 @@ test("localized cache regression adequacy must kill a valid delimiter mutant", a
       collisionFreeCacheKeySource,
     );
 
-    const gates = [await hydratedCacheArtifactGate()];
+    const gates = await hydratedCacheArtifactGates();
     const verifierFiles = benchmarkCase.verifier_files.map((file) =>
       new URL(file, suitePath)
     );
@@ -5022,8 +5548,8 @@ test("localized cache regression adequacy must kill a valid delimiter mutant", a
       workspace,
       verifierFiles,
     });
-    assert.equal(normal.visible.exit_code, 0);
-    assert.equal(normal.hidden.exit_code, 0);
+    assert.equal(normal.visible.exit_code, 0, normal.visible.output);
+    assert.equal(normal.hidden.exit_code, 0, normal.hidden.output);
 
     const insufficient = await runArtifactRegressionGates({
       baselineHead,
@@ -5067,19 +5593,26 @@ test("localized cache regression adequacy must kill a valid delimiter mutant", a
       workspace,
     });
     assert.equal(adequate.status, "PASS");
-    assert.deepEqual(adequate.required_gate_ids, ["naive-colon-cache-key"]);
-    assert.deepEqual(adequate.gates[0].changed_visible_test_paths, [
-      "test/resolver.test.mjs",
+    assert.deepEqual(adequate.required_gate_ids, [
+      "component-inclusion",
+      "collision-free-composition",
     ]);
-    assert.equal(
-      adequate.gates[0].replacement_sha256,
-      gates[0].mutation.replacement_sha256,
-    );
-    assert.equal(adequate.gates[0].baseline_tests_mutant_visible.exit_code, 0);
-    assert.equal(adequate.gates[0].candidate_tests_mutant_visible.signal, null);
-    assert.notEqual(adequate.gates[0].candidate_tests_mutant_visible.exit_code, 0);
+    for (const gate of adequate.gates) {
+      assert.deepEqual(gate.changed_visible_test_paths, [
+        "test/resolver.test.mjs",
+      ]);
+      assert.equal(gate.member_count, gate.members.length);
+      assert.match(gate.mutation_manifest_sha256, /^[a-f0-9]{64}$/u);
+      assert.ok(gate.members.every((member) =>
+        member.baseline_tests_mutant_visible.exit_code === 0
+      ));
+      assert.ok(gate.members.some((member) => member.killed));
+    }
+    assert.equal(adequate.gates[0].policy, "all-kill");
+    assert.equal(adequate.gates[1].policy, "all-kill");
     assert.match(
-      adequate.gates[0].candidate_tests_mutant_visible.output,
+      adequate.gates[1].members.find(({ killed }) => killed)
+        .candidate_tests_mutant_visible.output,
       /delimiter-colliding tuples/u,
     );
     assert.equal(
@@ -5087,14 +5620,98 @@ test("localized cache regression adequacy must kill a valid delimiter mutant", a
       fingerprintBefore,
     );
     const serializedEvidence = JSON.stringify(adequate);
-    assert.match(serializedEvidence, /naive-colon-cache-key/u);
+    assert.match(serializedEvidence, /component-inclusion/u);
+    assert.match(serializedEvidence, /collision-free-composition/u);
     assert.match(serializedEvidence, /src\/cache-key\.mjs/u);
+    assert.match(serializedEvidence, /mutation_manifest_sha256/u);
     assert.match(serializedEvidence, /replacement_sha256/u);
     assert.match(serializedEvidence, /sandbox/u);
-    assert.ok(!serializedEvidence.includes(gates[0].mutation.replacement));
+    for (const gate of gates) {
+      for (const mutation of gate.mutations) {
+        assert.ok(!serializedEvidence.includes(mutation.replacement));
+      }
+    }
+    assert.ok(!serializedEvidence.includes("naive-colon"));
+    assert.ok(!serializedEvidence.includes(".source"));
     assert.ok(!serializedEvidence.includes(workspace));
     assert.ok(!serializedEvidence.includes(os.homedir()));
     assert.ok(!serializedEvidence.includes("file://"));
+    const publicEvidence = summarizeArtifactRegressionEvidence(adequate);
+    const publicSerialized = JSON.stringify(publicEvidence);
+    assert.deepEqual(Object.keys(publicEvidence).sort(), [
+      "gates",
+      "required_gate_ids",
+      "status",
+    ]);
+    assert.equal(publicEvidence.gates[0].baseline_pass_count, 2);
+    assert.equal(publicEvidence.gates[0].candidate_complete_count, 2);
+    assert.equal(publicEvidence.gates[0].killed_member_count, 2);
+    assert.equal(publicEvidence.gates[1].baseline_pass_count, 1);
+    assert.equal(publicEvidence.gates[1].candidate_complete_count, 1);
+    assert.equal(publicEvidence.gates[1].killed_member_count, 1);
+    assert.doesNotMatch(publicSerialized, /replacement_sha256|members|delimiter-colliding|a:b/u);
+    assert.match(publicSerialized, /evidence_sha256/u);
+
+    await writeFile(
+      regressionPath,
+      `${existingTests}\n${componentOnlyRegressionBlock}`,
+    );
+    const componentOnly = await runArtifactRegressionGates({
+      baselineHead,
+      changedPaths: ["src/cache-key.mjs", "test/resolver.test.mjs"],
+      gates,
+      testGlobs: benchmarkCase.change_policy.tests,
+      workspace,
+    });
+    assert.equal(componentOnly.status, "FAIL");
+    assert.equal(componentOnly.gates[0].status, "PASS");
+    assert.equal(componentOnly.gates[1].status, "FAIL");
+    assert.deepEqual(componentOnly.gates[1].reasons, [
+      "candidate visible tests did not kill every semantic fault member",
+    ]);
+
+    await writeFile(
+      regressionPath,
+      `${existingTests}\n${componentOnlyRegressionBlock}\n${nonBoundaryAnagramRegressionBlock}`,
+    );
+    const anagramOnly = await runArtifactRegressionGates({
+      baselineHead,
+      changedPaths: ["src/cache-key.mjs", "test/resolver.test.mjs"],
+      gates,
+      testGlobs: benchmarkCase.change_policy.tests,
+      workspace,
+    });
+    assert.equal(anagramOnly.status, "FAIL");
+    assert.equal(anagramOnly.gates[0].status, "PASS");
+    assert.equal(anagramOnly.gates[1].status, "FAIL");
+    assert.equal(anagramOnly.gates[1].members[0].killed, false);
+    assert.equal(
+      anagramOnly.gates[1].members[0].candidate_tests_mutant_visible.exit_code,
+      0,
+    );
+    assert.deepEqual(anagramOnly.gates[1].reasons, [
+      "candidate visible tests did not kill every semantic fault member",
+    ]);
+
+    for (const separator of ["|", "<->", "XYZ"]) {
+      await writeFile(
+        regressionPath,
+        `${existingTests}\n${collisionRegressionBlockFor(separator)}`,
+      );
+      const alternateRepresentative = await runArtifactRegressionGates({
+        baselineHead,
+        changedPaths: ["src/cache-key.mjs", "test/resolver.test.mjs"],
+        gates,
+        testGlobs: benchmarkCase.change_policy.tests,
+        workspace,
+      });
+      assert.equal(
+        alternateRepresentative.status,
+        "PASS",
+        `separator ${separator}`,
+      );
+      assert.equal(alternateRepresentative.gates[1].members[0].killed, true);
+    }
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -5103,7 +5720,7 @@ test("localized cache regression adequacy must kill a valid delimiter mutant", a
 test("artifact regression gates attribute mutant kills only to substantive test deltas", async () => {
   const suite = await loadDevelopmentSuite(suitePath);
   const benchmarkCase = suite.cases.find(({ id }) => id === "localized-template-cache");
-  const gate = await hydratedCacheArtifactGate();
+  const gates = await hydratedCacheArtifactGates();
   const root = await mkdtemp(path.join(os.tmpdir(), "leanpowers-artifact-matrix-"));
   const createWorkspace = async (name) => {
     const workspace = path.join(root, name);
@@ -5112,15 +5729,94 @@ test("artifact regression gates attribute mutant kills only to substantive test 
     });
     return workspace;
   };
-  const runGate = (workspace, baselineHead, changedPaths, gates = [gate]) =>
+  const runGate = (workspace, baselineHead, changedPaths, selectedGates = gates) =>
     runArtifactRegressionGates({
       baselineHead,
       changedPaths,
-      gates,
+      gates: selectedGates,
       testGlobs: benchmarkCase.change_policy.tests,
       workspace,
     });
   try {
+    const variableExportShape = await createWorkspace("variable-export-shape");
+    const variableExportHead = initializeFixtureGit(variableExportShape);
+    await writeFile(
+      path.join(variableExportShape, "src", "cache-key.mjs"),
+      collisionFreeCacheKeyConstExportSource,
+    );
+    await writeFile(
+      path.join(variableExportShape, "test", "collision.test.mjs"),
+      collisionRegressionSource,
+    );
+    const variableExportNormal = await runVerifier({
+      workspace: variableExportShape,
+      verifierFiles: benchmarkCase.verifier_files.map((file) =>
+        new URL(file, suitePath)
+      ),
+    });
+    assert.equal(
+      variableExportNormal.visible.exit_code,
+      0,
+      variableExportNormal.visible.output,
+    );
+    assert.equal(
+      variableExportNormal.hidden.exit_code,
+      0,
+      variableExportNormal.hidden.output,
+    );
+    const variableExportResult = await runGate(
+      variableExportShape,
+      variableExportHead,
+      ["src/cache-key.mjs", "test/collision.test.mjs"],
+    );
+    assert.equal(
+      variableExportResult.status,
+      "PASS",
+      JSON.stringify(variableExportResult),
+    );
+
+    const regexLiteralTarget = await createWorkspace("regex-literal-target");
+    await writeFile(
+      path.join(regexLiteralTarget, "test", "resolver.test.mjs"),
+      baselineWithoutTargetImportSource,
+    );
+    const regexLiteralHead = initializeFixtureGit(regexLiteralTarget);
+    await writeFile(
+      path.join(regexLiteralTarget, "src", "cache-key.mjs"),
+      collisionFreeCacheKeyWithRegexSource,
+    );
+    await writeFile(
+      path.join(regexLiteralTarget, "test", "collision.test.mjs"),
+      collisionRegressionSource,
+    );
+    const regexLiteralResult = await runGate(
+      regexLiteralTarget,
+      regexLiteralHead,
+      ["src/cache-key.mjs", "test/collision.test.mjs"],
+    );
+    assert.equal(regexLiteralResult.status, "PASS", JSON.stringify(regexLiteralResult));
+
+    const nestedTemplateTarget = await createWorkspace("nested-template-target");
+    const nestedTemplateHead = initializeFixtureGit(nestedTemplateTarget);
+    await writeFile(
+      path.join(nestedTemplateTarget, "src", "cache-key.mjs"),
+      collisionFreeCacheKeyWithNestedTemplateSource,
+    );
+    await writeFile(
+      path.join(nestedTemplateTarget, "test", "collision.test.mjs"),
+      collisionRegressionSource,
+    );
+    const nestedTemplateResult = await runGate(
+      nestedTemplateTarget,
+      nestedTemplateHead,
+      ["src/cache-key.mjs", "test/collision.test.mjs"],
+    );
+    assert.equal(
+      nestedTemplateResult.status,
+      "PASS",
+      JSON.stringify(nestedTemplateResult),
+    );
+
     const added = await createWorkspace("added");
     const addedHead = initializeFixtureGit(added);
     await writeFile(path.join(added, "src", "cache-key.mjs"), collisionFreeCacheKeySource);
@@ -5132,10 +5828,29 @@ test("artifact regression gates attribute mutant kills only to substantive test 
       "src/cache-key.mjs",
       "test/collision.test.mjs",
     ]);
-    assert.equal(addedResult.status, "PASS");
+    assert.equal(addedResult.status, "PASS", JSON.stringify(addedResult));
     assert.deepEqual(addedResult.gates[0].changed_visible_test_paths, [
       "test/collision.test.mjs",
     ]);
+
+    const collisionOnly = await createWorkspace("collision-only");
+    const collisionOnlyHead = initializeFixtureGit(collisionOnly);
+    await writeFile(
+      path.join(collisionOnly, "src", "cache-key.mjs"),
+      collisionFreeCacheKeySource,
+    );
+    await writeFile(
+      path.join(collisionOnly, "test", "collision.test.mjs"),
+      delimiterOnlyRegressionSource,
+    );
+    const collisionOnlyResult = await runGate(
+      collisionOnly,
+      collisionOnlyHead,
+      ["src/cache-key.mjs", "test/collision.test.mjs"],
+    );
+    assert.equal(collisionOnlyResult.status, "FAIL");
+    assert.equal(collisionOnlyResult.gates[0].status, "FAIL");
+    assert.equal(collisionOnlyResult.gates[1].status, "PASS");
 
     const deleted = await createWorkspace("deleted");
     const deletedHead = initializeFixtureGit(deleted);
@@ -5162,7 +5877,7 @@ test("artifact regression gates attribute mutant kills only to substantive test 
       "test/resolver-renamed.test.mjs",
     ]);
     assert.deepEqual(renamedResult.gates[0].reasons, [
-      "candidate visible tests did not kill the mutant",
+      "candidate visible tests did not kill every semantic fault member",
     ]);
 
     const survivor = await createWorkspace("survivor");
@@ -5178,8 +5893,89 @@ test("artifact regression gates attribute mutant kills only to substantive test 
       "test/resolver.test.mjs",
     ]);
     assert.deepEqual(survivorResult.gates[0].reasons, [
-      "candidate visible tests did not kill the mutant",
+      "candidate visible tests did not kill every semantic fault member",
     ]);
+
+    const unrelatedExport = await createWorkspace("unrelated-export");
+    const unrelatedExportHead = initializeFixtureGit(unrelatedExport);
+    await writeFile(
+      path.join(unrelatedExport, "src", "cache-key.mjs"),
+      collisionFreeCacheKeyWithExtraExportSource,
+    );
+    await writeFile(
+      path.join(unrelatedExport, "test", "candidate-export.test.mjs"),
+      candidateOnlyExportTestSource,
+    );
+    const unrelatedExportResult = await runGate(
+      unrelatedExport,
+      unrelatedExportHead,
+      ["src/cache-key.mjs", "test/candidate-export.test.mjs"],
+    );
+    assert.equal(unrelatedExportResult.status, "FAIL");
+    assert.ok(unrelatedExportResult.gates.every((gate) =>
+      gate.members.every((member) =>
+        member.candidate_tests_mutant_visible.exit_code === 0
+      )
+    ));
+    assert.ok(unrelatedExportResult.gates.every((gate) =>
+      gate.reasons.includes(
+        "candidate visible tests did not kill every semantic fault member",
+      )
+    ));
+
+    const defaultExport = await createWorkspace("default-export");
+    const defaultExportHead = initializeFixtureGit(defaultExport);
+    await writeFile(
+      path.join(defaultExport, "src", "cache-key.mjs"),
+      collisionFreeCacheKeyWithDefaultExportSource,
+    );
+    await writeFile(
+      path.join(defaultExport, "test", "candidate-default.test.mjs"),
+      candidateOnlyDefaultExportTestSource,
+    );
+    const defaultExportResult = await runGate(
+      defaultExport,
+      defaultExportHead,
+      ["src/cache-key.mjs", "test/candidate-default.test.mjs"],
+    );
+    assert.equal(defaultExportResult.status, "FAIL");
+    assert.ok(defaultExportResult.gates.every((gate) =>
+      gate.members.every((member) =>
+        member.candidate_tests_mutant_visible.exit_code === 0 &&
+        member.killed === false
+      )
+    ));
+
+    const layoutProbe = await createWorkspace("layout-probe");
+    const layoutProbeHead = initializeFixtureGit(layoutProbe);
+    await writeFile(
+      path.join(layoutProbe, "src", "cache-key.mjs"),
+      collisionFreeCacheKeySource,
+    );
+    await writeFile(
+      path.join(layoutProbe, "test", "layout.test.mjs"),
+      candidateLayoutProbeSource,
+    );
+    const normalLayout = await runVerifier({
+      workspace: layoutProbe,
+      verifierFiles: benchmarkCase.verifier_files.map((file) =>
+        new URL(file, suitePath)
+      ),
+    });
+    assert.equal(normalLayout.visible.exit_code, 0, normalLayout.visible.output);
+    assert.equal(normalLayout.hidden.exit_code, 0, normalLayout.hidden.output);
+    const layoutResult = await runGate(
+      layoutProbe,
+      layoutProbeHead,
+      ["src/cache-key.mjs", "test/layout.test.mjs"],
+    );
+    assert.equal(layoutResult.status, "FAIL");
+    assert.ok(layoutResult.gates.every((gate) =>
+      gate.members.every((member) =>
+        member.candidate_tests_mutant_visible.exit_code === 0 &&
+        member.killed === false
+      )
+    ));
 
     const phaseProbe = await createWorkspace("phase-probe");
     const phaseProbeHead = initializeFixtureGit(phaseProbe);
@@ -5200,7 +5996,7 @@ test("artifact regression gates attribute mutant kills only to substantive test 
       "test/resolver.test.mjs",
     ]);
     assert.deepEqual(phaseProbeResult.gates[0].reasons, [
-      "candidate visible tests did not kill the mutant",
+      "candidate visible tests did not kill every semantic fault member",
     ]);
     assert.ok(!JSON.stringify(phaseProbeResult).includes("artifact-candidate"));
 
@@ -5224,11 +6020,14 @@ test("artifact regression gates attribute mutant kills only to substantive test 
       "test/resolver.test.mjs",
     ]);
     assert.deepEqual(baselineKillResult.gates[0].reasons, [
-      "baseline-test counterfactual already killed the mutant",
+      "baseline-test counterfactual already killed a semantic fault",
+    ]);
+    assert.deepEqual(baselineKillResult.gates[1].reasons, [
+      "baseline-test counterfactual already killed a semantic fault",
     ]);
 
-    const changedSnapshot = structuredClone(gate);
-    changedSnapshot.mutation.replacement += "// changed after suite load\n";
+    const changedSnapshot = structuredClone(gates[0]);
+    changedSnapshot.mutations[0].replacement += "// changed after suite load\n";
     const changedSnapshotResult = await runGate(
       survivor,
       survivorHead,
@@ -5236,7 +6035,7 @@ test("artifact regression gates attribute mutant kills only to substantive test 
       [changedSnapshot],
     );
     assert.deepEqual(changedSnapshotResult.gates[0].reasons, [
-      "mutation snapshot hash did not match replacement content",
+      "mutation family snapshot did not match replacement content",
     ]);
   } finally {
     await rm(root, { force: true, recursive: true });
@@ -5367,7 +6166,7 @@ test("workspace symlinks fail verifier and artifact gates without touching the t
     const artifact = await runArtifactRegressionGates({
       baselineHead,
       changedPaths: ["test/resolver.test.mjs"],
-      gates: [await hydratedCacheArtifactGate()],
+      gates: await hydratedCacheArtifactGates(),
       testGlobs: benchmarkCase.change_policy.tests,
       workspace,
     });

@@ -41,6 +41,22 @@ const VERIFIER_SANDBOX_MODES = new Set([
   "linux-bubblewrap-hermetic-v2",
   "macos-seatbelt-hermetic-v2",
 ]);
+const ARTIFACT_GATE_POLICIES = new Set(["all-kill"]);
+const REGEX_PREFIX_KEYWORDS = new Set([
+  "await",
+  "case",
+  "delete",
+  "do",
+  "else",
+  "in",
+  "instanceof",
+  "of",
+  "return",
+  "throw",
+  "typeof",
+  "void",
+  "yield",
+]);
 const MACOS_VERIFIER_SANDBOX_PROFILE = [
   "(version 1)",
   "(deny default)",
@@ -102,7 +118,7 @@ export async function loadDevelopmentSuite(input) {
   const errors = [];
   const suiteRoot = await realpath(fileURLToPath(new URL(".", suiteUrl)));
 
-  if (suite.schema_version !== 1) errors.push("schema_version must equal 1");
+  if (suite.schema_version !== 2) errors.push("schema_version must equal 2");
   if (suite.evidence_level !== "paired-development-pilot") {
     errors.push("evidence_level must equal paired-development-pilot");
   }
@@ -249,47 +265,121 @@ export async function loadDevelopmentSuite(input) {
               errors.push(`${label}.id must be unique lower-kebab-case`);
             }
             gateIds.add(gate?.id);
-            const mutation = gate?.mutation;
+            if (!ARTIFACT_GATE_POLICIES.has(gate?.policy)) {
+              errors.push(`${label}.policy must be all-kill`);
+            }
+            const mutations = gate?.mutations;
             if (
-              mutation?.kind !== "replace-file" ||
-              !isSafeRelativePath(mutation?.target) ||
-              !isSafeRelativePath(mutation?.source)
+              !Array.isArray(mutations) ||
+              mutations.length === 0
             ) {
-              errors.push(`${label}.mutation must declare safe replace-file target and source paths`);
+              errors.push(`${label}.mutations must be a non-empty policy-valid array`);
               continue;
             }
             const productPatterns = benchmarkCase?.change_policy?.product ?? [];
             const testPatterns = benchmarkCase?.change_policy?.tests ?? [];
             const workflowPatterns = benchmarkCase?.change_policy?.workflow ?? [];
-            if (
-              !productPatterns.some((pattern) => matchGlob(mutation.target, pattern)) ||
-              testPatterns.some((pattern) => matchGlob(mutation.target, pattern)) ||
-              workflowPatterns.some((pattern) => matchGlob(mutation.target, pattern))
-            ) {
-              errors.push(`${label}.mutation.target must address product code, not tests or workflow files`);
+            const mutationSources = new Set();
+            const mutationTargets = new Set();
+            const mutationExportNames = new Set();
+            const replacementHashes = new Set();
+            for (const [mutationIndex, mutation] of mutations.entries()) {
+              const mutationLabel = `${label}.mutations[${mutationIndex}]`;
+              if (
+                mutation?.kind !== "replace-callable-export" ||
+                typeof mutation?.export_name !== "string" ||
+                mutation.export_name === "default" ||
+                !/^[A-Za-z_$][A-Za-z0-9_$]*$/u.test(mutation.export_name) ||
+                !isSafeRelativePath(mutation?.target) ||
+                !isSafeRelativePath(mutation?.source)
+              ) {
+                errors.push(`${mutationLabel} must declare a safe replace-callable-export target, source, and export name`);
+                continue;
+              }
+              if (mutationSources.has(mutation.source)) {
+                errors.push(`${label}.mutations must use unique source files`);
+              }
+              mutationSources.add(mutation.source);
+              mutationTargets.add(mutation.target);
+              mutationExportNames.add(mutation.export_name);
+              if (
+                !productPatterns.some((pattern) => matchGlob(mutation.target, pattern)) ||
+                testPatterns.some((pattern) => matchGlob(mutation.target, pattern)) ||
+                workflowPatterns.some((pattern) => matchGlob(mutation.target, pattern))
+              ) {
+                errors.push(`${mutationLabel}.target must address product code, not tests or workflow files`);
+              }
+              try {
+                const sourceUrl = new URL(mutation.source, suiteUrl);
+                const sourceStat = await lstat(sourceUrl);
+                if (!sourceStat.isFile()) {
+                  errors.push(`${mutationLabel}.source must be a regular file`);
+                  continue;
+                }
+                const sourcePath = await realpath(fileURLToPath(sourceUrl));
+                if (!isSameOrAncestor(suiteRoot, sourcePath)) {
+                  errors.push(`${mutationLabel}.source must resolve inside the suite root`);
+                  continue;
+                }
+                if (workspacePath !== null && isSameOrAncestor(workspacePath, sourcePath)) {
+                  errors.push(`${mutationLabel}.source must stay outside the candidate workspace`);
+                  continue;
+                }
+                const replacement = await readFile(sourcePath, "utf8");
+                try {
+                  await assertJavaScriptSourceSyntax({
+                    environment: benchmarkEnvironment(os.tmpdir(), {
+                      TMPDIR: os.tmpdir(),
+                    }),
+                    source: replacement,
+                    workspace: suiteRoot,
+                  });
+                } catch {
+                  errors.push(`${mutationLabel}.source must be syntactically valid`);
+                  continue;
+                }
+                let replacementFragment;
+                try {
+                  replacementFragment = directNamedFunctionExportFragment(
+                    replacement,
+                    mutation.export_name,
+                  );
+                } catch {
+                  errors.push(
+                    `${mutationLabel}.source must contain only one direct named function export`,
+                  );
+                  continue;
+                }
+                const replacementSha256 =
+                  createHash("sha256").update(replacementFragment).digest("hex");
+                if (replacementHashes.has(replacementSha256)) {
+                  errors.push(`${label}.mutations must have unique replacement content`);
+                }
+                replacementHashes.add(replacementSha256);
+                mutation.replacement = replacementFragment;
+                mutation.replacement_sha256 = replacementSha256;
+              } catch {
+                errors.push(`${mutationLabel}.source must be a readable regular file`);
+              }
             }
-            try {
-              const sourceUrl = new URL(mutation.source, suiteUrl);
-              const sourceStat = await lstat(sourceUrl);
-              if (!sourceStat.isFile()) {
-                errors.push(`${label}.mutation.source must be a regular file`);
-                continue;
-              }
-              const sourcePath = await realpath(fileURLToPath(sourceUrl));
-              if (!isSameOrAncestor(suiteRoot, sourcePath)) {
-                errors.push(`${label}.mutation.source must resolve inside the suite root`);
-                continue;
-              }
-              if (workspacePath !== null && isSameOrAncestor(workspacePath, sourcePath)) {
-                errors.push(`${label}.mutation.source must stay outside the candidate workspace`);
-                continue;
-              }
-              const replacement = await readFile(sourcePath, "utf8");
-              mutation.replacement = replacement;
-              mutation.replacement_sha256 =
-                createHash("sha256").update(replacement).digest("hex");
-            } catch {
-              errors.push(`${label}.mutation.source must be a readable regular file`);
+            if (mutationTargets.size !== 1) {
+              errors.push(`${label}.mutations must replace one shared product target`);
+            }
+            if (mutationExportNames.size !== 1) {
+              errors.push(`${label}.mutations must replace one shared named export`);
+            }
+            if (
+              ARTIFACT_GATE_POLICIES.has(gate?.policy) &&
+              mutations.every((mutation) =>
+                typeof mutation?.replacement === "string" &&
+                /^[a-f0-9]{64}$/u.test(String(mutation?.replacement_sha256 ?? ""))
+              ) &&
+              mutationTargets.size === 1 &&
+              mutationExportNames.size === 1
+            ) {
+              gate.target = mutations[0].target;
+              gate.export_name = mutations[0].export_name;
+              gate.mutation_manifest_sha256 = artifactGateMutationManifestSha256(gate);
             }
           }
         }
@@ -2577,12 +2667,39 @@ export function evaluateRunOutcome(run) {
     requiredArtifactGates.every((contract, index) =>
       contract !== null &&
       typeof contract === "object" &&
+      hasExactObjectKeys(contract, [
+        "export_name",
+        "id",
+        "member_count",
+        "mutation_manifest_sha256",
+        "policy",
+        "target",
+      ]) &&
       contract.id === requiredArtifactGateIds[index] &&
+      ARTIFACT_GATE_POLICIES.has(contract.policy) &&
       isSafeRelativePath(contract.target) &&
-      /^[a-f0-9]{64}$/u.test(String(contract.replacement_sha256 ?? ""))
+      typeof contract.export_name === "string" &&
+      contract.export_name !== "default" &&
+      /^[A-Za-z_$][A-Za-z0-9_$]*$/u.test(contract.export_name) &&
+      Number.isInteger(contract.member_count) &&
+      contract.member_count > 0 &&
+      /^[a-f0-9]{64}$/u.test(String(contract.mutation_manifest_sha256 ?? ""))
     );
   if (!contractsMatchIds) {
     reasons.push("required artifact regression gate contracts did not match ids");
+  }
+  let requiredArtifactManifestSha256 = null;
+  if (contractsMatchIds) {
+    try {
+      requiredArtifactManifestSha256 = artifactGateContractManifestSha256(
+        requiredArtifactGates,
+      );
+    } catch {
+      // The contract-shape reason above or the snapshot mismatch below is sufficient.
+    }
+  }
+  if (requiredArtifactManifestSha256 !== run?.case_snapshot?.mutants_sha256) {
+    reasons.push("required artifact regression gates did not match the case snapshot");
   }
   if (requiredArtifactGateIds.length > 0) {
     const artifactRegression = verifier.artifact_regression;
@@ -2593,6 +2710,13 @@ export function evaluateRunOutcome(run) {
     ) {
       reasons.push("artifact regression evidence was missing");
     } else {
+      if (!hasExactObjectKeys(artifactRegression, [
+        "gates",
+        "required_gate_ids",
+        "status",
+      ])) {
+        reasons.push("artifact regression evidence contained unexpected fields");
+      }
       const expectedIds = new Set(requiredArtifactGateIds);
       if (
         !Array.isArray(artifactRegression.required_gate_ids) ||
@@ -2670,10 +2794,25 @@ function validCaseSnapshotEvidence(snapshot) {
     ].every((value) => /^[a-f0-9]{64}$/u.test(String(value ?? "")));
 }
 
+function hasExactObjectKeys(value, keys) {
+  return value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).sort().join(",") === [...keys].sort().join(",");
+}
+
 function completeVerifierCommandEvidence(evidence) {
-  return evidence !== null &&
-    typeof evidence === "object" &&
+  return hasExactObjectKeys(evidence, [
+    "exit_code",
+    "output",
+    "output_limited",
+    "sandbox",
+    "signal",
+    "timed_out",
+  ]) &&
     Number.isInteger(evidence.exit_code) &&
+    evidence.exit_code >= 0 &&
+    evidence.exit_code <= 255 &&
     evidence.output_limited === false &&
     isVerifierSandboxMode(evidence.sandbox) &&
     evidence.timed_out === false &&
@@ -2687,6 +2826,28 @@ function isVerifierSandboxMode(value) {
 
 function artifactGateEvidenceProblems(gate, expectedGate) {
   const reasons = [];
+  if (!hasExactObjectKeys(gate, [
+    "candidate_visible_test_paths",
+    "changed_visible_test_paths",
+    "export_name",
+    "id",
+    "member_count",
+    "members",
+    "mutation_manifest_sha256",
+    "policy",
+    "reasons",
+    "status",
+    "target",
+  ])) {
+    reasons.push("mutation family evidence contained unexpected fields");
+  }
+  if (
+    expectedGate === undefined ||
+    gate.policy !== expectedGate?.policy ||
+    !ARTIFACT_GATE_POLICIES.has(gate.policy)
+  ) {
+    reasons.push("mutation policy evidence was missing or inconsistent");
+  }
   if (
     expectedGate === undefined ||
     !isSafeRelativePath(gate.target) ||
@@ -2695,12 +2856,22 @@ function artifactGateEvidenceProblems(gate, expectedGate) {
     reasons.push("mutation target evidence was missing or inconsistent");
   }
   if (
-    !/^[a-f0-9]{64}$/u.test(String(gate.replacement_sha256 ?? "")) ||
-    gate.replacement_sha256 !== expectedGate?.replacement_sha256
+    typeof gate.export_name !== "string" ||
+    gate.export_name !== expectedGate?.export_name
   ) {
-    reasons.push("mutation snapshot hash evidence was missing or inconsistent");
+    reasons.push("mutation export evidence was missing or inconsistent");
   }
-  if (Object.hasOwn(gate, "replacement")) {
+  if (
+    !/^[a-f0-9]{64}$/u.test(String(gate.mutation_manifest_sha256 ?? "")) ||
+    gate.mutation_manifest_sha256 !== expectedGate?.mutation_manifest_sha256
+  ) {
+    reasons.push("mutation family snapshot evidence was missing or inconsistent");
+  }
+  if (
+    Object.hasOwn(gate, "replacement") ||
+    Object.hasOwn(gate, "mutation") ||
+    Object.hasOwn(gate, "mutations")
+  ) {
     reasons.push("mutation replacement content leaked into result evidence");
   }
   const changedTestPaths = gate.changed_visible_test_paths;
@@ -2721,31 +2892,94 @@ function artifactGateEvidenceProblems(gate, expectedGate) {
   if (!Array.isArray(gate.reasons) || gate.reasons.length !== 0) {
     reasons.push("passing artifact gate retained failure reasons");
   }
-  if (!passingBaselineMutantEvidence(gate.baseline_tests_mutant_visible)) {
-    reasons.push("baseline-test counterfactual evidence was incomplete or non-passing");
-  }
-  if (!killedCandidateMutantEvidence(gate.candidate_tests_mutant_visible)) {
-    reasons.push("candidate-test mutant evidence was incomplete or non-killing");
+  const members = Array.isArray(gate.members) ? gate.members : [];
+  if (
+    gate.member_count !== expectedGate?.member_count ||
+    !Array.isArray(gate.members) ||
+    members.length !== expectedGate?.member_count ||
+    members.some((member, index) =>
+      member === null ||
+      typeof member !== "object" ||
+      !hasExactObjectKeys(member, [
+        "baseline_tests_mutant_visible",
+        "candidate_tests_mutant_visible",
+        "index",
+        "killed",
+        "replacement_sha256",
+      ]) ||
+      member.index !== index + 1 ||
+      !/^[a-f0-9]{64}$/u.test(String(member.replacement_sha256 ?? "")) ||
+      Object.hasOwn(member, "replacement") ||
+      Object.hasOwn(member, "source")
+    )
+  ) {
+    reasons.push("mutation family member evidence was missing or inconsistent");
+  } else {
+    let observedManifest = null;
+    try {
+      observedManifest = artifactFamilyManifestSha256({
+        id: gate.id,
+        policy: gate.policy,
+        target: gate.target,
+        exportName: gate.export_name,
+        replacementSha256s: members.map(({ replacement_sha256 }) =>
+          replacement_sha256
+        ),
+      });
+    } catch {
+      // The structural reason above or the manifest mismatch below is sufficient.
+    }
+    if (observedManifest !== gate.mutation_manifest_sha256) {
+      reasons.push("mutation family members did not match the declared snapshot");
+    }
+    for (const member of members) {
+      if (!passingBaselineMutantEvidence(member.baseline_tests_mutant_visible)) {
+        reasons.push("baseline-test counterfactual evidence was incomplete or non-passing");
+        break;
+      }
+    }
+    for (const member of members) {
+      if (!completeArtifactMutantEvidence(member.candidate_tests_mutant_visible)) {
+        reasons.push("candidate-test mutant evidence was incomplete");
+        break;
+      }
+      if (
+        member.killed !==
+          (member.candidate_tests_mutant_visible.exit_code !== 0)
+      ) {
+        reasons.push("candidate-test mutant kill evidence was inconsistent");
+        break;
+      }
+    }
+    const killed = members.map(({ killed }) => killed === true);
+    if (
+      gate.policy === "all-kill" &&
+      (killed.length === 0 || killed.some((value) => !value))
+    ) {
+      reasons.push("candidate tests did not kill every semantic fault member");
+    }
   }
   return reasons;
 }
 
 function passingBaselineMutantEvidence(evidence) {
-  return evidence !== null &&
-    typeof evidence === "object" &&
+  return completeArtifactMutantEvidence(evidence) &&
     evidence.exit_code === 0 &&
-    evidence.output_limited === false &&
-    isVerifierSandboxMode(evidence.sandbox) &&
-    evidence.timed_out === false &&
-    evidence.signal === null &&
-    typeof evidence.output === "string";
+    evidence.signal === null;
 }
 
-function killedCandidateMutantEvidence(evidence) {
-  return evidence !== null &&
-    typeof evidence === "object" &&
+function completeArtifactMutantEvidence(evidence) {
+  return hasExactObjectKeys(evidence, [
+    "exit_code",
+    "output",
+    "output_limited",
+    "sandbox",
+    "signal",
+    "timed_out",
+  ]) &&
     Number.isInteger(evidence.exit_code) &&
-    evidence.exit_code !== 0 &&
+    evidence.exit_code >= 0 &&
+    evidence.exit_code <= 255 &&
     evidence.output_limited === false &&
     isVerifierSandboxMode(evidence.sandbox) &&
     evidence.timed_out === false &&
@@ -2995,20 +3229,98 @@ function artifactMutationManifestSha256(gates) {
   if (!Array.isArray(gates)) {
     throw new Error("artifact mutation gates were malformed");
   }
-  const hash = createHash("sha256");
-  for (const [index, gate] of gates.entries()) {
-    const replacementSha256 = gate?.mutation?.replacement_sha256;
+  return artifactGateContractManifestSha256(gates.map((gate) => {
+    const mutationManifestSha256 = artifactGateMutationManifestSha256(gate);
     if (
       typeof gate?.id !== "string" ||
-      !isSafeRelativePath(gate?.mutation?.target) ||
-      !/^[a-f0-9]{64}$/u.test(String(replacementSha256 ?? ""))
+      !ARTIFACT_GATE_POLICIES.has(gate?.policy) ||
+      !isSafeRelativePath(gate?.target) ||
+      typeof gate?.export_name !== "string" ||
+      mutationManifestSha256 !== gate?.mutation_manifest_sha256
     ) {
       throw new Error("artifact mutation manifest was incomplete");
     }
+    return {
+      id: gate.id,
+      policy: gate.policy,
+      target: gate.target,
+      export_name: gate.export_name,
+      member_count: gate.mutations.length,
+      mutation_manifest_sha256: mutationManifestSha256,
+    };
+  }));
+}
+
+function artifactGateMutationManifestSha256(gate) {
+  if (!Array.isArray(gate?.mutations) || gate.mutations.length === 0) {
+    throw new Error("artifact mutation family was malformed");
+  }
+  return artifactFamilyManifestSha256({
+    id: gate.id,
+    policy: gate.policy,
+    target: gate.target ?? gate.mutations[0]?.target,
+    exportName: gate.export_name ?? gate.mutations[0]?.export_name,
+    replacementSha256s: gate.mutations.map(
+      ({ replacement_sha256 }) => replacement_sha256,
+    ),
+  });
+}
+
+function artifactFamilyManifestSha256({
+  id,
+  policy,
+  target,
+  exportName,
+  replacementSha256s,
+}) {
+  if (
+    typeof id !== "string" ||
+    !ARTIFACT_GATE_POLICIES.has(policy) ||
+    !isSafeRelativePath(target) ||
+    typeof exportName !== "string" ||
+    exportName === "default" ||
+    !/^[A-Za-z_$][A-Za-z0-9_$]*$/u.test(exportName) ||
+    !Array.isArray(replacementSha256s) ||
+    replacementSha256s.length === 0 ||
+    replacementSha256s.some(
+      (digest) => !/^[a-f0-9]{64}$/u.test(String(digest ?? "")),
+    )
+  ) {
+    throw new Error("artifact mutation family manifest was incomplete");
+  }
+  const hash = createHash("sha256");
+  updateFingerprint(hash, `fault-family:${id}:policy`, policy);
+  updateFingerprint(hash, `fault-family:${id}:target`, target);
+  updateFingerprint(hash, `fault-family:${id}:export`, exportName);
+  for (const [index, digest] of replacementSha256s.entries()) {
+    updateFingerprint(hash, `fault-family:${id}:member:${index + 1}`, digest);
+  }
+  return hash.digest("hex");
+}
+
+function artifactGateContractManifestSha256(contracts) {
+  if (!Array.isArray(contracts)) {
+    throw new Error("artifact gate contracts were malformed");
+  }
+  const hash = createHash("sha256");
+  for (const [index, contract] of contracts.entries()) {
+    if (
+      typeof contract?.id !== "string" ||
+      !ARTIFACT_GATE_POLICIES.has(contract?.policy) ||
+      !isSafeRelativePath(contract?.target) ||
+      typeof contract?.export_name !== "string" ||
+      contract.export_name === "default" ||
+      !/^[A-Za-z_$][A-Za-z0-9_$]*$/u.test(contract.export_name) ||
+      !Number.isInteger(contract?.member_count) ||
+      contract.member_count < 1 ||
+      !/^[a-f0-9]{64}$/u.test(String(contract?.mutation_manifest_sha256 ?? ""))
+    ) {
+      throw new Error("artifact gate contract manifest was incomplete");
+    }
     updateFingerprint(
       hash,
-      `mutant:${index + 1}:${gate.id}:${gate.mutation.target}`,
-      replacementSha256,
+      `fault-family:${index + 1}:${contract.id}:${contract.policy}:${contract.target}:${contract.export_name}:${contract.member_count}`,
+      contract.mutation_manifest_sha256,
     );
   }
   return hash.digest("hex");
@@ -3329,6 +3641,290 @@ export async function runArtifactRegressionGates({
   };
 }
 
+function maskJavaScriptStringsAndComments(source) {
+  const masked = source.split("");
+  let state = "code";
+  let templateDepth = 0;
+  let regexCharacterClass = false;
+  const templateExpressionDepths = [];
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source[index + 1];
+    if (state === "code") {
+      if (character === "'" || character === '"') {
+        state = character === "'"
+          ? "single"
+          : "double";
+        masked[index] = " ";
+      } else if (character === "`") {
+        templateDepth += 1;
+        state = "template";
+        masked[index] = " ";
+      } else if (character === "/" && next === "/") {
+        state = "line-comment";
+        masked[index] = " ";
+        masked[index + 1] = " ";
+        index += 1;
+      } else if (character === "/" && next === "*") {
+        state = "block-comment";
+        masked[index] = " ";
+        masked[index + 1] = " ";
+        index += 1;
+      } else if (character === "/" && isLikelyRegexLiteralStart(source, index)) {
+        state = "regex";
+        regexCharacterClass = false;
+        masked[index] = " ";
+      } else if (templateExpressionDepths.length > 0 && character === "{") {
+        templateExpressionDepths[templateExpressionDepths.length - 1] += 1;
+      } else if (templateExpressionDepths.length > 0 && character === "}") {
+        const expressionIndex = templateExpressionDepths.length - 1;
+        templateExpressionDepths[expressionIndex] -= 1;
+        if (templateExpressionDepths[expressionIndex] === 0) {
+          templateExpressionDepths.pop();
+          state = "template";
+          masked[index] = " ";
+        }
+      }
+      continue;
+    }
+    if (state === "regex") {
+      if (character === "\n" || character === "\r") {
+        throw new Error("JavaScript source contained an unterminated regex literal");
+      }
+      if (character === "\\") {
+        masked[index] = " ";
+        if (index + 1 < source.length) {
+          masked[index + 1] = " ";
+          index += 1;
+        }
+      } else {
+        if (character === "[" && !regexCharacterClass) {
+          regexCharacterClass = true;
+        } else if (character === "]" && regexCharacterClass) {
+          regexCharacterClass = false;
+        } else if (character === "/" && !regexCharacterClass) {
+          state = "code";
+        }
+        masked[index] = " ";
+      }
+      continue;
+    }
+    if (state === "template") {
+      if (character === "\\") {
+        masked[index] = " ";
+        if (index + 1 < source.length) {
+          if (source[index + 1] !== "\n" && source[index + 1] !== "\r") {
+            masked[index + 1] = " ";
+          }
+          index += 1;
+        }
+      } else if (character === "`") {
+        templateDepth -= 1;
+        state = "code";
+        masked[index] = " ";
+      } else if (character === "$" && next === "{") {
+        templateExpressionDepths.push(1);
+        state = "code";
+        masked[index] = " ";
+        masked[index + 1] = " ";
+        index += 1;
+      } else if (character !== "\n" && character !== "\r") {
+        masked[index] = " ";
+      }
+      continue;
+    }
+    if (state === "line-comment") {
+      if (character === "\n" || character === "\r") {
+        state = "code";
+      } else {
+        masked[index] = " ";
+      }
+      continue;
+    }
+    if (state === "block-comment") {
+      if (character === "*" && next === "/") {
+        masked[index] = " ";
+        masked[index + 1] = " ";
+        index += 1;
+        state = "code";
+      } else if (character !== "\n" && character !== "\r") {
+        masked[index] = " ";
+      }
+      continue;
+    }
+    if (character === "\\") {
+      masked[index] = " ";
+      if (index + 1 < source.length) {
+        if (source[index + 1] !== "\n" && source[index + 1] !== "\r") {
+          masked[index + 1] = " ";
+        }
+        index += 1;
+      }
+      continue;
+    }
+    const closingQuote = state === "single" ? "'" : '"';
+    if (character === closingQuote) state = "code";
+    if (character !== "\n" && character !== "\r") masked[index] = " ";
+  }
+  if (
+    !["code", "line-comment"].includes(state) ||
+    templateDepth !== 0 ||
+    templateExpressionDepths.length !== 0
+  ) {
+    throw new Error("JavaScript source contained unterminated lexical content");
+  }
+  return masked.join("");
+}
+
+function isLikelyRegexLiteralStart(source, slashIndex) {
+  const prefix = source.slice(0, slashIndex).trimEnd();
+  if (prefix.length === 0) return true;
+  const lastCharacter = prefix.at(-1);
+  if (/[[({:;,=!?&|+\-*%^~<>]/u.test(lastCharacter)) return true;
+  const previousWord = prefix.match(/([A-Za-z_$][A-Za-z0-9_$]*)$/u)?.[1];
+  return REGEX_PREFIX_KEYWORDS.has(previousWord);
+}
+
+function matchingDelimiterIndex(source, start, opening, closing) {
+  let depth = 0;
+  for (let index = start; index < source.length; index += 1) {
+    if (source[index] === opening) depth += 1;
+    if (source[index] === closing) {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+}
+
+function directExportedFunction(source, exportName) {
+  const masked = maskJavaScriptStringsAndComments(source);
+  const escapedName = exportName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const pattern = new RegExp(
+    `\\bexport\\s+(?:async\\s+)?function\\s+${escapedName}\\s*\\(`,
+    "gu",
+  );
+  const matches = [...masked.matchAll(pattern)];
+  if (matches.length !== 1) {
+    throw new Error("fault target must contain exactly one direct named function export");
+  }
+  const start = matches[0].index;
+  const openingParenthesis = masked.indexOf("(", start);
+  const closingParenthesis = matchingDelimiterIndex(
+    masked,
+    openingParenthesis,
+    "(",
+    ")",
+  );
+  if (closingParenthesis < 0) {
+    throw new Error("fault target export parameters were malformed");
+  }
+  let openingBrace = closingParenthesis + 1;
+  while (/\s/u.test(masked[openingBrace] ?? "")) openingBrace += 1;
+  if (masked[openingBrace] !== "{") {
+    throw new Error("fault target export was not a function declaration");
+  }
+  const closingBrace = matchingDelimiterIndex(masked, openingBrace, "{", "}");
+  if (closingBrace < 0) {
+    throw new Error("fault target export body was malformed");
+  }
+  return { end: closingBrace + 1, start };
+}
+
+function directNamedCallableExport(source, exportName) {
+  const masked = maskJavaScriptStringsAndComments(source);
+  const escapedName = exportName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const functionPattern = new RegExp(
+    `\\bexport\\s+(?:async\\s+)?function\\s+${escapedName}\\s*\\(`,
+    "gu",
+  );
+  const variablePattern = new RegExp(
+    `\\bexport\\s+(?:const|let|var)\\s+${escapedName}\\s*=`,
+    "gu",
+  );
+  const functionMatches = [...masked.matchAll(functionPattern)];
+  const variableMatches = [...masked.matchAll(variablePattern)];
+  if (functionMatches.length + variableMatches.length !== 1) {
+    throw new Error("fault target must contain exactly one supported direct named export");
+  }
+  if (functionMatches.length === 1) {
+    return directExportedFunction(source, exportName);
+  }
+
+  const match = variableMatches[0];
+  const start = match.index;
+  const initializerStart = start + match[0].length;
+  const depth = { "(": 0, "[": 0, "{": 0 };
+  const openingFor = { ")": "(", "]": "[", "}": "{" };
+  for (let index = initializerStart; index < masked.length; index += 1) {
+    const character = masked[index];
+    if (Object.hasOwn(depth, character)) {
+      depth[character] += 1;
+      continue;
+    }
+    if (Object.hasOwn(openingFor, character)) {
+      const opening = openingFor[character];
+      depth[opening] -= 1;
+      if (depth[opening] < 0) {
+        throw new Error("fault target variable export was malformed");
+      }
+      continue;
+    }
+    const atTopLevel = Object.values(depth).every((value) => value === 0);
+    if (atTopLevel && character === ",") {
+      throw new Error("fault target variable export must bind only one name");
+    }
+    if (atTopLevel && character === ";") {
+      return { end: index + 1, start };
+    }
+  }
+  throw new Error("fault target variable export must end with a semicolon");
+}
+
+function replaceDirectNamedFunctionExport(source, replacement, exportName) {
+  const target = directNamedCallableExport(source, exportName);
+  const replacementFragment = directNamedFunctionExportFragment(
+    replacement,
+    exportName,
+  );
+  return `${source.slice(0, target.start)}${replacementFragment}${source.slice(
+    target.end,
+  )}`;
+}
+
+function directNamedFunctionExportFragment(source, exportName) {
+  const fault = directExportedFunction(source, exportName);
+  const remainingFaultSource = maskJavaScriptStringsAndComments(
+    `${source.slice(0, fault.start)}${source.slice(fault.end)}`,
+  ).replace(/[;\s]/gu, "");
+  if (remainingFaultSource.length > 0) {
+    throw new Error("fault replacement must contain only the named function export");
+  }
+  return source.slice(fault.start, fault.end);
+}
+
+async function assertJavaScriptSourceSyntax({ environment, source, workspace }) {
+  const syntax = await runProcess(
+    process.execPath,
+    ["--input-type=module", "--check", "-"],
+    {
+      cwd: workspace,
+      env: environment,
+      input: source,
+      maxOutputBytes: 100_000,
+      timeoutMs: 30_000,
+    },
+  );
+  if (
+    syntax.exitCode !== 0 ||
+    syntax.timedOut ||
+    syntax.outputLimitExceeded ||
+    syntax.signal !== null
+  ) {
+    throw new Error("fault source syntax validation failed");
+  }
+}
+
 async function runArtifactRegressionGate({
   baselineHead,
   candidateTestPaths,
@@ -3340,35 +3936,76 @@ async function runArtifactRegressionGate({
   workspace,
   workspaceSymlinkObserved,
 }) {
-  const replacement = gate?.mutation?.replacement;
-  const replacementSha256 = typeof replacement === "string"
-    ? createHash("sha256").update(replacement).digest("hex")
-    : null;
+  const mutations = Array.isArray(gate?.mutations) ? gate.mutations : [];
+  const target = gate?.target ?? mutations[0]?.target ?? null;
+  const exportName = gate?.export_name ?? mutations[0]?.export_name ?? null;
+  const memberDigests = mutations.map(({ replacement }) =>
+    typeof replacement === "string"
+      ? createHash("sha256").update(replacement).digest("hex")
+      : null
+  );
+  let mutationManifestSha256 = null;
+  try {
+    mutationManifestSha256 = artifactFamilyManifestSha256({
+      id: gate?.id,
+      policy: gate?.policy,
+      target,
+      exportName,
+      replacementSha256s: memberDigests,
+    });
+  } catch {
+    // The fail-closed result below reports the malformed family.
+  }
   const result = {
     id: gate.id,
+    policy: gate.policy,
     status: "FAIL",
-    target: gate.mutation.target,
-    replacement_sha256: replacementSha256,
+    target,
+    export_name: exportName,
+    member_count: mutations.length,
+    mutation_manifest_sha256: mutationManifestSha256,
     changed_visible_test_paths: changedTestPaths,
     candidate_visible_test_paths: candidateTestPaths,
-    baseline_tests_mutant_visible: null,
-    candidate_tests_mutant_visible: null,
+    members: mutations.map((mutation, index) => ({
+      index: index + 1,
+      replacement_sha256: memberDigests[index],
+      baseline_tests_mutant_visible: null,
+      candidate_tests_mutant_visible: null,
+      killed: false,
+    })),
     reasons: [],
   };
+  const addReason = (reason) => {
+    if (!result.reasons.includes(reason)) result.reasons.push(reason);
+  };
   if (candidateTestPaths.length === 0) {
-    result.reasons.push("no candidate visible test delta");
+    addReason("no candidate visible test delta");
   }
   if (invalidTestPaths.length > 0) {
-    result.reasons.push("a changed visible test path was not a regular file");
+    addReason("a changed visible test path was not a regular file");
   }
   if (workspaceSymlinkObserved) {
-    result.reasons.push("workspace symlinks are unsupported by artifact regression gates");
+    addReason("workspace symlinks are unsupported by artifact regression gates");
   }
   if (
-    replacementSha256 === null ||
-    replacementSha256 !== gate.mutation.replacement_sha256
+    !ARTIFACT_GATE_POLICIES.has(gate?.policy) ||
+    mutations.length === 0 ||
+    !isSafeRelativePath(target) ||
+    typeof exportName !== "string" ||
+    !/^[A-Za-z_$][A-Za-z0-9_$]*$/u.test(exportName) ||
+    mutations.some(
+      (mutation, index) =>
+        mutation?.kind !== "replace-callable-export" ||
+        mutation?.target !== target ||
+        mutation?.export_name !== exportName ||
+        memberDigests[index] === null ||
+        memberDigests[index] !== mutation?.replacement_sha256,
+    ) ||
+    new Set(memberDigests).size !== memberDigests.length ||
+    mutationManifestSha256 === null ||
+    mutationManifestSha256 !== gate?.mutation_manifest_sha256
   ) {
-    result.reasons.push("mutation snapshot hash did not match replacement content");
+    addReason("mutation family snapshot did not match replacement content");
   }
   if (result.reasons.length > 0) return result;
 
@@ -3376,7 +4013,50 @@ async function runArtifactRegressionGate({
   const sandboxHome = path.join(evaluationRoot, "home");
   const sandboxWorkspace = path.join(evaluationRoot, "workspace");
   try {
-    const prepareMutationWorkspace = async ({ baselineTests }) => {
+    let transformedSources;
+    try {
+      await mkdir(path.join(sandboxHome, "tmp"), { recursive: true });
+      const syntaxEnvironment = benchmarkEnvironment(sandboxHome, environment);
+      const originalMutationTarget = path.join(workspace, target);
+      const originalTargetStat = await lstat(originalMutationTarget);
+      if (!originalTargetStat.isFile()) {
+        throw new Error("mutation target was not a regular file");
+      }
+      const candidateSource = await readFile(originalMutationTarget, "utf8");
+      await assertJavaScriptSourceSyntax({
+        environment: syntaxEnvironment,
+        source: candidateSource,
+        workspace,
+      });
+      transformedSources = [];
+      for (const mutation of mutations) {
+        await assertJavaScriptSourceSyntax({
+          environment: syntaxEnvironment,
+          source: mutation.replacement,
+          workspace,
+        });
+        const transformedSource = replaceDirectNamedFunctionExport(
+          candidateSource,
+          mutation.replacement,
+          mutation.export_name,
+        );
+        await assertJavaScriptSourceSyntax({
+          environment: syntaxEnvironment,
+          source: transformedSource,
+          workspace,
+        });
+        transformedSources.push(transformedSource);
+      }
+    } catch {
+      addReason("mutation source transformation was unsupported or invalid");
+      return result;
+    }
+
+    const prepareMutationWorkspace = async ({
+      baselineTests,
+      mutation,
+      transformedSource,
+    }) => {
       await Promise.all([
         rm(sandboxHome, { force: true, recursive: true }),
         rm(sandboxWorkspace, { force: true, recursive: true }),
@@ -3400,57 +4080,93 @@ async function runArtifactRegressionGate({
           workspace: sandboxWorkspace,
         });
       }
-      const target = path.join(sandboxWorkspace, gate.mutation.target);
-      const targetStat = await lstat(target);
+      const mutationTarget = path.join(sandboxWorkspace, mutation.target);
+      const targetStat = await lstat(mutationTarget);
       if (!targetStat.isFile()) {
         throw new Error("mutation target was not a regular file");
       }
-      await writeFile(target, replacement);
+      await writeFile(mutationTarget, transformedSource);
     };
 
-    await prepareMutationWorkspace({ baselineTests: true });
-    const baselineTestsMutant = await runSandboxedNpmTest({
-      cwd: sandboxWorkspace,
-      env: verifierEnvironment(sandboxHome, environment),
-      timeoutMs: 120_000,
-    });
-    result.baseline_tests_mutant_visible = publicArtifactCommandResult(
-      baselineTestsMutant,
-      {
-        redactPaths: [evaluationRoot, sandboxHome, sandboxWorkspace, workspace],
-      },
-    );
+    let candidateRunsComplete = true;
+    for (const [index, mutation] of mutations.entries()) {
+      const member = result.members[index];
+      await prepareMutationWorkspace({
+        baselineTests: true,
+        mutation,
+        transformedSource: transformedSources[index],
+      });
+      const baselineTestsMutant = await runSandboxedNpmTest({
+        cwd: sandboxWorkspace,
+        env: verifierEnvironment(sandboxHome, environment),
+        timeoutMs: 120_000,
+      });
+      member.baseline_tests_mutant_visible = publicArtifactCommandResult(
+        baselineTestsMutant,
+        {
+          redactPaths: [evaluationRoot, sandboxHome, sandboxWorkspace, workspace],
+        },
+      );
 
-    await prepareMutationWorkspace({ baselineTests: false });
-    const candidateTestsMutant = await runSandboxedNpmTest({
-      cwd: sandboxWorkspace,
-      env: verifierEnvironment(sandboxHome, environment),
-      timeoutMs: 120_000,
-    });
-    result.candidate_tests_mutant_visible = publicArtifactCommandResult(
-      candidateTestsMutant,
-      {
-        redactPaths: [evaluationRoot, sandboxHome, sandboxWorkspace, workspace],
-      },
-    );
-    if (baselineTestsMutant.timedOut) {
-      result.reasons.push("baseline-test counterfactual timed out");
-    } else if (baselineTestsMutant.signal !== null) {
-      result.reasons.push("baseline-test counterfactual was terminated by a signal");
-    } else if (baselineTestsMutant.exitCode !== 0) {
-      result.reasons.push("baseline-test counterfactual already killed the mutant");
+      await prepareMutationWorkspace({
+        baselineTests: false,
+        mutation,
+        transformedSource: transformedSources[index],
+      });
+      const candidateTestsMutant = await runSandboxedNpmTest({
+        cwd: sandboxWorkspace,
+        env: verifierEnvironment(sandboxHome, environment),
+        timeoutMs: 120_000,
+      });
+      member.candidate_tests_mutant_visible = publicArtifactCommandResult(
+        candidateTestsMutant,
+        {
+          redactPaths: [evaluationRoot, sandboxHome, sandboxWorkspace, workspace],
+        },
+      );
+      member.killed = completeArtifactMutantEvidence(
+        member.candidate_tests_mutant_visible,
+      ) && candidateTestsMutant.exitCode !== 0;
+
+      if (!completeArtifactMutantEvidence(member.baseline_tests_mutant_visible)) {
+        if (baselineTestsMutant.timedOut) {
+          addReason("baseline-test counterfactual timed out");
+        } else if (baselineTestsMutant.outputLimitExceeded) {
+          addReason("baseline-test counterfactual exceeded its output limit");
+        } else if (baselineTestsMutant.signal !== null) {
+          addReason("baseline-test counterfactual was terminated by a signal");
+        } else {
+          addReason("baseline-test counterfactual evidence was incomplete");
+        }
+      } else if (baselineTestsMutant.exitCode !== 0) {
+        addReason("baseline-test counterfactual already killed a semantic fault");
+      }
+      const candidateComplete = completeArtifactMutantEvidence(
+        member.candidate_tests_mutant_visible,
+      );
+      if (!candidateComplete) {
+        candidateRunsComplete = false;
+      }
+      if (candidateTestsMutant.timedOut) {
+        addReason("candidate-test semantic fault run timed out");
+      } else if (candidateTestsMutant.outputLimitExceeded) {
+        addReason("candidate-test semantic fault run exceeded its output limit");
+      } else if (candidateTestsMutant.signal !== null) {
+        addReason("candidate-test semantic fault run was terminated by a signal");
+      } else if (!candidateComplete) {
+        addReason("candidate-test semantic fault run was incomplete");
+      }
     }
-    if (candidateTestsMutant.timedOut) {
-      result.reasons.push("candidate-test mutant run timed out");
-    } else if (candidateTestsMutant.signal !== null) {
-      result.reasons.push("candidate-test mutant run was terminated by a signal");
-    } else if (candidateTestsMutant.exitCode === 0) {
-      result.reasons.push("candidate visible tests did not kill the mutant");
+    if (candidateRunsComplete) {
+      const killed = result.members.map((member) => member.killed);
+      if (gate.policy === "all-kill" && killed.some((value) => !value)) {
+        addReason("candidate visible tests did not kill every semantic fault member");
+      }
     }
     if (result.reasons.length === 0) result.status = "PASS";
     return result;
   } catch {
-    result.reasons.push("artifact regression gate execution failed");
+    addReason("artifact regression gate execution failed");
     return result;
   } finally {
     await rm(evaluationRoot, { force: true, recursive: true });
@@ -3495,6 +4211,38 @@ function publicArtifactCommandResult(result, options) {
   return {
     ...publicCommandResult(result, options),
     signal: result.signal ?? null,
+  };
+}
+
+export function summarizeArtifactRegressionEvidence(artifactRegression) {
+  if (artifactRegression === null || artifactRegression === undefined) {
+    return null;
+  }
+  return {
+    required_gate_ids: [...artifactRegression.required_gate_ids],
+    status: artifactRegression.status,
+    gates: artifactRegression.gates.map((gate) => ({
+      id: gate.id,
+      policy: gate.policy,
+      status: gate.status,
+      target: gate.target,
+      export_name: gate.export_name,
+      member_count: gate.member_count,
+      mutation_manifest_sha256: gate.mutation_manifest_sha256,
+      changed_visible_test_paths: [...gate.changed_visible_test_paths],
+      candidate_visible_test_paths: [...gate.candidate_visible_test_paths],
+      baseline_pass_count: gate.members.filter((member) =>
+        passingBaselineMutantEvidence(member.baseline_tests_mutant_visible)
+      ).length,
+      candidate_complete_count: gate.members.filter((member) =>
+        completeArtifactMutantEvidence(member.candidate_tests_mutant_visible)
+      ).length,
+      killed_member_count: gate.members.filter(({ killed }) => killed === true).length,
+      evidence_sha256: createHash("sha256")
+        .update(JSON.stringify(gate.members))
+        .digest("hex"),
+      reasons: [...gate.reasons],
+    })),
   };
 }
 
@@ -3674,7 +4422,7 @@ export function renderDevelopmentReport(result) {
     "",
     `Suite manifest: ${result.suite_sha256}.`,
     "",
-    "Case | Workspace snapshot | Hidden verifier snapshot | Mutant snapshot",
+    "Case | Workspace snapshot | Hidden verifier snapshot | Fault-family snapshot",
     "--- | --- | --- | ---",
     ...manifestRows,
     "",
@@ -3714,8 +4462,8 @@ export function renderDevelopmentReport(result) {
     "",
     "## Interpretation boundary",
     "",
-    "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, any case-owned seeded mutant to be killed by visible regression tests, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    "- LeanPowers quality-bearing conformance requires an unambiguous semantic route declaration before any task tool, rejects conflicting declarations, and forbids risk downgrade after an upgrade. Build/debug traces must show each later-edited existing file was successfully read before its own first edit, fixture-owned structured pre-edit reproduction for debug, and supported successful validation after the final edit. Discovery syntax, extra grounded-file reads, implementation/test patch composition, split versus batched reads, validation-manifest reads, Skill/reference reloads, exact command/call budgets, clause-ledger shape, repeated route or ledger presentation, contiguous versus split patch events, one-call versus two-call validation, and later non-mutating tooling remain efficiency or ceremony diagnostics rather than quality gates. Representation-boundary adequacy is measured workflow-neutrally in Task PASS: a candidate-test mutant must fail while the same mutant with candidate test deltas removed still passes, in addition to normal visible and hidden verification. Replay telemetry proves only that the exact reproduction command ran, not that its diagnostic meaning changed. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Strict quality additionally requires a current independent PASS review with the complete task and current validation context, plus proof the reviewer did not mutate the workspace; exact Skill invocation, prompt/verdict surface, reviewer count, wait targeting, and cycle choreography remain diagnostics.",
+    "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, every case-owned semantic fault family policy to pass, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
+    "- LeanPowers quality-bearing conformance requires an unambiguous semantic route declaration before any task tool, rejects conflicting declarations, and forbids risk downgrade after an upgrade. Build/debug traces must show each later-edited existing file was successfully read before its own first edit, fixture-owned structured pre-edit reproduction for debug, and supported successful validation after the final edit. Discovery syntax, extra grounded-file reads, implementation/test patch composition, split versus batched reads, validation-manifest reads, Skill/reference reloads, exact command/call budgets, clause-ledger shape, repeated route or ledger presentation, contiguous versus split patch events, one-call versus two-call validation, and later non-mutating tooling remain efficiency or ceremony diagnostics rather than quality gates. Representation-boundary adequacy is measured workflow-neutrally in Task PASS: every pre-registered fault-family member must preserve baseline tests, every candidate counterfactual must complete, and every member must be killed by the candidate test delta. Replay telemetry proves only that the exact reproduction command ran, not that its diagnostic meaning changed. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Strict quality additionally requires a current independent PASS review with the complete task and current validation context, plus proof the reviewer did not mutate the workspace; exact Skill invocation, prompt/verdict surface, reviewer count, wait targeting, and cycle choreography remain diagnostics.",
     "- Codex JSONL does not expose raw spawn arguments such as `fork_context`; observable spawn/wait behavior is checked dynamically, while exact argument shape is covered by static workflow tests and remains a runtime telemetry gap.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
@@ -3892,16 +4640,32 @@ async function runSingleCase({
       required_artifact_regression_gate_ids:
         benchmarkCase.artifact_regression_gates.map(({ id }) => id),
       required_artifact_regression_gates:
-        benchmarkCase.artifact_regression_gates.map(({ id, mutation }) => ({
+        benchmarkCase.artifact_regression_gates.map(({
           id,
-          target: mutation.target,
-          replacement_sha256: mutation.replacement_sha256,
+          policy,
+          target,
+          export_name,
+          mutations,
+          mutation_manifest_sha256,
+        }) => ({
+          id,
+          policy,
+          target,
+          export_name,
+          member_count: mutations.length,
+          mutation_manifest_sha256,
         })),
       verifier: verifierEvidence,
       verifier_workspace_unchanged: verifierWorkspaceUnchanged,
     };
     result.outcome = evaluateRunOutcome(result);
     result.workflow_conformance = evaluateWorkflowConformance(result);
+    result.verifier = {
+      ...verifierEvidence,
+      artifact_regression: summarizeArtifactRegressionEvidence(
+        artifactRegression,
+      ),
+    };
     return {
       result,
       artifacts: {
@@ -3925,7 +4689,7 @@ export function makePilotResult(suite, runtime, runs, repetitions, selectedCases
   const matrixComplete = /^[a-f0-9]{64}$/u.test(String(suite.suite_sha256 ?? "")) &&
     hasCompleteRunMatrix(runs, selectedCases, repetitions);
   return {
-    schema_version: 1,
+    schema_version: 2,
     suite_id: suite.suite_id,
     suite_sha256: suite.suite_sha256,
     evidence_level: suite.evidence_level,
@@ -4783,8 +5547,14 @@ export function parseLeanRouteLedger(message) {
   ) {
     return null;
   }
-  const routeAndFields = firstLine.slice(routeMatch.index);
-  const routeFieldText = firstLine.slice(routeMatch.index + routeMatch[0].length);
+  const rawRouteFieldText = firstLine.slice(
+    routeMatch.index + routeMatch[0].length,
+  );
+  const routeFieldText = rawRouteFieldText.replace(
+    /^[*_`]*\s+workflow\s*:\s*(?=owner\s*[:=])/iu,
+    " ",
+  );
+  const routeAndFields = `${routeMatch[0]}${routeFieldText}`;
   const structuredFields = [...routeFieldText.matchAll(
     /(?:^|[^\p{L}\p{N}_-])([\p{L}_][\p{L}\p{N}_-]*)\s*[:=]/gu,
   )].map((match) => match[1].toLocaleLowerCase("en-US"));
@@ -4999,7 +5769,7 @@ function isAssertiveLeanRoutePrefix(value) {
     .replace(/[*_`]/gu, "")
     .trim()
     .replace(/\s+/gu, " ");
-  return /^(?:leanpowers:route|(?:(?:routing|route) selected|selected|using|following|invoking|activated|activating|entrypoint)\s*:?\s*leanpowers:route|starting in workflow\s+leanpowers:route|I(?:'m|’m| am)?\s+(?:use|using|follow|following|select|selected|activate|activated|invoke|invoking)\s+leanpowers:route)$/iu
+  return /^(?:leanpowers:route|(?:(?:routing|route) selected|selected|using|following|invoking|activated|activating|entrypoint)\s*:?\s*leanpowers:route|starting (?:in workflow\s+|with (?:the\s+)?|using (?:the\s+)?)leanpowers:route|I(?:'m|’m| am)?\s+(?:use|using|follow|following|select|selected|activate|activated|invoke|invoking)\s+leanpowers:route)$/iu
     .test(normalized);
 }
 

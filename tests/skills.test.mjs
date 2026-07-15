@@ -48,7 +48,7 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
     assert.match(body, new RegExp(`\\b${workflow}\\b`, "i"), workflow);
   }
   assert.doesNotMatch(body, /1%|before any response|you do not have a choice/i);
-  assert.ok(wordCount(content) <= 598, `route has ${wordCount(content)} words`);
+  assert.ok(wordCount(content) <= 597, `route has ${wordCount(content)} words`);
 });
 
 test("direct workflow entry loads one compact runtime contract at most once", async () => {
@@ -141,20 +141,22 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /REPRODUCE runs ONE pre-edit failing path/i);
   assert.match(route, /showing failure and first wrong transition/i);
   assert.match(route, /inspection\/inference is not reproduction/i);
-  assert.match(route, /Regression tests must fail against a plausible shortcut/i);
-  assert.match(route, /For composite identities, assert the structural\/round-trip contract/i);
-  assert.match(route, /distinct identities reach the operation/i);
-  assert.match(route, /arbitrary separator samples are insufficient/i);
+  assert.match(route, /Regression tests must fail under a plausible shortcut/i);
+  assert.match(route, /For composite identities/i);
+  assert.match(route, /distinct inputs with identical concatenated text/i);
+  assert.match(route, /different component boundaries/i);
+  assert.match(route, /assert both reach the operation separately/i);
   assert.match(route, /PATCH: Codex ONE repository-relative `apply_patch` for code\/tests/i);
   assert.match(route, /Claude adjacent native `Edit`\/`Write` without prose\/inspection/i);
   assert.match(route, /Include failure-path tests/i);
   assert.match(route, /Validation\/review failure reopens cycle/i);
   assert.match(route, /Pre-PATCH emit once: header-alone `Clause→test ledger:`/i);
   assert.match(route, /one `<constraint>→<test>` per regression\/preserved boundary/i);
-  assert.match(route, /VALIDATE\(1\): target ONE shell call with the canonical test\/build covering regression\/affected checks/i);
-  assert.match(route, /DEBUG replay combines exact pre-edit REPRODUCE, literal ` && `, and validation/i);
-  assert.match(route, /Two ordered calls remain correct but miss the green budget/i);
-  assert.match(route, /forbid every other command/i);
+  assert.match(route, /DEBUG is incomplete until the exact pre-edit REPRODUCE command runs again after PATCH/i);
+  assert.match(route, /canonical validation passes/i);
+  assert.match(route, /Prefer `<exact REPRODUCE> && <validation>`/i);
+  assert.match(route, /two ordered calls are quality-correct but exceed the green budget/i);
+  assert.match(route, /Test\/build alone cannot support `fixed` or completion/i);
   assert.match(route, /Green lean\/standard stops tooling and answers/i);
   assert.match(route, /only strict continues below/i);
   assert.match(route, /Mandatory strict gate/i);
@@ -258,7 +260,7 @@ test("skill bodies stay within the LeanPowers context budget", async () => {
     if (name === "adapt") {
       assert.ok(words < 400, `adapt has ${words} words`);
     } else if (name === "route") {
-      assert.ok(words <= 598, `route has ${words} words`);
+      assert.ok(words <= 597, `route has ${words} words`);
       engineeringWords += words;
     } else {
       assert.ok(words <= 800, `${name} has ${words} words`);

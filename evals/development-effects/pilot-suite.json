@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "suite_id": "development-effects-pilot-2026-07-14",
   "evidence_level": "paired-development-pilot",
   "runtime": "codex-cli",
@@ -41,7 +41,7 @@
       "verifier_files": [
         "cases/localized-template-cache/verifier/cache.hidden.mjs"
       ],
-      "task": "Users report that after loading a template in one locale, requesting the same template in another locale can return the first locale's content. Before editing, run the included `node repro/localized-template-cache.mjs`; use its structured output to trace the first incorrect assumption. Fix the root cause while keeping the cache, the current public API, locale normalization, error propagation, and same-locale cache hits intact. Cache identity must remain unambiguous even when template names or locales contain separator characters. Add a regression test and run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "task": "Users report that after loading a template in one locale, requesting the same template in another locale can return the first locale's content. Before editing, run the included `node repro/localized-template-cache.mjs`; use its structured output to trace the first incorrect assumption. Fix the root cause while keeping the cache, the current public API, locale normalization, error propagation, and same-locale cache hits intact; keep `templateCacheKey` as a direct named export. Cache identity must remain unambiguous when either component contains separator characters; add a regression proving that two distinct identities with identical concatenated text but different name/locale boundaries both reach the loader separately. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
       "reproduction_contract": {
         "command": "node repro/localized-template-cache.mjs",
         "expected_output": {
@@ -71,12 +71,34 @@
       },
       "artifact_regression_gates": [
         {
-          "id": "naive-colon-cache-key",
-          "mutation": {
-            "kind": "replace-file",
-            "target": "src/cache-key.mjs",
-            "source": "cases/localized-template-cache/verifier/mutants/cache-key.naive-colon.mjs"
-          }
+          "id": "component-inclusion",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "templateCacheKey",
+              "target": "src/cache-key.mjs",
+              "source": "cases/localized-template-cache/verifier/mutants/cache-key.component-omission.mjs"
+            },
+            {
+              "kind": "replace-callable-export",
+              "export_name": "templateCacheKey",
+              "target": "src/cache-key.mjs",
+              "source": "cases/localized-template-cache/verifier/mutants/cache-key.name-omission.mjs"
+            }
+          ]
+        },
+        {
+          "id": "collision-free-composition",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "templateCacheKey",
+              "target": "src/cache-key.mjs",
+              "source": "cases/localized-template-cache/verifier/mutants/cache-key.boundary-erasure.mjs"
+            }
+          ]
         }
       ],
       "change_policy": {
