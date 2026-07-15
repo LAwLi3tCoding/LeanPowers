@@ -44,11 +44,16 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
   assert.match(body, /otherwise(?: use)? `standard`/i);
   assert.match(body, /required_gates/i);
   assert.match(body, /leanpowers:route \| workflow=OWNER \| risk=RISK/i);
+  assert.ok(
+    body.indexOf("First emitted bytes MUST be") < body.indexOf("Choose lowest-safe owner"),
+    "canonical declaration must precede routing prose",
+  );
+  assert.match(body, /`strict`:[^\n]*\bconcurrency\b/i);
   for (const workflow of ["shape", "build", "debug", "review", "verify", "ship", "adapt"]) {
     assert.match(body, new RegExp(`\\b${workflow}\\b`, "i"), workflow);
   }
   assert.doesNotMatch(body, /1%|before any response|you do not have a choice/i);
-  assert.ok(wordCount(content) <= 450, `route has ${wordCount(content)} words`);
+  assert.ok(wordCount(content) <= 500, `route has ${wordCount(content)} words`);
 });
 
 test("direct workflow entry loads one compact runtime contract at most once", async () => {
@@ -122,62 +127,64 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /even with supplied repro\/cause/i);
   assert.match(route, /deterministic single-component defects with a bounded component scope/i);
   assert.match(route, /without (?:reading )?Skill\/reference/i);
-  assert.match(route, /failure-path tests/i);
+  assert.match(route, /Include failure paths/i);
   assert.match(route, /Other defects load `debug`/i);
   assert.match(route, /non-defects load selected Skill/i);
   assert.match(route, /ambiguity→`shape`/i);
   assert.match(route, /explicit-feedback→`adapt`/i);
   assert.match(route, /diagnosis\/unknown-cause→`debug`/i);
   assert.match(route, /implementation\/known-repair→`build`/i);
-  assert.match(route, /FIRST line exactly/i);
+  assert.match(route, /First emitted bytes MUST be/i);
   assert.match(route, /leanpowers:route \| workflow=OWNER \| risk=RISK/i);
-  assert.match(route, /substitute lowercase OWNER\/RISK; no prefix\/final repeat/i);
+  assert.match(route, /Byte 1 is `l`/i);
+  assert.match(route, /never prefix, bullet, quote, fence, or final-repeat/i);
   assert.match(route, /If evidence raises risk, emit `leanpowers:risk \| risk=strict` and apply strict gates/i);
-  assert.match(route, /Capsule hard caps/i);
-  assert.match(route, /Codex one successful call\/stage; select inputs first/i);
-  assert.match(route, /No substitutes\/splits on green stages/i);
-  assert.match(route, /Truncated\/incomplete output fails its stage/i);
+  assert.match(route, /Green capsule/i);
+  assert.match(route, /One successful call\/stage/i);
+  assert.match(route, /Omit routine narration/i);
+  assert.match(route, /emit risk\/decision changes, blockers\/failures, authorization needs, and host updates/i);
+  assert.match(route, /Truncated\/incomplete output allows one narrower complete retry/i);
   assert.match(route, /allows one narrower complete retry/i);
   assert.match(route, /Destructive\/irreversible\/credential-gated\/production action requires prior explicit authorization/i);
-  assert.match(route, /`build` DISCOVER\(1\)→READ\(1\)→PATCH\(1\)→VALIDATE\(1\)/i);
-  assert.match(route, /`debug` DISCOVER\(1\)→READ\(1\)\+REPRODUCE\/TRACE\(1\) \(either order\)→PATCH\(1\)→VALIDATE\(1\)/i);
-  assert.match(route, /failed\/missing\/contradictory stages may also expand once/i);
-  assert.match(route, /DISCOVER: Preset repository cwd applies throughout/i);
-  assert.match(route, /Codex uses `rg --files SCOPE; rg -n -- 'TERMS' SCOPE`/i);
-  assert.match(route, /replacing both SCOPE tokens with one repository-relative component path/i);
-  assert.match(route, /use `\.` only for a bounded repository/i);
-  assert.match(route, /TERMS is `a\|b`, never backslashed/i);
-  assert.match(route, /No prefix\/`cd`\/pipes\/globs\/redirections\/extra paths/i);
-  assert.match(route, /Claude uses adjacent native `Glob`\+`Grep`/i);
-  assert.match(route, /Identify implementation, callers, tests, repro, validation manifest/i);
-  assert.match(route, /READ and DEBUG REPRODUCE follow DISCOVER in either order; finish both before PATCH/i);
-  assert.match(route, /Codex READ is exactly one `tail -n \+1 --`/i);
-  assert.match(route, /every selected implementation\/test\/repro\/validation file/i);
-  assert.match(route, /after complete output, never `cat`, split, or re-read/i);
-  assert.match(route, /Claude uses adjacent native `Read`, each candidate once without prose\/inspection/i);
-  assert.match(route, /REPRODUCE runs ONE pre-edit failing path/i);
-  assert.match(route, /showing failure and first wrong transition/i);
-  assert.match(route, /inspection\/inference is not reproduction/i);
-  assert.match(route, /Regression tests must fail under plausible shortcuts/i);
-  assert.match(route, /For composite identities/i);
-  assert.match(route, /vary each component/i);
-  assert.match(route, /inputs with identical concatenated text/i);
-  assert.match(route, /different boundaries/i);
-  assert.match(route, /First assert the shortcut collides/i);
-  assert.match(route, /assert all inputs reach the operation separately/i);
-  assert.match(route, /PATCH: Codex ONE repository-relative `apply_patch` for code\/tests/i);
-  assert.match(route, /Claude adjacent native `Edit`\/`Write` without prose\/inspection/i);
-  assert.match(route, /Include failure-path tests/i);
-  assert.match(route, /Validation\/review failure reopens cycle/i);
-  assert.match(route, /Pre-PATCH emit once: header-alone `Clause→test ledger:`/i);
+  assert.match(route, /`build` DISCOVER\(1\)→READ-BATCH\(1\)→TEST-PATCH\(1\)→RED\(1\)→CODE-PATCH\(1\)→VALIDATE-COMBINED\(1\)/i);
+  assert.match(route, /`debug` uses DISCOVER→READ-BATCH\+REPRODUCE\/TRACE→PATCH→VALIDATE-COMBINED/i);
+  assert.match(route, /failed\/missing\/contradictory stages may expand once/i);
+  assert.match(route, /DISCOVER\(1\): skip only when task\/repository instructions bound scope and name every needed implementation\/caller\/test\/repro\/manifest path/i);
+  assert.match(route, /Codex ONE command contains `rg --files SCOPE; rg -n -- 'TERMS' SCOPE`/i);
+  assert.match(route, /same relative SCOPE twice/i);
+  assert.match(route, /`\.`[\s\S]{0,20}bounded repository/i);
+  assert.match(route, /TERMS=`a\|b`, never backslashed/i);
+  assert.match(route, /No `cd`\/pipes\/globs\/redirections\/extra paths/i);
+  assert.match(route, /Claude uses adjacent `Glob`\+`Grep`/i);
+  assert.match(route, /Locate implementation, callers, tests, repro, manifest/i);
+  assert.match(route, /READ-BATCH\(1\) and DEBUG REPRODUCE\(1\) follow DISCOVER when used, in either order; finish before editing/i);
+  assert.match(route, /Codex fully reads every edit target and its directly affected tests\/manifest in ONE `tail -n \+1 --`/i);
+  assert.match(route, /include callers only when their contract may change/i);
+  assert.match(route, /never unrelated matches or re-reads/i);
+  assert.match(route, /Claude uses adjacent `Read`/i);
+  assert.match(route, /REPRODUCE executes one pre-edit failing path/i);
+  assert.match(route, /proving failure and first wrong transition/i);
+  assert.match(route, /inference is not reproduction/i);
+  assert.match(route, /Tests must kill plausible shortcuts/i);
+  assert.match(route, /Dry-run return\/event\/call order/i);
+  assert.match(route, /async\/concurrent tests use deferred settlement and deterministic checkpoints, not sleeps/i);
+  assert.match(route, /BUILD behavior changes use a test-only patch, then RED runs that focused test and must fail for the expected missing behavior before product edits/i);
+  assert.match(route, /Non-behavior docs\/config name why RED does not apply and the pre-change check/i);
+  assert.match(route, /Preserve RED tests through completion; later edits restart gates/i);
+  assert.match(route, /Codex uses ONE repository-relative `apply_patch` for product code and remaining tests/i);
+  assert.match(route, /Claude uses adjacent `Edit`\/`Write`/i);
+  assert.match(route, /Include failure paths/i);
+  assert.match(route, /Failure reopens the cycle/i);
+  assert.match(route, /Pre-PATCH emit header-alone `Clause→test ledger:`/i);
   assert.match(route, /one `<constraint>→<test>` per regression\/preserved boundary/i);
-  assert.match(route, /DEBUG is incomplete until the exact pre-edit REPRODUCE command runs again after PATCH/i);
-  assert.match(route, /canonical validation passes/i);
-  assert.match(route, /Lean\/standard green path runs exactly one `<exact REPRODUCE> && <validation>`/i);
-  assert.match(route, /split only after that call fails/i);
-  assert.match(route, /Test\/build alone cannot support `fixed` or completion/i);
-  assert.match(route, /Green lean\/standard stops tooling and answers/i);
-  assert.match(route, /only strict continues below/i);
+  assert.match(route, /VALIDATE-COMBINED\(1\)/i);
+  assert.match(route, /BUILD runs the targeted regression plus canonical applicable integration\/lint\/typecheck\/build\/full-suite checks in one shell-safe call/i);
+  assert.match(route, /DEBUG reruns exact pre-edit REPRODUCE plus canonical validation/i);
+  assert.match(route, /in one `<exact REPRODUCE> && <validation>` call/i);
+  assert.match(route, /split only after failure/i);
+  assert.match(route, /Test\/build alone cannot support `fixed`\/completion/i);
+  assert.match(route, /Green lean\/standard stops tooling and answers concisely with outcome\/root cause, changed paths, exact validation result, and residual risk only/i);
+  assert.match(route, /strict continues/i);
   assert.doesNotMatch(route, /tool_search\(query="wait_agent targets spawn_agent fork_context"/i);
   assert.match(route, /STRICT only after green VALIDATE/i);
   assert.match(route, /Lean\/standard never read it/i);
@@ -290,7 +297,7 @@ test("skill bodies stay within the LeanPowers context budget", async () => {
     if (name === "adapt") {
       assert.ok(words < 400, `adapt has ${words} words`);
     } else if (name === "route") {
-      assert.ok(words <= 450, `route has ${words} words`);
+      assert.ok(words <= 500, `route has ${words} words`);
       engineeringWords += words;
     } else {
       assert.ok(words <= 800, `${name} has ${words} words`);

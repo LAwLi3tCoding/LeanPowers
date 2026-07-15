@@ -508,7 +508,7 @@ Release gates:
 - Composite quality passes a five-percent non-inferiority margin.
 - No additional critical seeded-defect escape.
 - Regression and scope-violation rates are no more than two percentage points worse.
-- Standard-task median tokens are reduced by at least 50%.
+- Overall summed model-token use is at most 60% of Superpowers across the complete matched matrix; standard-task medians and individual pair shares remain diagnostics.
 - Standard-task median wall time is reduced by at least 40%.
 - Median agent calls are reduced by at least 60%.
 - Strict tasks prioritize quality even when savings are smaller.

@@ -435,6 +435,12 @@ function passingCapsuleStage(workflow = "build") {
     quality_patch_targets_read_observed: true,
     quality_pre_change_evidence_observed: true,
     quality_read_observed: true,
+    build_red_observed: workflow === "build" ? true : null,
+    build_red_command_calls: workflow === "build" ? 1 : 0,
+    build_red_cycle_restarts: 0,
+    build_red_retry_command_calls: 0,
+    build_red_retry_protocol_observed: workflow === "build" ? true : null,
+    red_test_paths_preserved_observed: workflow === "build" ? true : null,
     required_read_paths: ["src/index.mjs", "test/index.test.mjs"],
     validation_metadata_read_observed: true,
     reproduce_observed: workflow === "debug" ? true : null,
@@ -452,13 +458,14 @@ function passingCapsuleStage(workflow = "build") {
     pre_patch_counterexample_transition_observed: true,
     pre_patch_counterexample_observed: true,
     post_patch_clause_test_ledger_observed: false,
-    patch_batches: 1,
+    patch_batches: workflow === "build" ? 2 : 1,
     patch_file_events: 2,
     patch_paths: ["src/index.mjs", "test/index.test.mjs"],
     implementation_patch_observed: true,
     quality_patch_observed: true,
     test_patch_observed: true,
-    multi_file_patch_observed: true,
+    multi_file_patch_observed: workflow === "debug",
+    patch_protocol_observed: true,
     post_change_command_calls: 1,
     validation_observed: true,
     quality_validation_observed: true,
@@ -496,6 +503,7 @@ function capsuleTraceEvents({
   ].join("\n"),
   duplicateLedger = false,
   expectedWorkflow = "debug",
+  extraBuildRedCommand = false,
   extraPostCommand = false,
   extraPreCommand = false,
   extraReadAfterSuccess = false,
@@ -507,8 +515,10 @@ function capsuleTraceEvents({
   initialExtra = null,
   ledgerAfterDiscover = false,
   nonReviewTail = false,
+  omitBuildRed = false,
   patchBatches = 1,
   patchPaths = ["src/index.mjs", "test/index.test.mjs"],
+  preserveBuildPatchOrder = false,
   prePatchProgress = [],
   prePatchLedger = [
     "Clause→test ledger:",
@@ -522,6 +532,18 @@ function capsuleTraceEvents({
   reproduceBeforeRead = false,
   reproduceCommand = capsuleReproductionContract.command,
   reproduceOutput = capsuleReproductionOutput,
+  redCommand = "node --test test/index.test.mjs",
+  redExitCode = 1,
+  redOutput = "expected failure: behavior is not implemented",
+  redStatus = "completed",
+  redTimedOut = false,
+  repeatRedTestInCodePatch = false,
+  retryBuildRedCycle = false,
+  retryRedCommand = "node --test test/index.test.mjs",
+  retryRedExitCode = 0,
+  retryRedOutput = "unexpected pass before correcting the regression",
+  retryRedStatus = "completed",
+  retryRedTimedOut = false,
   routeDeclaration = null,
   separatePostReproduction = false,
   validationExitCode = 0,
@@ -656,10 +678,21 @@ function capsuleTraceEvents({
   if (prePatchLedger !== null) {
     events.push(completed({ type: "agent_message", text: prePatchLedger }));
   }
-  const changes = patchPaths.map((changedPath) => ({
+  const orderedPatchPaths = expectedWorkflow === "build" && !preserveBuildPatchOrder
+    ? [...patchPaths].sort((left, right) => {
+        const leftIsTest = left.startsWith("test/");
+        const rightIsTest = right.startsWith("test/");
+        return leftIsTest === rightIsTest ? 0 : leftIsTest ? -1 : 1;
+      })
+    : patchPaths;
+  const changes = orderedPatchPaths.map((changedPath) => ({
     path: `/tmp/run/workspace/${changedPath}`,
     kind: "update",
   }));
+  const firstImplementationPatch = expectedWorkflow === "build"
+    ? changes.findIndex((change) => change.path.includes("/src/"))
+    : -1;
+  const redTestChange = changes.find((change) => change.path.includes("/test/"));
   for (const [index, change] of changes.entries()) {
     const item = {
       id: `patch-${index}`,
@@ -669,7 +702,64 @@ function capsuleTraceEvents({
     };
     events.push({ type: "item.started", item: { ...item, status: "in_progress" } });
     events.push(completed(item));
-    if (patchBatches > 1 && index < changes.length - 1) {
+    if (
+      expectedWorkflow === "build" &&
+      !omitBuildRed &&
+      firstImplementationPatch > 0 &&
+      index === firstImplementationPatch - 1
+    ) {
+      events.push(completed({
+        type: "command_execution",
+        command: retryBuildRedCycle ? retryRedCommand : redCommand,
+        aggregated_output: retryBuildRedCycle ? retryRedOutput : redOutput,
+        exit_code: retryBuildRedCycle ? retryRedExitCode : redExitCode,
+        status: retryBuildRedCycle ? retryRedStatus : redStatus,
+        timed_out: retryBuildRedCycle ? retryRedTimedOut : redTimedOut,
+      }));
+      if (retryBuildRedCycle && redTestChange) {
+        const correctedItem = {
+          id: "patch-red-test-correction",
+          type: "file_change",
+          changes: [redTestChange],
+          status: "completed",
+        };
+        events.push({
+          type: "item.started",
+          item: { ...correctedItem, status: "in_progress" },
+        });
+        events.push(completed(correctedItem));
+        events.push(completed({
+          type: "command_execution",
+          command: redCommand,
+          aggregated_output: redOutput,
+          exit_code: redExitCode,
+          status: redStatus,
+          timed_out: redTimedOut,
+        }));
+      }
+      if (extraBuildRedCommand) {
+        events.push(completed({
+          type: "command_execution",
+          command: "npm test",
+          aggregated_output: "another failing check",
+          exit_code: 1,
+          status: "completed",
+        }));
+      }
+      if (repeatRedTestInCodePatch && redTestChange) {
+        const repeatedItem = {
+          id: "patch-red-test-repeat",
+          type: "file_change",
+          changes: [redTestChange],
+          status: "completed",
+        };
+        events.push({
+          type: "item.started",
+          item: { ...repeatedItem, status: "in_progress" },
+        });
+        events.push(completed(repeatedItem));
+      }
+    } else if (patchBatches > 1 && index < changes.length - 1) {
       events.push(completed({ type: "agent_message", text: "Starting another patch." }));
     }
   }
@@ -995,6 +1085,25 @@ test("artifact regression gate schema fails closed", async () => {
           candidate.evidence_level = "unregistered-development-evidence";
         },
         /evidence_level must equal paired-development-pilot or paired-development-heldout/u,
+      ],
+      [
+        (candidate) => {
+          candidate.token_target = {
+            metric: "aggregate-model-token-share",
+            population: "all-matched-pairs",
+          };
+        },
+        /token_target must be a closed aggregate-model-token-share target/u,
+      ],
+      [
+        (candidate) => {
+          candidate.token_target = {
+            max_share_pct: 0,
+            metric: "aggregate-model-token-share",
+            population: "all-matched-pairs",
+          };
+        },
+        /max_share_pct in \(0, 100\]/u,
       ],
       [
         (candidate) => {
@@ -2970,7 +3079,10 @@ test("distilled real r2 route requires exact reproduction replay after patch", (
     route_ledger_reported: true,
     telemetry: { workflow_trace: parsed.workflow_trace },
     workflow: "leanpowers-0.2.0",
-  }), { status: "PASS", reasons: [] });
+  }), {
+    status: "FAIL",
+    reasons: ["contiguous code-and-test PATCH protocol was not observed"],
+  });
 
   const missingReplayEvents = structuredClone(events);
   const combinedValidation = missingReplayEvents.find(({ item }) =>
@@ -2998,7 +3110,10 @@ test("distilled real r2 route requires exact reproduction replay after patch", (
     workflow: "leanpowers-0.2.0",
   }), {
     status: "FAIL",
-    reasons: ["supported successful post-edit validation was not observed"],
+    reasons: [
+      "contiguous code-and-test PATCH protocol was not observed",
+      "supported successful post-edit validation was not observed",
+    ],
   });
 });
 
@@ -3403,6 +3518,9 @@ test("debug capsule stage protocol rejects one-property trace regressions", () =
     [{ validationCommand: "npm run test --if-present" }, "validation_observed"],
     [{ validationCommand: "cargo test --no-run" }, "validation_observed"],
     [{ validationCommand: "pytest --collect-only" }, "validation_observed"],
+    [{
+      validationCommand: `${capsuleReproductionContract.command} && npm run build`,
+    }, "validation_observed"],
     [{ validationCommand: "node repro/other.mjs && npm test" }, "validation_observed"],
     [{
       validationCommand: `npm test && ${capsuleReproductionContract.command}`,
@@ -3445,6 +3563,18 @@ test("build capsule stage protocol omits reproduction but keeps all other gates"
 
   assert.deepEqual(stage, passingCapsuleStage("build"));
 
+  const compoundStage = parseCodexResult(
+    capsuleTraceEvents({
+      expectedWorkflow: "build",
+      validationCommand:
+        "node --test test/index.test.mjs && npm run lint && npm test",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("build"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(compoundStage.validation_observed, true);
+  assert.equal(compoundStage.quality_validation_observed, true);
+  assert.equal(compoundStage.protocol_observed, true);
+
   const chainedStage = parseCodexResult(
     capsuleTraceEvents({
       expectedWorkflow: "build",
@@ -3454,6 +3584,144 @@ test("build capsule stage protocol omits reproduction but keeps all other gates"
   ).workflow_trace.capsule_stage;
   assert.equal(chainedStage.validation_observed, false);
   assert.equal(chainedStage.protocol_observed, false);
+
+  for (const validationCommand of [
+    "npm test || npm run lint",
+    "npm test; npm run lint",
+    "npm test | npm run lint",
+    "npm test && npm test",
+    "npm test&&npm run lint",
+    "npm run build",
+    "npm run lint && npm run build",
+    [
+      "npm test",
+      "npm run lint",
+      "npm run typecheck",
+      "npm run build",
+      "npm run check",
+      "npm run test:unit",
+      "npm run test:integration",
+    ].join(" && "),
+  ]) {
+    const invalid = parseCodexResult(
+      capsuleTraceEvents({ expectedWorkflow: "build", validationCommand })
+        .map(JSON.stringify).join("\n"),
+      capsuleTraceOptions("build"),
+    ).workflow_trace.capsule_stage;
+    assert.equal(invalid.validation_observed, false, validationCommand);
+    assert.equal(invalid.protocol_observed, false, validationCommand);
+  }
+});
+
+test("build capsule requires one focused failing RED between test and product patches", () => {
+  const recoveredRed = parseCodexResult(
+    capsuleTraceEvents({
+      expectedWorkflow: "build",
+      retryBuildRedCycle: true,
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("build"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(recoveredRed.patch_batches, 3);
+  assert.equal(recoveredRed.build_red_cycle_restarts, 1);
+  assert.equal(recoveredRed.build_red_retry_command_calls, 1);
+  assert.equal(recoveredRed.build_red_retry_protocol_observed, true);
+  assert.equal(recoveredRed.build_red_observed, true);
+  assert.equal(recoveredRed.red_test_paths_preserved_observed, true);
+  assert.equal(recoveredRed.quality_pre_change_evidence_observed, true);
+  assert.equal(recoveredRed.patch_protocol_observed, true);
+  assert.equal(recoveredRed.protocol_observed, true);
+  assert.equal(recoveredRed.capsule_green_path_observed, false);
+
+  const unrelatedRetry = parseCodexResult(
+    capsuleTraceEvents({
+      expectedWorkflow: "build",
+      retryBuildRedCycle: true,
+      retryRedCommand: "git status --short",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("build"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(unrelatedRetry.build_red_retry_protocol_observed, false);
+  assert.equal(unrelatedRetry.patch_protocol_observed, false);
+  assert.equal(unrelatedRetry.protocol_observed, false);
+
+  const missingRed = parseCodexResult(
+    capsuleTraceEvents({
+      expectedWorkflow: "build",
+      omitBuildRed: true,
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("build"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(missingRed.build_red_command_calls, 0);
+  assert.equal(missingRed.build_red_observed, false);
+  assert.equal(missingRed.quality_pre_change_evidence_observed, false);
+  assert.equal(missingRed.patch_protocol_observed, false);
+  assert.equal(missingRed.protocol_observed, false);
+
+  for (const mutation of [
+    { redExitCode: 0 },
+    { redCommand: "node -e \"process.exit(1)\"" },
+    { redCommand: "npm run lint" },
+    { redCommand: "npm run build" },
+    { redOutput: "" },
+    { redOutput: "   " },
+    { redStatus: "failed" },
+    { redStatus: "in_progress" },
+    { redTimedOut: true },
+    { redExitCode: 256 },
+    { redOutput: "zsh: command not found: node" },
+    { extraBuildRedCommand: true },
+  ]) {
+    const stage = parseCodexResult(
+      capsuleTraceEvents({ expectedWorkflow: "build", ...mutation })
+        .map(JSON.stringify).join("\n"),
+      capsuleTraceOptions("build"),
+    ).workflow_trace.capsule_stage;
+    assert.equal(
+      stage.build_red_command_calls,
+      mutation.extraBuildRedCommand ? 2 : 1,
+    );
+    assert.equal(stage.build_red_observed, false);
+    assert.equal(stage.quality_pre_change_evidence_observed, false);
+    assert.equal(stage.patch_protocol_observed, false);
+    assert.equal(stage.protocol_observed, false);
+  }
+
+  const mixedTestBatch = parseCodexResult(
+    capsuleTraceEvents({
+      expectedWorkflow: "build",
+      patchPaths: ["test/index.test.mjs", "docs/options.md", "src/index.mjs"],
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("build"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(mixedTestBatch.build_red_observed, true);
+  assert.equal(mixedTestBatch.patch_protocol_observed, false);
+  assert.equal(mixedTestBatch.protocol_observed, false);
+
+  const productBeforeTest = parseCodexResult(
+    capsuleTraceEvents({
+      expectedWorkflow: "build",
+      omitBuildRed: true,
+      patchBatches: 2,
+      patchPaths: ["src/index.mjs", "test/index.test.mjs"],
+      preserveBuildPatchOrder: true,
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("build"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(productBeforeTest.build_red_observed, false);
+  assert.equal(productBeforeTest.patch_protocol_observed, false);
+  assert.equal(productBeforeTest.protocol_observed, false);
+
+  const weakenedRedTest = parseCodexResult(
+    capsuleTraceEvents({
+      expectedWorkflow: "build",
+      repeatRedTestInCodePatch: true,
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("build"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(weakenedRedTest.build_red_observed, true);
+  assert.equal(weakenedRedTest.red_test_paths_preserved_observed, false);
+  assert.equal(weakenedRedTest.patch_protocol_observed, false);
+  assert.equal(weakenedRedTest.protocol_observed, false);
 });
 
 test("process stdout callbacks preserve complete line order across chunks", async () => {
@@ -5012,6 +5280,7 @@ test("capsule stage telemetry independently gates workflow conformance", () => {
     [{ implementation_patch_observed: false }, null],
     [{ test_patch_observed: false }, null],
     [{ multi_file_patch_observed: false }, null],
+    [{ patch_protocol_observed: false }, "ordered TEST-PATCH, RED, and CODE-PATCH protocol was not observed"],
     [{ post_change_command_calls: 2 }, null],
     [{
       validation_observed: false,
@@ -5021,7 +5290,7 @@ test("capsule stage telemetry independently gates workflow conformance", () => {
       post_validation_tool_calls: 1,
       ordinary_stop_observed: false,
     }, null],
-    [{ quality_pre_change_evidence_observed: false }, "ordered pre-change source and reproduction evidence was not observed"],
+    [{ quality_pre_change_evidence_observed: false }, "ordered pre-product source and failing RED evidence was not observed"],
     [{ quality_read_observed: false }, "pre-change source READ evidence was not observed"],
     [{ quality_patch_targets_read_observed: false }, "READ omitted discovered files that were later changed"],
     [{ quality_patch_observed: false }, null],
@@ -5147,6 +5416,12 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
     count: 1,
     required_pair_count: 2,
     token_pairs: 1,
+    aggregate_model_tokens: {
+      baseline: 100,
+      candidate: 60,
+    },
+    aggregate_model_token_share_pct: 60,
+    aggregate_model_token_reduction_pct: 40,
     model_token_shares: [{
       at_or_below_60: true,
       case_id: selectedCases[0].id,
@@ -5169,6 +5444,7 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
   });
   assert.equal(result.paired.all_pairs.count, 2);
   assert.equal(result.paired.all_pairs.median_token_reduction_pct, 65);
+  assert.equal(result.token_target_result.status, "INELIGIBLE");
   assert.equal(result.paired.by_risk.lean.both_pass_pairs.count, 1);
   assert.equal(result.paired.by_risk.standard.both_pass_pairs.count, 0);
   assert.equal(result.paired.conformant_pass_pairs.count, 1);
@@ -5202,6 +5478,41 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
     allTaskPassing.paired.both_pass_pairs.stable_token_share_at_or_below_60,
     true,
   );
+  assert.equal(allTaskPassing.token_target_result.status, "PASS");
+
+  const aggregateTargetSuite = {
+    ...suite,
+    token_target: {
+      metric: "aggregate-model-token-share",
+      population: "all-matched-pairs",
+      max_share_pct: 60,
+    },
+  };
+  const unevenAggregateRuns = structuredClone(allTaskPassingRuns);
+  unevenAggregateRuns[1].telemetry.tokens.total = 80;
+  unevenAggregateRuns[3].telemetry.tokens.total = 20;
+  const aggregateTarget = makePilotResult(
+    aggregateTargetSuite,
+    {},
+    unevenAggregateRuns,
+    1,
+    selectedCases,
+  );
+  assert.equal(aggregateTarget.paired.both_pass_pairs.max_token_share_pct, 80);
+  assert.equal(
+    aggregateTarget.paired.conformant_pass_pairs.aggregate_model_token_share_pct,
+    100 / 300 * 100,
+  );
+  assert.deepEqual(aggregateTarget.token_target_result, {
+    eligible: true,
+    eligible_pair_count: 2,
+    metric: "aggregate-model-token-share",
+    observed_share_pct: 100 / 300 * 100,
+    population: "all-matched-pairs",
+    required_pair_count: 2,
+    status: "PASS",
+    threshold_pct: 60,
+  });
 
   const roundedBoundaryRuns = structuredClone(allTaskPassingRuns);
   roundedBoundaryRuns[0].telemetry.tokens.total = 10_000;
@@ -5310,10 +5621,12 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
     },
   });
   assert.match(report, /Max Lean token share/u);
+  assert.match(report, /Aggregate Lean token share/u);
+  assert.match(report, /Token target/u);
   assert.match(report, /Run matrix: \*\*complete\*\*/u);
   assert.match(report, new RegExp(`Suite manifest: ${suite.suite_sha256}`, "u"));
   assert.match(report, /Workspace snapshot \| Hidden verifier snapshot \| Fault-family snapshot/u);
-  assert.match(report, /1\/2 \| no/u);
+  assert.match(report, /eligible pairs: 1\/2/u);
   const incompleteReport = renderDevelopmentReport({
     ...incomplete,
     activation_mode: "explicit-entrypoint",
@@ -5329,7 +5642,8 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
     },
   });
   assert.match(incompleteReport, /Run matrix: \*\*incomplete\*\*/u);
-  assert.match(incompleteReport, /1\/1 \| n\/a/u);
+  assert.match(incompleteReport, /Status: \*\*INELIGIBLE\*\*/u);
+  assert.match(incompleteReport, /observed share: n\/a/u);
   const artifactReportResult = structuredClone(result);
   artifactReportResult.runs[0].verifier.artifact_regression = { status: "PASS" };
   const artifactReport = renderDevelopmentReport({

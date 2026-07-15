@@ -2,6 +2,8 @@
 
 Date: 2026-07-14
 
+> Historical target note: this report preserves the 50% token-reduction gate that was in force when the pilot was run. The current project target is an aggregate 40% reduction—about 60% of Superpowers token use—and does not require every individual task pair to meet that ratio.
+
 This report compares actual coding outcomes under a small paired pilot. It is evidence about three tested task shapes, not a winner ranking and not the full LeanPowers release benchmark. Superpowers is both the upstream inspiration for LeanPowers and the reference workflow used here.
 
 ## Result

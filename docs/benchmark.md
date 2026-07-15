@@ -8,7 +8,9 @@ This is a non-inferiority and efficiency study, not a competition narrative. Sup
 
 The repository contains the scenario catalog, result schema, deterministic comparator, and scorer fixtures. A **12-run paired development-effects pilot** has now been executed on three task classes. Both workflows passed 5/6 runs; LeanPowers used 19.8% fewer median model tokens and 9.5% less median wall time. The complete sanitized result is in the [2026-07-14 pilot report](benchmarks/development-effects-pilot-2026-07-14.md).
 
-The pilot is real coding evidence, but it is not the full 11-scenario release benchmark: it lacks the required coverage, repetitions for formal uncertainty, deterministic seeds, feedback-learning scenario, and agent-call metric. It also falls short of the predeclared 50% token and 40% wall-time efficiency targets. Current releases may cite the exact bounded pilot observations, but may not claim general non-inferiority or release-gate success.
+A separate **one-case preregistered frozen held-out check** produced 2/2 executable task passes for both workflows. LeanPowers conformance was 1/2, so the frozen engineering-effect gate failed. Its paired model-token shares were 83.3% and 75.9% of Superpowers, a 79.6% median, so 0/2 pairs met the `<=60%` target. The complete sanitized result is in the [2026-07-14 held-out report](benchmarks/development-effects-heldout-2026-07-14.md).
+
+The pilot and held-out check are real coding evidence, but neither is the full 11-scenario release benchmark. They lack the required coverage, repetitions for formal uncertainty, deterministic seeds, feedback-learning scenario, and full agent-call evidence. The pilot falls short of the current aggregate model-token share and wall-time efficiency targets; the held-out check also fails its separate frozen engineering-effect and pairwise token rules. Current releases may cite these exact bounded observations, but may not claim general non-inferiority or release-gate success.
 
 Files under `evals/fixtures/` explicitly use `"provenance": "simulated"`; they are test data for scorer behavior, not observations from real agent runs, and must not be cited as product results.
 
@@ -27,6 +29,12 @@ node scripts/development-benchmark.mjs run \
 ```
 
 The runner verifies that the Superpowers checkout is clean, uses the official `obra/superpowers` origin, and has `HEAD` exactly at `v6.1.1`. It also requires the LeanPowers checkout to be clean so every report records immutable commit SHAs.
+
+### Frozen held-out check
+
+The separate [held-out suite](../evals/development-effects/heldout-suite.json) froze its task, workflow revisions, counterbalanced order, hidden verifier, semantic fault families, decision rules, and agent read isolation before the first live run. All four executable repairs passed visible and hidden acceptance, mutation gates, artifact checks, and scope checks. The result still fails its preregistered engineering-effect rule because one LeanPowers run missed the frozen first-message conformance format, and it fails the `<=60%` token rule in both pairs. The parser result is retained rather than changed after observing the run. A post-run audit also found that the suite's frozen `standard` label did not resolve the route policy's `strict` treatment of concurrency, so this case is not clean risk-routing evidence; that limitation is likewise retained rather than reinterpreted. This single task cannot establish broad parity; workflow changes informed by it require a newly frozen task for future confirmation.
+
+The next confirmatory matrix is frozen in [confirmatory-suite.json](../evals/development-effects/confirmatory-suite.json) and [its preregistration](benchmarks/development-effects-confirmatory-preregistration-2026-07-15.md). It uses three preregistered task shapes, two counterbalanced repetitions, independent quality gates, and the current aggregate token rule. No result from that matrix is cited until all 12 runs complete against the exact frozen revision and inputs.
 
 The current [Agent Workflow Benchmark target](../evals/awb/leanpowers-target.draft.yaml) has a different role: it checks workflow contracts, routing, and expected behavioral responses. It does not edit disposable repositories or run independent hidden code tests, so it must not be cited as evidence of implementation quality, token efficiency, or development success. The development-effects pilot was added specifically to close that evidence gap.
 
@@ -61,7 +69,7 @@ Pre-register the baseline and candidate commits, non-inferiority margin, efficie
 
 The evaluator must not know which workflow produced an artifact. Record raw transcripts and command output outside the result summary so audits can reproduce each score.
 
-The machine-readable workflow identity is deterministic: the baseline `workflow` must begin with `superpowers-`, the candidate must begin with `leanpowers-`, and their `run_id` values must differ. Benchmark result schema version `2` is the only accepted result format; version `1` predates required learning evidence and is intentionally rejected. The catalog's own `schema_version: 1` is a separate format version.
+The machine-readable workflow identity is deterministic: the baseline `workflow` must begin with `superpowers-`, the candidate must begin with `leanpowers-`, and their `run_id` values must differ. Benchmark result schema version `3` is the only accepted result format; version `2` predates complete aggregate model-token telemetry and is intentionally rejected. The catalog's own `schema_version: 1` and the development-effects suite/result `schema_version: 2` are separate format versions.
 
 ## Scenario coverage
 
@@ -98,7 +106,7 @@ Each run must conform to [schemas/benchmark-result.schema.json](../schemas/bench
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "run_id": "unique-run-id",
   "workflow": "superpowers-6.1.1 or leanpowers-x.y.z",
   "provenance": "live",
@@ -113,13 +121,23 @@ Each run must conform to [schemas/benchmark-result.schema.json](../schemas/bench
     "safety_gate_bypass_count": 0,
     "max_retrieved_lessons": 0
   },
-  "efficiency": {},
+  "efficiency": {
+    "overall": {
+      "total_model_tokens": 1,
+      "token_observations": 1
+    },
+    "standard": {
+      "median_tokens": 1,
+      "median_wall_seconds": 1,
+      "median_agent_calls": 1
+    }
+  },
   "categories": [],
   "hard_failures": []
 }
 ```
 
-Quality records task success, composite score, critical defect escapes, introduced regressions, scope violations, false completion claims, unauthorized actions, and review severity accuracy. Efficiency records standard-task median tokens, wall seconds, and agent calls.
+Quality records task success, composite score, critical defect escapes, introduced regressions, scope violations, false completion claims, unauthorized actions, and review severity accuracy. Efficiency records the total model tokens and number of token observations across all completed cases, plus standard-task median tokens, wall seconds, and agent calls. The positive values above are placeholders; a comparable run's observation count must equal its completed-case count.
 
 `learning_evidence` is required on both runs. It is a closed object for the canonical four-turn scenario. Its related-task numerator and denominator must exactly match the `multi-turn-feedback-learning` category's task-success count; contamination and safety-bypass counts must be non-negative and cannot exceed that denominator; the maximum retrieved lesson count must be non-negative. Missing scenario coverage, missing evidence, invalid bounds, or mismatched category evidence makes the comparison `DIAGNOSTIC_ONLY`.
 
@@ -166,7 +184,7 @@ All gates must pass:
 | Additional critical seeded-defect escapes | `0` |
 | Introduced-regression rate delta | no more than `+2` percentage points |
 | Scope-violation rate delta | no more than `+2` percentage points |
-| Standard-task median token reduction | at least `50%` |
+| Overall model-token share | at most `60%` (`Σ LeanPowers / Σ Superpowers` across all completed cases) |
 | Standard-task median wall-time reduction | at least `40%` |
 | Standard-task median agent-call reduction | at least `60%` |
 | Related-task learning accuracy | improve over paired baseline |
@@ -176,13 +194,13 @@ All gates must pass:
 
 Hard failures dominate aggregate scores. A critical escape, unauthorized high-risk action, known false completion, or equivalent hard failure blocks release. A regressing scenario category must be rerun through strict mode and meet its baseline before release.
 
-The `-3` percentage-point task-success gate is the predeclared non-inferiority margin for this project. The current deterministic comparator treats it as a mechanical point-estimate screen. A formal published non-inferiority claim must additionally report a paired uncertainty interval that remains on the acceptable side of the margin; until that analysis is encoded in the result schema, it is an explicit external reporting requirement and validation gap. Efficiency metrics are separate superiority targets and must not compensate for a quality or safety gate failure.
+The `-3` percentage-point task-success gate is the predeclared non-inferiority margin for this project. The current deterministic comparator treats it as a mechanical point-estimate screen. A formal published non-inferiority claim must additionally report a paired uncertainty interval that remains on the acceptable side of the margin; until that analysis is encoded in the result schema, it is an explicit external reporting requirement and validation gap. Efficiency metrics are separate superiority targets and must not compensate for a quality or safety gate failure. The token target is the ratio of summed LeanPowers model tokens to summed Superpowers model tokens across the complete matched matrix, not a requirement that every individual pair stay below 60%. Quality remains an independent hard gate, while paired medians, maxima, and missing telemetry must still be reported so the aggregate cannot hide where the workflow is expensive.
 
 The comparator executes all four learning gates from each run's validated `learning_evidence`. Candidate related-task accuracy must be strictly greater than baseline, while contamination and safety bypass must both be zero and maximum retrieval must be at most three. A valid comparable live pair that fails any learning gate is `BLOCK`; simulated evidence remains `DIAGNOSTIC_ONLY` regardless of its values.
 
 ## Comparability rules
 
-The comparator returns `DIAGNOSTIC_ONLY` when either run is simulated or incomplete, evaluation is not blind, pairing conditions differ, planned coverage is incomplete, scenario/category coverage does not match, or the paired runs use different `task_success.total` values for any category. Per-category case totals must be identical so a rate cannot improve by silently changing the denominator; per-category passed counts may differ. A diagnostic result may improve the harness but cannot authorize release.
+The comparator returns `DIAGNOSTIC_ONLY` when either run is simulated or incomplete, evaluation is not blind, pairing conditions differ, planned coverage is incomplete, scenario/category coverage does not match, the paired runs use different `task_success.total` values for any category, aggregate token telemetry does not cover every completed case, or the two runs report different token-observation counts. Per-category case totals must be identical so a rate cannot improve by silently changing the denominator; per-category passed counts may differ. Missing aggregate token fields are invalid schema-v3 input and likewise cannot produce a release verdict. A diagnostic result may improve the harness but cannot authorize release.
 
 Strict-risk scenarios prioritize quality. Their efficiency savings may be smaller, but they still contribute to hard-failure and non-inferiority gates.
 

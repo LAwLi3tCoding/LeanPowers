@@ -103,10 +103,10 @@ test("benchmark fixtures satisfy the executable result contract", async () => {
   }
 });
 
-test("benchmark result schema requires closed four-turn learning evidence", async () => {
+test("benchmark result schema v3 requires closed learning and aggregate token evidence", async () => {
   const schema = await benchmarkSchema();
 
-  assert.equal(schema.properties.schema_version.const, 2);
+  assert.equal(schema.properties.schema_version.const, 3);
   assert.ok(schema.required.includes("learning_evidence"));
   assert.deepEqual(schema.properties.learning_evidence, {
     "$ref": "#/$defs/learningEvidence",
@@ -119,6 +119,12 @@ test("benchmark result schema requires closed four-turn learning evidence", asyn
     "safety_gate_bypass_count",
     "max_retrieved_lessons",
   ]);
+  assert.deepEqual(schema.properties.efficiency.required, ["overall", "standard"]);
+  assert.deepEqual(schema.$defs.overallEfficiency.required, [
+    "total_model_tokens",
+    "token_observations",
+  ]);
+  assert.equal(schema.$defs.overallEfficiency.additionalProperties, false);
 });
 
 test("the canonical suite defines the four-turn feedback-learning scenario and gates", async () => {
@@ -126,7 +132,9 @@ test("the canonical suite defines the four-turn feedback-learning scenario and g
   const scenario = catalog.scenario_protocols?.["multi-turn-feedback-learning"];
 
   assert.equal(catalog.schema_version, 1);
-  assert.equal(catalog.result_integrity.schema_version, 2);
+  assert.equal(catalog.result_integrity.schema_version, 3);
+  assert.equal(catalog.release_gates.overall_model_token_share_max, 0.6);
+  assert.equal("standard_tokens_reduction_min" in catalog.release_gates, false);
   assert.ok(catalog.scenario_classes.includes("multi-turn-feedback-learning"));
   assert.deepEqual(scenario?.turns, [
     "plausible-wrong-project-assumption",
@@ -150,8 +158,10 @@ test("all checked-in scorer fixtures are truthful simulated 0.2.0 data with lear
     "critical-escape",
   ]) {
     const run = await fixture(name);
+    assert.equal(run.schema_version, 3, name);
     assert.equal(run.provenance, "simulated", name);
     assert.equal(run.coverage.completed_cases, 110, name);
+    assert.equal(run.efficiency.overall.token_observations, 110, name);
     assert.ok(run.coverage.scenario_classes.includes("multi-turn-feedback-learning"), name);
     assert.ok(run.categories.some((category) => category.name === "multi-turn-feedback-learning"), name);
     if (run.workflow.startsWith("leanpowers-")) {
@@ -160,17 +170,45 @@ test("all checked-in scorer fixtures are truthful simulated 0.2.0 data with lear
   }
 });
 
-test("schema version 2 is the only accepted benchmark result version", () => {
+test("schema version 3 is the only accepted benchmark result version", () => {
   const legacy = structuredClone(passing);
-  legacy.schema_version = 1;
+  legacy.schema_version = 2;
   assert.ok(
-    validateBenchmarkRun(legacy).some((error) => error.includes("schema_version must equal 2")),
+    validateBenchmarkRun(legacy).some((error) => error.includes("schema_version must equal 3")),
   );
 
   const future = structuredClone(passing);
-  future.schema_version = 3;
+  future.schema_version = 4;
   assert.ok(
-    validateBenchmarkRun(future).some((error) => error.includes("schema_version must equal 2")),
+    validateBenchmarkRun(future).some((error) => error.includes("schema_version must equal 3")),
+  );
+});
+
+test("aggregate token telemetry validates totals and observation bounds", () => {
+  const missingOverall = structuredClone(livePassing);
+  delete missingOverall.efficiency.overall;
+  assert.ok(
+    validateBenchmarkRun(missingOverall).some((error) =>
+      error.includes("efficiency.overall must be an object"),
+    ),
+  );
+  assert.equal(compareRuns(liveBaseline, missingOverall).decision, "DIAGNOSTIC_ONLY");
+
+  const invalidTotal = structuredClone(passing);
+  invalidTotal.efficiency.overall.total_model_tokens = 0;
+  assert.ok(
+    validateBenchmarkRun(invalidTotal).some((error) =>
+      error.includes("efficiency.overall.total_model_tokens must be a finite number greater than 0"),
+    ),
+  );
+
+  const tooManyObservations = structuredClone(passing);
+  tooManyObservations.efficiency.overall.token_observations =
+    tooManyObservations.coverage.completed_cases + 1;
+  assert.ok(
+    validateBenchmarkRun(tooManyObservations).some((error) =>
+      error.includes("efficiency.overall.token_observations cannot exceed coverage.completed_cases"),
+    ),
   );
 });
 
@@ -275,8 +313,48 @@ test("a comparable non-inferior and materially leaner run passes", () => {
     { id: "learning_safety_gate_bypass_zero", passed: true },
     { id: "learning_retrieval_cap", passed: true },
   ]);
-  assert.ok(result.efficiency.standard_tokens_reduction >= 0.5);
+  assert.ok(result.efficiency.overall_model_token_share <= 0.6);
+  assert.equal(result.efficiency.baseline_total_model_tokens, 1_100_000);
+  assert.equal(result.efficiency.candidate_total_model_tokens, 600_000);
+  assert.equal(result.efficiency.token_observations, 110);
   assert.deepEqual(result.hard_failures, []);
+});
+
+test("standard median tokens remain diagnostic while aggregate tokens own the release gate", () => {
+  const candidate = structuredClone(livePassing);
+  candidate.efficiency.standard.median_tokens = 9_000;
+
+  const result = compareRuns(liveBaseline, candidate);
+  assert.equal(result.decision, "PASS");
+  assert.deepEqual(
+    result.gates.find(({ id }) => id === "overall_model_token_share"),
+    { id: "overall_model_token_share", passed: true },
+  );
+  assert.equal(result.efficiency.standard_tokens_reduction, 0.1);
+});
+
+test("incomplete or mismatched aggregate token telemetry is diagnostic only", () => {
+  const incomplete = structuredClone(livePassing);
+  incomplete.efficiency.overall.token_observations -= 1;
+  const incompleteResult = compareRuns(liveBaseline, incomplete);
+  assert.equal(incompleteResult.decision, "DIAGNOSTIC_ONLY");
+  assert.ok(
+    incompleteResult.reasons.some((reason) =>
+      reason.includes("model-token telemetry must cover every completed case"),
+    ),
+  );
+
+  const mismatchedBaseline = structuredClone(liveBaseline);
+  const mismatchedCandidate = structuredClone(livePassing);
+  mismatchedBaseline.efficiency.overall.token_observations = 109;
+  mismatchedCandidate.efficiency.overall.token_observations = 108;
+  const mismatchResult = compareRuns(mismatchedBaseline, mismatchedCandidate);
+  assert.equal(mismatchResult.decision, "DIAGNOSTIC_ONLY");
+  assert.ok(
+    mismatchResult.reasons.some((reason) =>
+      reason.includes("model-token observation counts do not match"),
+    ),
+  );
 });
 
 test("missing canonical learning coverage or evidence is diagnostic only", () => {
@@ -419,10 +497,16 @@ test("all non-inferiority boundaries pass exactly and fail beyond the margin", (
   boundary.quality.composite_quality = liveBaseline.quality.composite_quality * 0.95;
   boundary.quality.introduced_regressions.count = 4;
   boundary.quality.scope_violations.count = 3;
-  boundary.efficiency.standard.median_tokens = 5000;
+  boundary.efficiency.overall.total_model_tokens = 660_000;
   boundary.efficiency.standard.median_wall_seconds = 60;
   boundary.efficiency.standard.median_agent_calls = 2;
   assert.equal(compareRuns(liveBaseline, boundary).decision, "PASS");
+
+  const overTokenTarget = structuredClone(boundary);
+  overTokenTarget.efficiency.overall.total_model_tokens = 660_001;
+  const tokenBlocked = compareRuns(liveBaseline, overTokenTarget);
+  assert.equal(tokenBlocked.decision, "BLOCK");
+  assert.ok(tokenBlocked.reasons.some((reason) => reason.includes("exceeds 60.00%")));
 
   boundary.quality.task_success.passed = 96;
   boundary.categories[1].task_success.passed = 4;

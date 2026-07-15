@@ -151,6 +151,25 @@ export async function loadDevelopmentSuite(input) {
   if (suite.activation_mode !== "explicit-entrypoint") {
     errors.push("activation_mode must equal explicit-entrypoint");
   }
+  if (suite.token_target !== undefined) {
+    const target = suite.token_target;
+    if (
+      target === null ||
+      typeof target !== "object" ||
+      Array.isArray(target) ||
+      Object.keys(target).sort().join(",") !==
+        "max_share_pct,metric,population" ||
+      target.metric !== "aggregate-model-token-share" ||
+      target.population !== "all-matched-pairs" ||
+      !Number.isFinite(target.max_share_pct) ||
+      target.max_share_pct <= 0 ||
+      target.max_share_pct > 100
+    ) {
+      errors.push(
+        "token_target must be a closed aggregate-model-token-share target for all-matched-pairs with max_share_pct in (0, 100]",
+      );
+    }
+  }
   for (const workflow of WORKFLOWS) {
     if (typeof suite.workflow_entrypoints?.[workflow] !== "string") {
       errors.push(`workflow_entrypoints must define ${workflow}`);
@@ -412,6 +431,9 @@ export async function loadDevelopmentSuite(input) {
         agent_read_isolation: HELDOUT_AGENT_READ_ISOLATION,
         superpowers_revision: suite.freeze_contract?.superpowers_revision,
         case_snapshots: caseSnapshots,
+        ...(suite.token_target === undefined
+          ? {}
+          : { token_target: suite.token_target }),
       };
       freezeContractVerified =
         /^[a-f0-9]{40}$/u.test(String(
@@ -1572,23 +1594,96 @@ function traceCapsuleStage(
   const discoverObserved = preChangeStage.discover_observed;
   const readObserved = preChangeStage.read_observed;
   const reproduceObserved = preChangeStage.reproduce_observed;
+  const testPatterns = changePolicy?.tests ?? [];
+  const productPatterns = changePolicy?.product ?? [];
+  const isTestPath = (changedPath) =>
+    testPatterns.some((pattern) => matchGlob(changedPath, pattern));
+  const isImplementationPath = (changedPath) =>
+    productPatterns.some((pattern) => matchGlob(changedPath, pattern)) &&
+    !isTestPath(changedPath);
+  const changePaths = ({ event }) => (event.item.changes ?? [])
+    .map((change) => benchmarkObservedPath(change?.path))
+    .filter(Boolean);
+  const buildTestPatchBatch = patchBatches.at(-2) ?? [];
+  const buildCodePatchBatch = patchBatches.at(-1) ?? [];
+  const buildTestPatchPaths = buildTestPatchBatch.flatMap(changePaths);
+  const buildCodePatchPaths = buildCodePatchBatch.flatMap(changePaths);
+  const buildTestPatchObserved =
+    buildTestPatchPaths.length > 0 && buildTestPatchPaths.every(isTestPath);
+  const buildCodePatchObserved = buildCodePatchPaths.some(isImplementationPath);
+  const buildCodePatchPathSet = new Set(buildCodePatchPaths);
+  const redTestPathsPreservedObserved = expectedWorkflow === "build"
+    ? buildTestPatchPaths.length > 0 &&
+      buildTestPatchPaths.every((changedPath) =>
+        !buildCodePatchPathSet.has(changedPath)
+      )
+    : null;
+  const buildTestPatchEndIndex = buildTestPatchBatch.at(-1)?.index ?? -1;
+  const buildCodePatchStartIndex = buildCodePatchBatch[0]?.index ?? -1;
+  const buildRedCommands = expectedWorkflow === "build" &&
+    buildTestPatchEndIndex >= 0 &&
+    buildCodePatchStartIndex > buildTestPatchEndIndex
+    ? taskCommands.filter(({ index }) =>
+        index > buildTestPatchEndIndex && index < buildCodePatchStartIndex
+      )
+    : [];
+  const buildRedObserved = expectedWorkflow === "build"
+    ? buildRedCommands.length === 1 &&
+      isExpectedBuildRed(buildRedCommands[0].event.item)
+    : null;
+  const buildRedCycleRestarts = expectedWorkflow === "build"
+    ? Math.max(0, patchBatches.length - 2)
+    : 0;
+  const priorBuildPatchBatches = expectedWorkflow === "build"
+    ? patchBatches.slice(0, -2)
+    : [];
+  const priorBuildPatchPaths = priorBuildPatchBatches.flatMap((batch) =>
+    batch.flatMap(changePaths)
+  );
+  const priorBuildPatchEndIndex =
+    priorBuildPatchBatches.at(-1)?.at(-1)?.index ?? -1;
+  const buildTestPatchStartIndex = buildTestPatchBatch[0]?.index ?? -1;
+  const buildRedRetryCommands = expectedWorkflow === "build" &&
+    priorBuildPatchEndIndex >= 0 &&
+    buildTestPatchStartIndex > priorBuildPatchEndIndex
+    ? taskCommands.filter(({ index }) =>
+        index > priorBuildPatchEndIndex && index < buildTestPatchStartIndex
+      )
+    : [];
+  const buildRedRetryProtocolObserved = expectedWorkflow === "build"
+    ? buildRedCycleRestarts === 0 ||
+      (buildRedCycleRestarts === 1 &&
+        priorBuildPatchPaths.length > 0 &&
+        priorBuildPatchPaths.every(isTestPath) &&
+        buildRedRetryCommands.length <= 1 &&
+        buildRedRetryCommands.every(({ event }) =>
+          isBuildRedRetryAttempt(event.item)
+        ))
+    : null;
   const qualityPreChangeEvidenceObserved =
     qualityReadObserved &&
     qualityPatchTargetsReadObserved &&
-    (expectedWorkflow !== "debug" || reproduceObserved);
-  const testPatterns = changePolicy?.tests ?? [];
-  const productPatterns = changePolicy?.product ?? [];
+    (expectedWorkflow === "debug" ? reproduceObserved : buildRedObserved);
   const testPatchObserved = patchPaths.some((changedPath) =>
-    testPatterns.some((pattern) => matchGlob(changedPath, pattern))
+    isTestPath(changedPath)
   );
   const implementationPatchObserved = patchPaths.some((changedPath) =>
-    productPatterns.some((pattern) => matchGlob(changedPath, pattern)) &&
-    !testPatterns.some((pattern) => matchGlob(changedPath, pattern))
+    isImplementationPath(changedPath)
   );
   const multiFilePatchObserved =
     patchBatches.length === 1 &&
     implementationPatchObserved &&
     testPatchObserved;
+  const patchProtocolObserved = expectedWorkflow === "build"
+    ? [2, 3].includes(patchBatches.length) &&
+      buildRedObserved &&
+      buildTestPatchObserved &&
+      buildCodePatchObserved &&
+      buildRedRetryProtocolObserved &&
+      redTestPathsPreservedObserved &&
+      implementationPatchObserved &&
+      testPatchObserved
+    : multiFilePatchObserved;
   const qualityPatchObserved = implementationPatchObserved && testPatchObserved;
   const validation = parsePostChangeValidationSequence(
     postChangeCommands,
@@ -1622,7 +1717,7 @@ function traceCapsuleStage(
     preChangeStage.protocol_observed &&
     prePatchClauseTestLedgerObserved &&
     !postPatchClauseTestLedgerObserved &&
-    multiFilePatchObserved &&
+    patchProtocolObserved &&
     validationObserved &&
     (declaredRisk === "strict" || ordinaryStopObserved);
 
@@ -1655,6 +1750,12 @@ function traceCapsuleStage(
     quality_patch_targets_read_observed: qualityPatchTargetsReadObserved,
     quality_pre_change_evidence_observed: qualityPreChangeEvidenceObserved,
     quality_read_observed: qualityReadObserved,
+    build_red_observed: buildRedObserved,
+    build_red_command_calls: buildRedCommands.length,
+    build_red_cycle_restarts: buildRedCycleRestarts,
+    build_red_retry_command_calls: buildRedRetryCommands.length,
+    build_red_retry_protocol_observed: buildRedRetryProtocolObserved,
+    red_test_paths_preserved_observed: redTestPathsPreservedObserved,
     required_read_paths: preChangeStage.required_read_paths,
     validation_metadata_read_observed:
       preChangeStage.validation_metadata_read_observed,
@@ -1685,6 +1786,7 @@ function traceCapsuleStage(
     quality_patch_observed: qualityPatchObserved,
     test_patch_observed: testPatchObserved,
     multi_file_patch_observed: multiFilePatchObserved,
+    patch_protocol_observed: patchProtocolObserved,
     post_change_command_calls: postChangeCommands.length,
     validation_observed: validationObserved,
     quality_validation_observed: qualityValidationObserved,
@@ -1695,6 +1797,7 @@ function traceCapsuleStage(
     capsule_green_path_observed:
       protocolObserved &&
       preChangeStage.retry_calls === 0 &&
+      (expectedWorkflow !== "build" || buildRedCycleRestarts === 0) &&
       postChangeCommands.length === 1 &&
       (expectedWorkflow !== "debug" || validation?.mode === "combined"),
     post_change_reproduction_replayed:
@@ -2143,6 +2246,31 @@ function isStageRetryAuthorized(item) {
   return hasFatalShellDiagnostic(output, {
     allowInlineShellPrefix: /^\s*printf\b/u.test(command),
   });
+}
+
+function isExpectedBuildRed(item) {
+  return (
+    item?.type === "command_execution" &&
+    item?.status === "completed" &&
+    item?.timed_out !== true &&
+    Number.isInteger(item?.exit_code) &&
+    item.exit_code >= 1 &&
+    item.exit_code <= 255 &&
+    String(item?.aggregated_output ?? "").trim().length > 0 &&
+    !hasFatalShellDiagnostic(item?.aggregated_output) &&
+    canonicalTestValidationCommand(item?.command) !== null
+  );
+}
+
+function isBuildRedRetryAttempt(item) {
+  return (
+    canonicalTestValidationCommand(item?.command) !== null &&
+    (item?.status === "failed" ||
+      item?.timed_out === true ||
+      (Number.isInteger(item?.exit_code) &&
+        item.exit_code >= 0 &&
+        item.exit_code <= 255))
+  );
 }
 
 function groupContiguousFileChanges(events, taskChanges) {
@@ -2659,7 +2787,9 @@ function parseValidationEvidence(evidence, parseValidationCommand = canonicalVal
 }
 
 function parsePostChangeValidation(command, expectedWorkflow, reproductionContract) {
-  const direct = canonicalValidationCommand(command);
+  const direct = expectedWorkflow === "build"
+    ? canonicalBuildValidationCommand(command)
+    : canonicalTestValidationCommand(command);
   if (direct !== null) {
     return { command: direct, reproduction_replayed: false };
   }
@@ -2675,7 +2805,7 @@ function parsePostChangeValidation(command, expectedWorkflow, reproductionContra
   if (text === null) return null;
   const prefix = `${reproductionCommand} && `;
   if (!text.startsWith(prefix)) return null;
-  const testCommand = canonicalValidationCommand(text.slice(prefix.length));
+  const testCommand = canonicalTestValidationCommand(text.slice(prefix.length));
   if (
     testCommand === null ||
     text !== `${reproductionCommand} && ${testCommand}`
@@ -2722,7 +2852,7 @@ function parsePostChangeValidationSequence(
   ) {
     return null;
   }
-  const testCommand = canonicalValidationCommand(commands[1].event.item.command);
+  const testCommand = canonicalTestValidationCommand(commands[1].event.item.command);
   if (testCommand === null) return null;
   return {
     command: testCommand,
@@ -2805,6 +2935,42 @@ function canonicalValidationCommand(command) {
     return null;
   }
   return text;
+}
+
+function canonicalTestValidationCommand(command) {
+  const text = canonicalValidationCommand(command);
+  if (text === null) return null;
+  return isTestValidationInvocation(text) ? text : null;
+}
+
+function canonicalBuildValidationCommand(command) {
+  const text = unwrapShellInvocation(command);
+  if (text === null || text.length === 0 || text !== text.trim()) return null;
+  const commands = text.split(" && ");
+  if (
+    commands.length === 0 ||
+    commands.length > 6 ||
+    new Set(commands).size !== commands.length ||
+    commands.some((candidate) => canonicalValidationCommand(candidate) !== candidate) ||
+    !commands.some((candidate) => isTestValidationInvocation(candidate))
+  ) {
+    return null;
+  }
+  return commands.join(" && ");
+}
+
+function isTestValidationInvocation(command) {
+  const script = "test(?::[A-Za-z0-9_.-]+)?";
+  return [
+    new RegExp(`^(?:bun|npm|pnpm|yarn)\\s+(?:run\\s+)?${script}(?:\\s|$)`, "iu"),
+    /^cargo\s+test(?:\s|$)/iu,
+    /^go\s+test(?:\s|$)/iu,
+    /^(?:gradle|\.\/gradlew)\s+test(?:\s|$)/iu,
+    new RegExp(`^make\\s+${script}(?:\\s|$)`, "iu"),
+    /^mvn\s+(?:test|verify)(?:\s|$)/iu,
+    /^node\s+--test(?:\s|$)/iu,
+    /^(?:python3?\s+-m\s+)?pytest(?:\s|$)/iu,
+  ].some((pattern) => pattern.test(command));
 }
 
 function unwrapShellInvocation(command) {
@@ -3348,7 +3514,9 @@ export function evaluateWorkflowConformance(run) {
           reasons.push("route ledger was not emitted before task tools");
         }
         if (!capsule.quality_pre_change_evidence_observed) {
-          reasons.push("ordered pre-change source and reproduction evidence was not observed");
+          reasons.push(run.expected_workflow === "build"
+            ? "ordered pre-product source and failing RED evidence was not observed"
+            : "ordered pre-change source and reproduction evidence was not observed");
         }
         if (!capsule.quality_read_observed) {
           reasons.push("pre-change source READ evidence was not observed");
@@ -3358,6 +3526,11 @@ export function evaluateWorkflowConformance(run) {
         }
         if (run.expected_workflow === "debug" && !capsule.reproduce_observed) {
           reasons.push("pre-edit executable REPRODUCE was not observed");
+        }
+        if (!capsule.patch_protocol_observed) {
+          reasons.push(run.expected_workflow === "build"
+            ? "ordered TEST-PATCH, RED, and CODE-PATCH protocol was not observed"
+            : "contiguous code-and-test PATCH protocol was not observed");
         }
         if (!capsule.quality_validation_observed) {
           reasons.push("supported successful post-edit validation was not observed");
@@ -4706,9 +4879,16 @@ export async function runDevelopmentPilot({
 
 export function renderDevelopmentReport(result) {
   const aggregate = aggregateRuns(result.runs);
-  const paired = aggregatePairedRuns(result.runs, {
+  const paired = result.paired ?? aggregatePairedRuns(result.runs, {
     matrixComplete: result.completion === "complete",
   });
+  const tokenTarget = result.token_target ?? defaultDevelopmentTokenTarget();
+  const tokenTargetResult = result.token_target_result ??
+    assessDevelopmentTokenTarget(
+      tokenTarget,
+      paired,
+      result.completion === "complete",
+    );
   const rows = result.runs.map((run) =>
     [
       run.case_id,
@@ -4802,7 +4982,7 @@ export function renderDevelopmentReport(result) {
         ]
       : []),
     "",
-    `Run matrix: **${result.completion}**. Stable token-target conclusions are unavailable unless the declared matrix is complete.`,
+    `Run matrix: **${result.completion}**. Token-target conclusions are unavailable unless the declared matrix and target population are complete.`,
     "",
     `Runtime: ${result.runtime.codex_version}; model: ${result.runtime.model}; effort: ${result.runtime.effort}.`,
     ...(heldout
@@ -4830,10 +5010,16 @@ export function renderDevelopmentReport(result) {
     "--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:",
     ...summaryRows,
     "",
+    "## Token target",
+    "",
+    `Metric: **${tokenTarget.metric}** across **${tokenTarget.population}**; LeanPowers target: at most **${tokenTarget.max_share_pct}%** of Superpowers model tokens.`,
+    "",
+    `Status: **${tokenTargetResult.status}**; eligible pairs: ${tokenTargetResult.eligible_pair_count}/${tokenTargetResult.required_pair_count}; observed share: ${Number.isFinite(tokenTargetResult.observed_share_pct) ? `${round(tokenTargetResult.observed_share_pct, 1)}%` : "n/a"}.`,
+    "",
     "## Paired reductions",
     "",
-    "Population | Eligible/required pairs | Median model-token reduction | Max Lean token share | Lean ≤60% pairs | Stable ≤60% | Median fresh-token reduction | Median wall reduction | Median tool-call reduction | Median workflow-read reduction",
-    "--- | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---:",
+    "Population | Eligible/required pairs | Aggregate Lean token share | Median model-token reduction | Median Lean token share | Max Lean token share | Lean ≤60% pairs | Median fresh-token reduction | Median wall reduction | Median tool-call reduction | Median workflow-read reduction",
+    "--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:",
     pairedRow(
       "Both Task PASS + Lean quality-bearing conformance + Superpowers activation (primary)",
       paired.conformant_pass_pairs,
@@ -4857,11 +5043,11 @@ export function renderDevelopmentReport(result) {
     "## Interpretation boundary",
     "",
     "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, every case-owned semantic fault family policy to pass, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    `- LeanPowers quality-bearing conformance requires an unambiguous semantic route declaration before any task tool, rejects conflicting declarations, and forbids risk downgrade after an upgrade. Build/debug traces must show each later-edited existing file was successfully read before its own first edit, fixture-owned structured pre-edit reproduction for debug, and supported successful validation after the final edit. Discovery syntax, extra grounded-file reads, implementation/test patch composition, split versus batched reads, validation-manifest reads, Skill/reference reloads, exact command/call budgets, clause-ledger shape, repeated route or ledger presentation, contiguous versus split patch events, one-call versus two-call validation, and later non-mutating tooling remain efficiency or ceremony diagnostics rather than quality gates. Representation-boundary adequacy is measured workflow-neutrally in Task PASS: every pre-registered fault-family member must preserve baseline tests, every candidate counterfactual must complete, and every member must be killed by the candidate test delta. Replay telemetry proves only that the exact reproduction command ran, not that its diagnostic meaning changed. These observable checks are scoped to ${caseScope}, not universal semantic proof. Strict quality additionally requires a current independent PASS review with the complete task and current validation context, plus proof the reviewer did not mutate the workspace; exact Skill invocation, prompt/verdict surface, reviewer count, wait targeting, and cycle choreography remain diagnostics.`,
+    `- LeanPowers quality-bearing conformance requires an unambiguous semantic route declaration before any task tool, rejects conflicting declarations, and forbids risk downgrade after an upgrade. Build/debug traces must show each later-edited existing file was successfully read before its own first edit and supported successful validation after the final edit. Build additionally requires a test-only patch, exactly one nonfatal failing supported test command before product edits, preservation of those RED test paths, and a later product patch; one invalidated test cycle may restart before the final conformant cycle. Debug requires fixture-owned structured pre-edit reproduction and one contiguous code-and-test patch. Discovery syntax, extra grounded-file reads, split versus batched reads, validation-manifest reads, Skill/reference reloads, exact command/call budgets, clause-ledger shape, repeated route or ledger presentation, one-call versus two-call validation, and later non-mutating tooling remain efficiency or ceremony diagnostics rather than quality gates. Representation-boundary adequacy is measured workflow-neutrally in Task PASS: every pre-registered fault-family member must preserve baseline tests, every candidate counterfactual must complete, and every member must be killed by the candidate test delta. Replay telemetry proves only that the exact reproduction command ran, not that its diagnostic meaning changed. These observable checks are scoped to ${caseScope}, not universal semantic proof. Strict quality additionally requires a current independent PASS review with the complete task and current validation context, plus proof the reviewer did not mutate the workspace; exact Skill invocation, prompt/verdict surface, reviewer count, wait targeting, and cycle choreography remain diagnostics.`,
     "- Codex JSONL does not expose raw spawn arguments such as `fork_context`; observable spawn/wait behavior is checked dynamically, while exact argument shape is covered by static workflow tests and remains a runtime telemetry gap.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
-    "- Paired reductions and Lean token shares are computed within each identical case and repetition before aggregation. The stable ≤60% target passes only when model-token telemetry exists for every pair in the population and every Lean/Superpowers share is at most 60%; a median cannot hide an over-target pair. Each other metric shows its own valid sample count. The task-PASS-and-conformant population is primary, so failing faster or skipping workflow gates never counts as an improvement.",
+    `- Paired reductions and Lean token shares are computed within each identical case and repetition. The declared token target uses ${tokenTarget.metric === "aggregate-model-token-share" ? "the ratio of summed LeanPowers tokens to summed Superpowers tokens" : "the maximum paired LeanPowers share"} across ${tokenTarget.population}; every-pair and median shares remain distribution diagnostics rather than substitute quality gates. Complete telemetry and the full target population are required. Failing faster or skipping workflow gates never counts as an improvement.`,
     "- Codex CLI does not expose a deterministic seed, so paired repetitions reduce noise but do not eliminate it.",
     `- The reported cases cover only these scenario classes: ${scenarioScope || "none"}. They do not establish universal non-inferiority.`,
     ...caseSpecificBoundaries,
@@ -4874,12 +5060,11 @@ function pairedRow(label, metrics) {
   return [
     label,
     `${metrics.count}/${metrics.required_pair_count}`,
+    displayPairedMetric(metrics.aggregate_model_token_share_pct, metrics.token_pairs),
     displayPairedMetric(metrics.median_token_reduction_pct, metrics.token_pairs),
+    displayPairedMetric(metrics.median_token_share_pct, metrics.token_pairs),
     displayPairedMetric(metrics.max_token_share_pct, metrics.token_pairs),
     `${metrics.token_share_at_or_below_60_count}/${metrics.required_pair_count}`,
-    metrics.stable_token_share_at_or_below_60 === null
-      ? "n/a"
-      : metrics.stable_token_share_at_or_below_60 ? "yes" : "no",
     displayPairedMetric(metrics.median_fresh_token_reduction_pct, metrics.fresh_token_pairs),
     displayPairedMetric(metrics.median_wall_reduction_pct, metrics.wall_pairs),
     displayPairedMetric(metrics.median_tool_call_reduction_pct, metrics.tool_call_pairs),
@@ -5116,6 +5301,8 @@ export function makePilotResult(suite, runtime, runs, repetitions, selectedCases
   const matrixComplete = /^[a-f0-9]{64}$/u.test(String(suite.suite_sha256 ?? "")) &&
     hasCompleteRunMatrix(runs, selectedCases, repetitions) &&
     heldoutContractVerified;
+  const paired = aggregatePairedRuns(runs, { matrixComplete });
+  const tokenTarget = suite.token_target ?? defaultDevelopmentTokenTarget();
   return {
     schema_version: 2,
     suite_id: suite.suite_id,
@@ -5136,7 +5323,47 @@ export function makePilotResult(suite, runtime, runs, repetitions, selectedCases
     case_snapshots: caseSnapshots,
     runs,
     aggregate: aggregateRuns(runs),
-    paired: aggregatePairedRuns(runs, { matrixComplete }),
+    paired,
+    token_target: tokenTarget,
+    token_target_result: assessDevelopmentTokenTarget(
+      tokenTarget,
+      paired,
+      matrixComplete,
+    ),
+  };
+}
+
+function defaultDevelopmentTokenTarget() {
+  return {
+    metric: "every-pair-model-token-share",
+    population: "both-pass-pairs",
+    max_share_pct: 60,
+  };
+}
+
+function assessDevelopmentTokenTarget(target, paired, matrixComplete) {
+  const metrics = target.population === "all-matched-pairs"
+    ? paired.all_pairs
+    : paired.both_pass_pairs;
+  const completePopulation = matrixComplete &&
+    metrics.required_pair_count > 0 &&
+    metrics.count === metrics.required_pair_count &&
+    metrics.token_pairs === metrics.required_pair_count;
+  const observedShare = target.metric === "aggregate-model-token-share"
+    ? metrics.aggregate_model_token_share_pct
+    : metrics.max_token_share_pct;
+  const eligible = completePopulation && Number.isFinite(observedShare);
+  return {
+    eligible,
+    eligible_pair_count: metrics.count,
+    metric: target.metric,
+    observed_share_pct: eligible ? observedShare : null,
+    population: target.population,
+    required_pair_count: metrics.required_pair_count,
+    status: !eligible
+      ? "INELIGIBLE"
+      : observedShare <= target.max_share_pct ? "PASS" : "FAIL",
+    threshold_pct: target.max_share_pct,
   };
 }
 
@@ -5294,6 +5521,25 @@ function summarizePairs(
       share_pct: sharePct,
     }];
   });
+  const modelTokenTotals = pairs.reduce((totals, pair) => {
+    const baseline = pair["superpowers-6.1.1"].telemetry.tokens?.total;
+    const candidate = pair["leanpowers-0.2.0"].telemetry.tokens?.total;
+    if (
+      !Number.isFinite(baseline) ||
+      !Number.isFinite(candidate) ||
+      baseline <= 0 ||
+      candidate <= 0
+    ) {
+      return totals;
+    }
+    totals.baseline += baseline;
+    totals.candidate += candidate;
+    totals.count += 1;
+    return totals;
+  }, { baseline: 0, candidate: 0, count: 0 });
+  const aggregateModelTokenShare = modelTokenTotals.count === 0
+    ? null
+    : modelTokenTotals.candidate / modelTokenTotals.baseline * 100;
   const fresh = reduction((run) => run.telemetry.tokens?.uncached_plus_output);
   const wall = reduction((run) => run.wall_seconds);
   const tools = reduction((run) => run.telemetry.tool_calls);
@@ -5302,6 +5548,14 @@ function summarizePairs(
     count: pairs.length,
     required_pair_count: requiredPairCount,
     token_pairs: token.length,
+    aggregate_model_tokens: {
+      baseline: modelTokenTotals.count === 0 ? null : modelTokenTotals.baseline,
+      candidate: modelTokenTotals.count === 0 ? null : modelTokenTotals.candidate,
+    },
+    aggregate_model_token_share_pct: aggregateModelTokenShare,
+    aggregate_model_token_reduction_pct: aggregateModelTokenShare === null
+      ? null
+      : 100 - aggregateModelTokenShare,
     model_token_shares: modelTokenShares,
     median_token_share_pct: median(
       modelTokenShares.map(({ share_pct }) => share_pct),

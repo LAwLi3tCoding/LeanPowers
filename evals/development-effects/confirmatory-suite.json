@@ -1,0 +1,308 @@
+{
+  "schema_version": 2,
+  "suite_id": "development-effects-confirmatory-2026-07-15",
+  "evidence_level": "paired-development-heldout",
+  "freeze_contract": {
+    "status": "frozen-before-live-run",
+    "model_default": "gpt-5.3-codex-spark",
+    "effort": "low",
+    "repetitions": 2,
+    "workflow_order": [
+      ["superpowers-6.1.1", "leanpowers-0.2.0"],
+      ["leanpowers-0.2.0", "superpowers-6.1.1"]
+    ],
+    "agent_read_isolation": "codex-minimal-workspace-plugin-toolchain-read-v1",
+    "superpowers_revision": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+    "case_snapshots": {
+      "integer-range-labels": {
+        "mutants_sha256": "6df4b9d8b747037fd129b6c3c4ceca5e63f3a162692c0d97c50dee03032e2f87",
+        "verifier_sha256": "3635f87a75e15b605b4bbedb737f4d12ef8615ff31e532bb302ab746084fee03",
+        "workspace_sha256": "1db0e45fb08791c590bfa0e007c90004ad9d2f7f6490d3c456a3df15ecd9bcff"
+      },
+      "layered-build-options": {
+        "mutants_sha256": "a3ef7d1c138108667abcb5e0416b37b998bca5639bcb17b542dd3a4a4dd39f07",
+        "verifier_sha256": "f21ae4ded8eabd940fd31d90098ee3cae8fa44b7fc92c9c95eb862f36b1a07ae",
+        "workspace_sha256": "73e38bf7c1bb94d6aafbd75579243ee602331f018a54d30841d61191c67f3503"
+      },
+      "chunked-ndjson-decoder": {
+        "mutants_sha256": "2f78054f5c1c3f04cd6f84ecfbb1bfcbd54fbb6c2a87a7a30b72df29e850984c",
+        "verifier_sha256": "4070b2e4e540c19cb6c24c3f0d10308652ee2b55ba4f25da7447f6dff6374f70",
+        "workspace_sha256": "cd1e071d38c98fc0f8861c4c8446f33ef09ccab2bb2e5ff04acf49d68df351b2"
+      }
+    },
+    "token_target": {
+      "metric": "aggregate-model-token-share",
+      "population": "all-matched-pairs",
+      "max_share_pct": 60
+    }
+  },
+  "runtime": "codex-cli",
+  "model_default": "gpt-5.3-codex-spark",
+  "effort": "low",
+  "repetitions": 2,
+  "activation_mode": "explicit-entrypoint",
+  "token_target": {
+    "metric": "aggregate-model-token-share",
+    "population": "all-matched-pairs",
+    "max_share_pct": 60
+  },
+  "workflow_entrypoints": {
+    "superpowers-6.1.1": "$superpowers:using-superpowers",
+    "leanpowers-0.2.0": "$leanpowers:route"
+  },
+  "workflow_order": [
+    ["superpowers-6.1.1", "leanpowers-0.2.0"],
+    ["leanpowers-0.2.0", "superpowers-6.1.1"]
+  ],
+  "cases": [
+    {
+      "id": "integer-range-labels",
+      "scenario_class": "small-explicit-feature",
+      "risk_level": "standard",
+      "expected_workflow": "build",
+      "workspace": "cases/integer-range-labels/workspace",
+      "verifier_files": [
+        "cases/integer-range-labels/verifier/integer-ranges.hidden.mjs"
+      ],
+      "task": "Extend formatIntegerRanges(values) so it returns a canonical label for an array of non-negative safe integers. Sort values numerically in ascending order, remove duplicates, compress every maximal consecutive run of two or more values to start-end, and leave single-value runs as the number itself. Join labels with commas and keep returning an empty string for an empty array. For example, [5, 2, 3, 3, 8] becomes \"2-3,5,8\". Preserve the existing TypeError behavior for non-arrays or invalid elements, do not mutate the caller's array, preserve the public exports, and keep formatIntegerRanges as a direct named export. Add focused regression tests that independently prove unsorted input is normalized without mutation, duplicates are removed, an exactly two-value run is compacted, and values separated by one missing integer are not merged. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {
+          "id": "ascending-normalization",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "formatIntegerRanges",
+              "target": "src/integer-ranges.mjs",
+              "source": "cases/integer-range-labels/verifier/mutants/integer-ranges.preserve-order.mjs"
+            }
+          ]
+        },
+        {
+          "id": "duplicate-elision",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "formatIntegerRanges",
+              "target": "src/integer-ranges.mjs",
+              "source": "cases/integer-range-labels/verifier/mutants/integer-ranges.keep-duplicates.mjs"
+            }
+          ]
+        },
+        {
+          "id": "two-value-run-compaction",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "formatIntegerRanges",
+              "target": "src/integer-ranges.mjs",
+              "source": "cases/integer-range-labels/verifier/mutants/integer-ranges.leave-pairs-expanded.mjs"
+            }
+          ]
+        },
+        {
+          "id": "gap-boundary",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "formatIntegerRanges",
+              "target": "src/integer-ranges.mjs",
+              "source": "cases/integer-range-labels/verifier/mutants/integer-ranges.bridge-single-gap.mjs"
+            }
+          ]
+        },
+        {
+          "id": "input-immutability",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "formatIntegerRanges",
+              "target": "src/integer-ranges.mjs",
+              "source": "cases/integer-range-labels/verifier/mutants/integer-ranges.mutate-input.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "layered-build-options",
+      "scenario_class": "configuration-or-build-change",
+      "risk_level": "standard",
+      "expected_workflow": "build",
+      "workspace": "cases/layered-build-options/workspace",
+      "verifier_files": [
+        "cases/layered-build-options/verifier/build-options.hidden.mjs"
+      ],
+      "task": "Extend resolveBuildOptions(defaults, projectOptions) with an optional third cliOptions layer while preserving the existing two-argument calling form and its behavior for declared options with defined override values. Resolution precedence is CLI options over project options over defaults. Only own enumerable string option names declared by defaults are valid. An override value of undefined means that layer has no value for the option; false, 0, an empty string, and null are explicit values and must be preserved. An own unknown option in either override layer must throw TypeError, while inherited properties must be ignored. Return a fresh result without mutating any input, preserve all public exports, and keep resolveBuildOptions as a direct named export. Add focused compatibility, precedence, value-boundary, schema-boundary, and immutability tests. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {
+          "id": "layer-precedence",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "resolveBuildOptions",
+              "target": "src/build-options.mjs",
+              "source": "cases/layered-build-options/verifier/mutants/build-options.project-wins.mjs"
+            }
+          ]
+        },
+        {
+          "id": "override-presence",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "resolveBuildOptions",
+              "target": "src/build-options.mjs",
+              "source": "cases/layered-build-options/verifier/mutants/build-options.truthy-only.mjs"
+            },
+            {
+              "kind": "replace-callable-export",
+              "export_name": "resolveBuildOptions",
+              "target": "src/build-options.mjs",
+              "source": "cases/layered-build-options/verifier/mutants/build-options.undefined-wins.mjs"
+            }
+          ]
+        },
+        {
+          "id": "schema-boundary",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "resolveBuildOptions",
+              "target": "src/build-options.mjs",
+              "source": "cases/layered-build-options/verifier/mutants/build-options.unknown-pass-through.mjs"
+            },
+            {
+              "kind": "replace-callable-export",
+              "export_name": "resolveBuildOptions",
+              "target": "src/build-options.mjs",
+              "source": "cases/layered-build-options/verifier/mutants/build-options.inherited-options.mjs"
+            }
+          ]
+        },
+        {
+          "id": "input-immutability",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "resolveBuildOptions",
+              "target": "src/build-options.mjs",
+              "source": "cases/layered-build-options/verifier/mutants/build-options.mutate-defaults.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "chunked-ndjson-decoder",
+      "scenario_class": "unknown-cause-defect",
+      "risk_level": "standard",
+      "expected_workflow": "debug",
+      "workspace": "cases/chunked-ndjson-decoder/workspace",
+      "verifier_files": [
+        "cases/chunked-ndjson-decoder/verifier/ndjson-decoder.hidden.mjs"
+      ],
+      "task": "Users report that the NDJSON decoder throws or loses records when one JSON record is split across input chunks. Before editing, run the included node repro/chunked-ndjson.mjs and use its structured output to identify the first incorrect transition. Fix the root cause so chunk boundaries do not change decoding: support LF and CRLF record boundaries, emit multiple complete records synchronously in source order, ignore blank lines, and flush one final valid unterminated record from end(). A malformed complete record must still throw SyntaxError synchronously. Preserve the createNdjsonDecoder callback API and public exports, and keep createNdjsonDecoder as a direct named export. Add focused regressions for split records, multi-record ordering and timing, blank/CRLF lines, final unterminated input, and malformed complete input. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "reproduction_contract": {
+        "command": "node repro/chunked-ndjson.mjs",
+        "expected_output": {
+          "scenario": "chunked-ndjson-decoder",
+          "observations": [
+            { "write": 1, "status": "threw", "error": "SyntaxError" },
+            { "write": 2, "status": "threw", "error": "SyntaxError" }
+          ],
+          "records": [],
+          "first_incorrect_transition": {
+            "stage": "partial-chunk-write",
+            "parsed_before_record_boundary": true
+          }
+        }
+      },
+      "artifact_regression_gates": [
+        {
+          "id": "fragment-buffering",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createNdjsonDecoder",
+              "target": "src/ndjson-decoder.mjs",
+              "source": "cases/chunked-ndjson-decoder/verifier/mutants/ndjson-decoder.eager-fragment.mjs"
+            },
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createNdjsonDecoder",
+              "target": "src/ndjson-decoder.mjs",
+              "source": "cases/chunked-ndjson-decoder/verifier/mutants/ndjson-decoder.discard-fragment.mjs"
+            }
+          ]
+        },
+        {
+          "id": "batch-completeness-order",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createNdjsonDecoder",
+              "target": "src/ndjson-decoder.mjs",
+              "source": "cases/chunked-ndjson-decoder/verifier/mutants/ndjson-decoder.first-record-only.mjs"
+            },
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createNdjsonDecoder",
+              "target": "src/ndjson-decoder.mjs",
+              "source": "cases/chunked-ndjson-decoder/verifier/mutants/ndjson-decoder.reverse-batch.mjs"
+            }
+          ]
+        },
+        {
+          "id": "synchronous-delivery",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createNdjsonDecoder",
+              "target": "src/ndjson-decoder.mjs",
+              "source": "cases/chunked-ndjson-decoder/verifier/mutants/ndjson-decoder.defer-until-end.mjs"
+            }
+          ]
+        },
+        {
+          "id": "final-record-flush",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createNdjsonDecoder",
+              "target": "src/ndjson-decoder.mjs",
+              "source": "cases/chunked-ndjson-decoder/verifier/mutants/ndjson-decoder.drop-final-record.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    }
+  ]
+}

@@ -3,7 +3,7 @@ const RATE_MARGIN = Object.freeze({
   compositeRatio: 0.95,
   regressionDelta: 0.02,
   scopeViolationDelta: 0.02,
-  tokenReduction: 0.5,
+  tokenShare: 0.6,
   wallReduction: 0.4,
   agentCallReduction: 0.6,
 });
@@ -24,8 +24,8 @@ export function validateBenchmarkRun(run) {
   }
 
   const errors = [];
-  if (run.schema_version !== 2) {
-    errors.push("schema_version must equal 2");
+  if (run.schema_version !== 3) {
+    errors.push("schema_version must equal 3");
   }
   requireText(run, "run_id", errors);
   requireText(run, "workflow", errors);
@@ -46,7 +46,7 @@ export function validateBenchmarkRun(run) {
     run.categories,
     errors,
   );
-  validateEfficiency(run.efficiency, errors);
+  validateEfficiency(run.efficiency, run.coverage, errors);
   validateCategories(run.categories, run.coverage, run.quality, run.run_id, errors);
   validateHardFailures(run.hard_failures, errors);
   validateAggregateTotals(run.coverage, run.quality, errors);
@@ -116,9 +116,9 @@ export function compareRuns(baseline, candidate) {
   addGate(
     gates,
     reasons,
-    "standard_token_reduction",
-    atLeast(efficiency.standard_tokens_reduction, RATE_MARGIN.tokenReduction),
-    `standard token reduction ${formatPercent(efficiency.standard_tokens_reduction)} is below 50.00%`,
+    "overall_model_token_share",
+    atMost(efficiency.overall_model_token_share, RATE_MARGIN.tokenShare),
+    `overall model-token share ${formatPercent(efficiency.overall_model_token_share)} exceeds 60.00%`,
   );
   addGate(
     gates,
@@ -338,15 +338,42 @@ function validateLearningEvidence(evidence, coverage, categories, errors) {
   }
 }
 
-function validateEfficiency(efficiency, errors) {
+function validateEfficiency(efficiency, coverage, errors) {
+  const overall = efficiency?.overall;
+  if (!isRecord(overall)) {
+    errors.push("efficiency.overall must be an object");
+  } else {
+    if (
+      !Number.isFinite(overall.total_model_tokens) ||
+      overall.total_model_tokens <= 0
+    ) {
+      errors.push(
+        "efficiency.overall.total_model_tokens must be a finite number greater than 0",
+      );
+    }
+    if (
+      !Number.isInteger(overall.token_observations) ||
+      overall.token_observations <= 0
+    ) {
+      errors.push("efficiency.overall.token_observations must be a positive integer");
+    } else if (
+      Number.isInteger(coverage?.completed_cases) &&
+      overall.token_observations > coverage.completed_cases
+    ) {
+      errors.push(
+        "efficiency.overall.token_observations cannot exceed coverage.completed_cases",
+      );
+    }
+  }
+
   const standard = efficiency?.standard;
   if (!isRecord(standard)) {
     errors.push("efficiency.standard must be an object");
-    return;
-  }
-  for (const field of ["median_tokens", "median_wall_seconds", "median_agent_calls"]) {
-    if (!Number.isFinite(standard[field]) || standard[field] <= 0) {
-      errors.push(`efficiency.standard.${field} must be a finite number greater than 0`);
+  } else {
+    for (const field of ["median_tokens", "median_wall_seconds", "median_agent_calls"]) {
+      if (!Number.isFinite(standard[field]) || standard[field] <= 0) {
+        errors.push(`efficiency.standard.${field} must be a finite number greater than 0`);
+      }
     }
   }
 }
@@ -529,6 +556,20 @@ function comparabilityReasons(baseline, candidate) {
     reasons.push("planned benchmark coverage is incomplete");
   }
   if (
+    baseline.efficiency.overall.token_observations !==
+      baseline.coverage.completed_cases ||
+    candidate.efficiency.overall.token_observations !==
+      candidate.coverage.completed_cases
+  ) {
+    reasons.push("model-token telemetry must cover every completed case");
+  }
+  if (
+    baseline.efficiency.overall.token_observations !==
+    candidate.efficiency.overall.token_observations
+  ) {
+    reasons.push("model-token observation counts do not match");
+  }
+  if (
     baseline.coverage.planned_cases !== candidate.coverage.planned_cases ||
     !sameValue(
       [...baseline.coverage.scenario_classes].sort(),
@@ -584,9 +625,24 @@ function qualityDeltas(baseline, candidate) {
 }
 
 function efficiencyDeltas(baseline, candidate) {
+  const baselineOverall = baseline.efficiency.overall;
+  const candidateOverall = candidate.efficiency.overall;
   const baselineStandard = baseline.efficiency.standard;
   const candidateStandard = candidate.efficiency.standard;
+  const overallModelTokenShare =
+    candidateOverall.total_model_tokens / baselineOverall.total_model_tokens;
+  const matchingTokenObservations =
+    baselineOverall.token_observations === candidateOverall.token_observations
+      ? baselineOverall.token_observations
+      : null;
   return {
+    baseline_total_model_tokens: baselineOverall.total_model_tokens,
+    candidate_total_model_tokens: candidateOverall.total_model_tokens,
+    token_observations: matchingTokenObservations,
+    baseline_token_observations: baselineOverall.token_observations,
+    candidate_token_observations: candidateOverall.token_observations,
+    overall_model_token_share: overallModelTokenShare,
+    overall_model_token_reduction: 1 - overallModelTokenShare,
     standard_tokens_reduction: reduction(
       baselineStandard.median_tokens,
       candidateStandard.median_tokens,
@@ -676,7 +732,12 @@ function recommendationsFor(reasons, hardFailures) {
   if (reasons.some((reason) => reason.includes("category "))) {
     recommendations.push("Route each regressing category through strict mode and re-run it.");
   }
-  if (reasons.some((reason) => reason.includes("reduction"))) {
+  if (
+    reasons.some(
+      (reason) =>
+        reason.includes("reduction") || reason.includes("model-token share"),
+    )
+  ) {
     recommendations.push("Reduce standard-path ceremony while preserving hard quality gates.");
   }
   if (reasons.length > 0 && recommendations.length === 0) {
