@@ -17,8 +17,8 @@ Start when goal, declared scope, acceptance evidence, and constraints are execut
 
 ## Direct-entry slice loop
 
-1. Inspect affected implementation and tests. Read every edit target before editing, extract literal `must`, `only`, `exact`, `preserve`, and `reject` boundaries, and preserve unrelated changes.
-2. Choose the smallest useful slice. For behavior, patch focused tests first and run them before product code. Meaningful RED proves missing behavior and freezes that regression assertion. Invalid test design restarts TEST-PATCH→RED against the pre-behavior baseline; never weaken an assertion to fit implementation.
+1. Inspect affected implementation and tests. Read every edit target before editing, extract literal `must`, `only`, `exact`, `preserve`, and `reject` boundaries, and preserve unrelated changes. Before patching, keep a terse in-context `Clause→test ledger:` mapping each distinct boundary to one positive or smallest distinguishing negative check; add one nearby-mutation counterexample for representation or side-effect risk.
+2. Choose the smallest useful slice. For behavior, patch focused tests first; product files stay locked until that focused test shows meaningful RED from the new assertion and missing behavior, not syntax, setup, or unrelated failure. RED freezes that regression assertion. Invalid test design restarts TEST-PATCH→RED against the pre-behavior baseline; never weaken an assertion to fit implementation.
 3. Patch product only after RED. Make boundaries observable: getters/counters prove no-access; snapshots and nested identities prove immutability; post-guard sentinels prove short-circuiting; one-property or one-element counterexamples prove exact validation boundaries.
 4. After the final edit, run current regression evidence and each applicable affected integration, lint, typecheck, static, package, build, or full-suite check. Inspect results. A failure or validation gap blocks `complete`.
 5. Unknown cause transitions to `debug`; otherwise repair in scope. First green freezes the completed acceptance set. A material omission discovered before review starts a new incomplete cycle. File edits invalidate evidence; read-only reporting does not.
@@ -28,7 +28,7 @@ Configuration or generated output uses a baseline or precheck. Failing evidence 
 
 ## Strict direct entry
 
-After green validation, strict direct entry loads the [subagent policy](../../references/subagent-policy.md) and runs its independent review in the same turn. Reviewer `changes_required` reopens repair, revalidation, then fresh review. Routed strict already continues under route; neither path outputs a user transition.
+After green validation, strict direct entry loads the [subagent policy](../../references/subagent-policy.md), starts one fresh independent read-only reviewer with the exact task, ledger, changed paths, and current validation, then waits in the same turn for completed Review YAML and requires `pass`. Reviewer `changes_required` reopens repair, revalidation, then fresh review. Routed strict already continues under route; neither path outputs a user transition.
 
 ## Output
 

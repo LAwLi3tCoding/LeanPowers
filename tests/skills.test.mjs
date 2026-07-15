@@ -83,20 +83,24 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
   assert.match(body, /alone on line 1/i);
   assert.match(body, /BUILD[\s\S]{0,120}DISCOVER→READ→TEST-PATCH→RED→CODE-PATCH→VALIDATE/i);
   assert.match(body, /DEBUG[\s\S]{0,160}DISCOVER→READ\+REPRODUCE\/TRACE→PATCH→VALIDATE/i);
-  assert.match(body, /READ every edit target[\s\S]{0,100}before edit/i);
-  assert.match(body, /BUILD behavior change[\s\S]{0,160}tests first/i);
+  assert.match(body, /READ every later-edited existing target[\s\S]{0,180}Before PATCH/i);
+  assert.match(body, /Clause→test ledger/i);
+  assert.match(body, /must\|only\|exact\|preserve\|reject/i);
+  assert.match(body, /Counterexample:[\s\S]{0,120}nearby mutation[\s\S]{0,80}expected boundary/i);
+  assert.match(body, /BUILD[\s\S]{0,160}Behavior uses tests first/i);
   assert.match(body, /meaningful RED/i);
-  assert.match(body, /product patch[\s\S]{0,100}after[\s\S]{0,100}RED/i);
-  assert.match(body, /current validation[\s\S]{0,120}final file edit/i);
-  assert.match(body, /DEBUG[\s\S]{0,180}before edit[\s\S]{0,180}root cause/i);
+  assert.match(body, /product files stay locked[\s\S]{0,160}meaningful RED/i);
+  assert.match(body, /meaningful RED:[\s\S]{0,140}missing behavior[\s\S]{0,100}not syntax, setup, or unrelated failure/i);
+  assert.match(body, /After the final edit[\s\S]{0,180}validation/i);
+  assert.match(body, /DEBUG[\s\S]{0,180}root cause before editing/i);
   assert.match(body, /regression[\s\S]{0,100}product repair/i);
-  assert.match(body, /applicable full validation[\s\S]{0,140}replay[\s\S]{0,80}reproduction/i);
+  assert.match(body, /Validate, then replay the exact reproduction/i);
   assert.match(body, /getter|counter/i);
   assert.match(body, /no-access/i);
   assert.match(body, /immutability/i);
   assert.match(body, /short-circuit/i);
   assert.match(body, /one-property|one-element/i);
-  assert.match(body, /exact validation boundar/i);
+  assert.match(body, /exact(?:-| validation )boundar/i);
   assert.match(body, /Codex native `apply_patch`[\s\S]{0,80}Claude `Edit`\/`Write`/i);
   assert.doesNotMatch(body, /One call\/stage/i);
   assert.doesNotMatch(body, /Codex joins `rg --files`|tail -n \+1/i);
@@ -162,7 +166,7 @@ test("direct workflow entry loads one compact runtime contract at most once", as
   const route = await readFile(path.join(skillsRoot, "route", "SKILL.md"), "utf8");
   assert.match(
     route,
-    /STRICT only[\s\S]{0,120}\[subagent policy\]\(\.\.\/\.\.\/references\/subagent-policy\.md\)[\s\S]{0,160}Lean\/standard never read it/i,
+    /Routed strict loads only the \[subagent policy\]\(\.\.\/\.\.\/references\/subagent-policy\.md\) after green[\s\S]{0,120}Lean\/standard never read it/i,
   );
   assert.equal(
     [...route.matchAll(/\.\.\/\.\.\/references\//giu)].length,
@@ -187,8 +191,8 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(debug, /lean or standard[\s\S]{0,180}next: null/i);
   assert.doesNotMatch(build, /next:\s*review/i);
   assert.doesNotMatch(debug, /next:\s*review/i);
-  assert.match(build, /strict direct entry[\s\S]{0,180}independent review[\s\S]{0,120}same turn/i);
-  assert.match(debug, /strict direct entry[\s\S]{0,180}independent review[\s\S]{0,120}same turn/i);
+  assert.match(build, /strict direct entry[\s\S]{0,220}independent read-only reviewer[\s\S]{0,180}same turn[\s\S]{0,120}Review YAML[\s\S]{0,80}`pass`/i);
+  assert.match(debug, /strict direct entry[\s\S]{0,220}independent read-only reviewer[\s\S]{0,180}same turn[\s\S]{0,120}Review YAML[\s\S]{0,80}`pass`/i);
   assert.match(verify, /independent_review: pass \| missing \| not_required/i);
   assert.match(build, /affected integration[\s\S]{0,120}full-suite/i);
   assert.match(build, /validation gap blocks `complete`/i);
@@ -207,26 +211,29 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /alone on line 1/i);
   assert.match(route, /never prefix or repeat it/i);
   assert.match(route, /If evidence raises risk, emit `leanpowers:risk \| risk=strict`; never downgrade/i);
-  assert.match(route, /Routed entry owns workflow order/i);
+  assert.match(route, /OWNER capsule[\s\S]{0,140}route invocation owns order through completion/i);
+  assert.ok(
+    route.indexOf("OWNER capsule") < route.indexOf("Choose the lowest-safe owner"),
+    "owner capsule must precede routing and risk detail",
+  );
   assert.match(build, /Routed entry owns workflow order/i);
   assert.match(debug, /Routed entry owns workflow order/i);
   assert.match(build, /Direct-entry slice loop/i);
   assert.match(debug, /Direct-entry root-cause loop/i);
   assert.match(route, /Destructive\/irreversible\/credential-gated\/production action requires prior explicit authorization/i);
-  assert.match(route, /BUILD DISCOVER→READ→TEST-PATCH→RED→CODE-PATCH→VALIDATE/i);
-  assert.match(route, /DEBUG DISCOVER→READ\+REPRODUCE\/TRACE→PATCH→VALIDATE/i);
-  assert.match(route, /READ every edit target[\s\S]{0,100}before edit/i);
-  assert.match(route, /tests first[\s\S]{0,180}meaningful RED[\s\S]{0,180}product patch/i);
-  assert.match(route, /current validation[\s\S]{0,120}final file edit/i);
+  assert.match(route, /BUILD(?: preserves)? DISCOVER→READ→TEST-PATCH→RED→CODE-PATCH→VALIDATE/i);
+  assert.match(route, /DEBUG(?: preserves)? DISCOVER→READ\+REPRODUCE\/TRACE→PATCH→VALIDATE/i);
+  assert.match(route, /READ every later-edited existing target[\s\S]{0,180}Before PATCH/i);
+  assert.match(route, /tests first[\s\S]{0,180}product files stay locked[\s\S]{0,180}meaningful RED/i);
+  assert.match(route, /After the final edit[\s\S]{0,180}validation/i);
   assert.match(route, /first wrong transition[\s\S]{0,100}root cause[\s\S]{0,160}before edit/i);
   assert.match(route, /regression[\s\S]{0,100}product repair/i);
-  assert.match(route, /applicable full validation[\s\S]{0,140}replay[\s\S]{0,80}reproduction/i);
+  assert.match(route, /Validate, then replay the exact reproduction/i);
   assert.match(route, /structured resolved output[\s\S]{0,120}separate final command/i);
-  assert.match(route, /combined validation\+reproduction[\s\S]{0,120}acceptable only/i);
-  assert.match(route, /successful final validation[\s\S]{0,100}no later file edit/i);
-  assert.match(route, /read-only reporting[\s\S]{0,80}allowed/i);
+  assert.match(route, /After the final edit[\s\S]{0,220}validation[\s\S]{0,220}File edits invalidate evidence/i);
+  assert.match(route, /read-only reporting[\s\S]{0,80}does not/i);
   assert.match(route, /Synchronous reentrancy alone is not concurrency/i);
-  assert.match(route, /Routed strict[\s\S]{0,140}green validation[\s\S]{0,140}immediately continue[\s\S]{0,140}independent review/i);
+  assert.match(route, /STRICT after final green[\s\S]{0,120}fresh independent read-only reviewer[\s\S]{0,180}wait[\s\S]{0,100}PASS/i);
   assert.doesNotMatch(route, /next:\s*review|handoff/i);
   assert.match(route, /Lean\/standard never read it/i);
   route = `${route}\n${strictPolicy}`;
@@ -289,23 +296,23 @@ test("runtime recovery freezes accepted evidence without hiding new omissions", 
   for (const source of [route, build]) {
     assert.match(
       source,
-      /meaningful RED[\s\S]{0,140}freezes[\s\S]{0,100}regression assertion/i,
+      /meaningful RED[\s\S]{0,180}(?:freezes[\s\S]{0,100}regression assertion|RED freezes it)/i,
     );
     assert.match(
       source,
       /invalid test design[\s\S]{0,140}restart[\s\S]{0,80}TEST-PATCH→RED[\s\S]{0,140}pre-behavior baseline/i,
     );
-    assert.match(source, /never weaken[\s\S]{0,100}assertion[\s\S]{0,100}implementation/i);
+    assert.match(source, /never weaken (?:an )?assertions?/i);
   }
 
   for (const source of [route, debug]) {
     assert.match(
       source,
-      /failed validation[\s\S]{0,140}one grounded correction[\s\S]{0,180}identical affected checks/i,
+      /failed (?:supported )?validation[\s\S]{0,180}one[\s\S]{0,100}correction[\s\S]{0,220}identical(?:-| )(?:(?:affected )?checks|command)/i,
     );
     assert.match(
       source,
-      /another failure[\s\S]{0,120}(?:blocks|rescope)[\s\S]{0,120}before more edits/i,
+      /(?:another failure[\s\S]{0,120}(?:blocks|rescope)[\s\S]{0,120}before more edits|No intervening task tool[\s\S]{0,180}second correction[\s\S]{0,80}second failure)/i,
     );
   }
 
@@ -316,14 +323,14 @@ test("runtime recovery freezes accepted evidence without hiding new omissions", 
     );
     assert.match(
       source,
-      /material omission discovered before review[\s\S]{0,140}new incomplete cycle/i,
+      /(?:material omission discovered before review[\s\S]{0,140}new incomplete cycle|material omission starts a new incomplete cycle)/i,
     );
   }
 
   for (const source of [route, build]) {
     assert.match(
       source,
-      /configuration or generated output[\s\S]{0,140}(?:baseline|precheck)[\s\S]{0,180}failing evidence[\s\S]{0,120}(?:behavioral change|defect)/i,
+      /configuration(?: or |\/)generated output[\s\S]{0,140}(?:baseline|precheck)[\s\S]{0,180}failing evidence[\s\S]{0,120}(?:behavior(?:al change)?|defect)/i,
     );
   }
   assert.doesNotMatch(build, /Configuration or generated output needs a failing/i);
@@ -336,17 +343,17 @@ test("debug reproduction output stays attributable after validation", async () =
   for (const source of [route, debug]) {
     assert.match(
       source,
-      /run[\s\S]{0,200}validation[\s\S]{0,80}then[\s\S]{0,80}exact reproduction/i,
+      /(?:run[\s\S]{0,200}validation[\s\S]{0,80}then[\s\S]{0,80}|Validate, then replay the )exact reproduction/i,
     );
     assert.match(
       source,
-      /structured resolved output[\s\S]{0,140}MUST[\s\S]{0,100}separate final command[\s\S]{0,140}(?:own output|output is) attributable/i,
-    );
-    assert.match(
-      source,
-      /combined[\s\S]{0,120}only[\s\S]{0,140}no structured output contract[\s\S]{0,120}attribution/i,
+      /structured resolved output[\s\S]{0,160}separate final command/i,
     );
   }
+  assert.match(
+    debug,
+    /combined[\s\S]{0,120}only[\s\S]{0,140}no structured output contract[\s\S]{0,120}attribution/i,
+  );
 });
 
 test("runtime risk prose mirrors the executable classifier", async () => {

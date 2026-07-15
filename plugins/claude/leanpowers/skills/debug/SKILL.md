@@ -16,16 +16,16 @@ If project learning is enabled, use `adapt` to query once at entry under the [le
 1. State the exact symptom, expected behavior, revision, and environment. Read every edit target before editing and preserve unrelated changes.
 2. Before editing, reproduce with the smallest reliable command, case, trace, or fixture. Trace backward to the first incorrect transition and root cause. If unavailable, report the validation gap; do not claim repair.
 3. Form one falsifiable hypothesis: cause, predicted observation, and smallest distinguishing experiment. Inspect evidence; reject or refine when prediction fails.
-4. Map the first wrong transition to regression and interacting-failure assertions. Put all applicable regression/API assertions and product repair in the initial repair so evidence exercises the corrected boundary.
+4. Map the first wrong transition to regression and interacting-failure assertions. Before patching, keep a terse in-context `Clause→test ledger:` mapping each distinct `must`, `only`, `exact`, `preserve`, and `reject` boundary to one positive or smallest distinguishing negative check. Put all applicable assertions and product repair in the initial repair so evidence exercises the corrected boundary.
 5. Post-edit, run current regression evidence and applicable affected integration, lint, typecheck, static, package, build, or full-suite validation. Then replay exact reproduction. Structured resolved output: reproduction MUST be a separate final command so its output is attributable. Combined validation+reproduction is acceptable only when no structured output contract needs attribution.
-6. Failed validation permits one grounded correction preserving regression evidence; rerun identical affected checks. Another failure blocks/rescopes before more edits.
+6. A launcher/tool-start error may correct only the command before supported validation runs and does not spend recovery. One failed supported validation permits one immediate substantive correction to already-read in-scope paths and an identical-command rerun. No intervening task tool, test weakening, empty retry, second correction, or second failure; otherwise block/rescope.
 7. First green freezes the completed acceptance set. A material omission discovered before review starts a new incomplete cycle. File edits invalidate validation and reproduction; read-only reporting does not.
 
 Use observable counterexamples for exact side-effect or traversal boundaries: getter/counter no-access sentinels, snapshots plus nested identity for immutability, post-guard short-circuit sentinels, and one-property or one-element exact-validation cases.
 
 ## Strict direct entry
 
-After green validation and reproduction, strict direct entry loads the [subagent policy](../../references/subagent-policy.md) and runs its independent review in the same turn. `changes_required` reopens repair, revalidation, then fresh review. Routed strict already continues under route; neither path outputs a user transition.
+After green validation and reproduction, strict direct entry loads the [subagent policy](../../references/subagent-policy.md), starts one fresh independent read-only reviewer with the exact task, ledger, changed paths, and current validation, then waits in the same turn for completed Review YAML and requires `pass`. `changes_required` reopens repair, revalidation, then fresh review. Routed strict already continues under route; neither path outputs a user transition.
 
 ## Output
 

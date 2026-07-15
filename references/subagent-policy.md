@@ -6,6 +6,6 @@ Lean and standard work may continue without delegation. Strict work requires a g
 
 ## Strict review internal phase
 
-After green validation, the implementer uses the runtime's native review mechanism to start one fresh read-only reviewer. This is an internal same-turn phase, never a user-facing workflow return. Provide the full original task, risk ledger, all changed paths, and current validation commands/results. The reviewer reads current diff, code, and tests; does not edit or delegate; and returns Review YAML.
+After green validation, the implementer uses the runtime's native review mechanism to start one fresh read-only reviewer. This is an internal same-turn phase, never a user-facing workflow return. Provide the full original task, risk ledger, all changed paths, and current validation commands/results. Wait for the completed Review YAML. The reviewer reads current diff, code, and tests; does not edit or delegate; and returns that verdict.
 
-A pass satisfies the strict independent-review gate. Findings reopen the owning build/debug cycle: repair, revalidate, then use a fresh reviewer. Unavailable review is `blocked`; implementer text cannot overrule it. Any later file edit invalidates validation and review. Read-only reporting does not invalidate either.
+A pass satisfies the strict independent-review gate. Findings reopen the owning build/debug cycle: repair, revalidate, then use a fresh reviewer. Unavailable review is `blocked`; implementer text cannot overrule it. Any later file edit invalidates validation and review; no mutation follows pass. Read-only reporting does not invalidate either.

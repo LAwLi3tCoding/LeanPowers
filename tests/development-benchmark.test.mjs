@@ -501,6 +501,7 @@ function passingCapsuleStage(workflow = "build") {
     quality_validation_mode: workflow === "debug" ? "separate" : "canonical",
     post_change_validation_mode: workflow === "debug" ? "separate" : "canonical",
     debug_recovery_count: 0,
+    debug_launcher_error_count: 0,
     debug_recovery_protocol_observed: workflow === "debug" ? true : null,
     final_validation_budget_observed: workflow !== "debug",
     capsule_green_path_observed: workflow !== "debug",
@@ -592,6 +593,7 @@ function capsuleTraceEvents({
   separatePostReproduction = null,
   validationExitCode = 0,
   validationCommand = null,
+  validationLauncherAttempts = [],
   validationOutput = null,
   workflowRead = false,
 } = {}) {
@@ -822,6 +824,16 @@ function capsuleTraceEvents({
         }));
       }
     }
+  }
+  for (const attempt of validationLauncherAttempts) {
+    events.push(completed({
+      type: "command_execution",
+      command: attempt.command ?? resolvedValidationCommand,
+      aggregated_output: attempt.output ?? "",
+      exit_code: attempt.exitCode ?? 255,
+      status: attempt.status ?? "completed",
+      timed_out: attempt.timedOut ?? false,
+    }));
   }
   events.push(completed({
     type: "command_execution",
@@ -3032,6 +3044,127 @@ test("DEBUG R1 and R2 traces separate mutation, recovery, validation, and freshn
   });
 });
 
+test("debug recovery ignores one validation launcher error before the real failure", () => {
+  const conformance = (parsed) => evaluateWorkflowConformance({
+    activation_reported: true,
+    declared_risk: "standard",
+    declared_workflow: "debug",
+    expected_workflow: "debug",
+    risk_level: "standard",
+    route_ledger_reported: true,
+    telemetry: { workflow_trace: parsed.workflow_trace },
+    workflow: "leanpowers-0.2.0",
+  });
+
+  for (const launcher of [
+    {
+      command: "npm test -- --runInBand",
+      exitCode: 255,
+      output: "",
+      status: "failed",
+    },
+    {
+      command: "npm test -- --runInBand",
+      exitCode: 255,
+      output: "> test\n> node --test test/*.test.mjs --runInBand",
+      status: "failed",
+    },
+    {
+      command: "npm test -- --runInBand",
+      exitCode: 127,
+      output: "zsh: command not found: npm",
+      status: "failed",
+    },
+  ]) {
+    const parsed = parseCodexResult(
+      capsuleTraceEvents({
+        recoveryPatchPaths: ["src/index.mjs"],
+        validationExitCode: 1,
+        validationLauncherAttempts: [launcher],
+      }).map(JSON.stringify).join("\n"),
+      capsuleTraceOptions("debug"),
+    );
+    const stage = parsed.workflow_trace.capsule_stage;
+    assert.equal(stage.debug_launcher_error_count, 1);
+    assert.equal(stage.debug_recovery_protocol_observed, true);
+    assert.deepEqual(conformance(parsed), { status: "PASS", reasons: [] });
+  }
+});
+
+test("debug recovery rejects excess or substantive pre-failure validations", () => {
+  const invalid = [
+    {
+      name: "two launcher errors",
+      attempts: [
+        {
+          command: "npm test -- --runInBand",
+          exitCode: 255,
+          output: "",
+          status: "failed",
+        },
+        {
+          command: "npm test -- --runInBand",
+          exitCode: 255,
+          output: "",
+          status: "failed",
+        },
+      ],
+    },
+    {
+      name: "substantive test failure",
+      attempts: [
+        {
+          command: "npm test -- --runInBand",
+          exitCode: 1,
+          output: "tests failed",
+        },
+      ],
+    },
+    {
+      name: "unrelated empty command",
+      attempts: [{ command: "git status --short", exitCode: 1, output: "" }],
+    },
+    {
+      name: "silent test failure",
+      attempts: [
+        {
+          command: "npm test -- --runInBand",
+          exitCode: 1,
+          output: "",
+          status: "failed",
+        },
+      ],
+    },
+    {
+      name: "substantive exit 255",
+      attempts: [
+        {
+          command: "npm test -- --runInBand",
+          exitCode: 255,
+          output: "tests failed",
+          status: "failed",
+        },
+      ],
+    },
+  ];
+
+  for (const { attempts, name } of invalid) {
+    const parsed = parseCodexResult(
+      capsuleTraceEvents({
+        recoveryPatchPaths: ["src/index.mjs"],
+        validationExitCode: 1,
+        validationLauncherAttempts: attempts,
+      }).map(JSON.stringify).join("\n"),
+      capsuleTraceOptions("debug"),
+    );
+    assert.equal(
+      parsed.workflow_trace.capsule_stage.debug_recovery_protocol_observed,
+      false,
+      name,
+    );
+  }
+});
+
 test("debug recovery fails closed on excess, changed, reopened, or ungrounded work", () => {
   const invalid = [
     {
@@ -4344,6 +4477,43 @@ test("capsule READ accepts one boundary-preserving tail batch and requires groun
     ).workflow_trace.capsule_stage;
     assert.equal(unsafe.read_observed, false, readCommand);
     assert.equal(unsafe.protocol_observed, false, readCommand);
+  }
+});
+
+test("source-grounding evidence accepts only pure read commands joined by &&", () => {
+  const groundedRead = parseCodexResult(
+    capsuleTraceEvents({
+      readCommand: [
+        "cat -- src/index.mjs",
+        "sed -n '1,200p' -- test/index.test.mjs",
+        "head -n 40 -- package.json",
+      ].join(" && "),
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+
+  assert.equal(groundedRead.read_observed, false);
+  assert.equal(groundedRead.quality_read_observed, true);
+  assert.equal(groundedRead.quality_patch_targets_read_observed, true);
+  assert.equal(groundedRead.quality_pre_change_evidence_observed, true);
+
+  for (const readCommand of [
+    "cat src/index.mjs && touch marker && cat test/index.test.mjs package.json",
+    "cat src/index.mjs && cat test/index.test.mjs package.json > read.txt",
+    "cat src/index.mjs && cat $(printf test/index.test.mjs) package.json",
+    "cat src/index.mjs && cat test/index.test.mjs | cat package.json",
+    "cat src/index.mjs || cat test/index.test.mjs package.json",
+    "cat src/index.mjs & cat test/index.test.mjs package.json",
+    "cat src/index.mjs && (cat test/index.test.mjs && cat package.json)",
+    "cat src/index.mjs && && cat test/index.test.mjs package.json",
+  ]) {
+    const unsafe = parseCodexResult(
+      capsuleTraceEvents({ readCommand }).map(JSON.stringify).join("\n"),
+      capsuleTraceOptions("debug"),
+    ).workflow_trace.capsule_stage;
+    assert.equal(unsafe.quality_read_observed, false, readCommand);
+    assert.equal(unsafe.quality_patch_targets_read_observed, false, readCommand);
+    assert.equal(unsafe.quality_pre_change_evidence_observed, false, readCommand);
   }
 });
 

@@ -1908,12 +1908,30 @@ function traceCapsuleStage(
         index > debugInitialPatchEndIndex && index < debugRecoveryPatchStartIndex
       )
     : [];
-  const failedDebugValidation = debugRecoveryCommands.length === 1
-    ? parseFailedDebugValidation(
-        debugRecoveryCommands[0].event.item,
-        reproductionContract,
-      )
+  const debugLauncherErrors = debugRecoveryCommands.filter(({ event }) =>
+    isDebugValidationLauncherError(event.item, reproductionContract)
+  );
+  const debugLauncherErrorIndexes = new Set(
+    debugLauncherErrors.map(({ index }) => index),
+  );
+  const failedDebugValidations = debugRecoveryCommands.flatMap((command) => {
+    if (debugLauncherErrorIndexes.has(command.index)) return [];
+    const validation = parseFailedDebugValidation(
+      command.event.item,
+      reproductionContract,
+    );
+    return validation === null ? [] : [{ command, validation }];
+  });
+  const failedDebugValidation = failedDebugValidations.length === 1
+    ? failedDebugValidations[0]
     : null;
+  const debugRecoveryCommandProtocolObserved =
+    failedDebugValidation !== null &&
+    debugLauncherErrors.length <= 1 &&
+    debugRecoveryCommands.length === debugLauncherErrors.length + 1 &&
+    debugLauncherErrors.every(({ index }) =>
+      index < failedDebugValidation.command.index
+    );
   const debugRecoveryToolCallCount = countToolCallsBetween(indexed, {
     afterIndex: debugInitialPatchEndIndex,
     beforeIndex: debugRecoveryPatchStartIndex,
@@ -1929,10 +1947,11 @@ function traceCapsuleStage(
         debugInitialPatchObserved
       : debugRecoveryCount === 1 &&
         debugInitialPatchObserved &&
-        debugRecoveryToolCallCount === 1 &&
+        debugRecoveryCommandProtocolObserved &&
+        debugRecoveryToolCallCount === debugLauncherErrors.length + 1 &&
         debugRecoveryPathsObserved &&
         failedDebugValidation !== null &&
-        failedDebugValidation.validation_command ===
+        failedDebugValidation.validation.validation_command ===
           qualityValidation?.validation_command
     : null;
   const patchProtocolObserved = expectedWorkflow === "build"
@@ -2061,6 +2080,7 @@ function traceCapsuleStage(
     quality_validation_mode: qualityValidation?.mode ?? null,
     post_change_validation_mode: validation?.mode ?? null,
     debug_recovery_count: debugRecoveryCount,
+    debug_launcher_error_count: debugLauncherErrors.length,
     debug_recovery_protocol_observed: debugRecoveryProtocolObserved,
     final_validation_budget_observed:
       validationObserved && postChangeCommands.length === 1,
@@ -2743,10 +2763,48 @@ function successfulReadEvidencePaths(item) {
   ) {
     return [];
   }
-  const batchPaths = batchReadPaths(item);
-  if (batchPaths.length > 0) return batchPaths;
   const command = unwrapShellInvocation(item?.command);
-  if (command === null || /[\\\r\n;&|`<>$#]/u.test(command)) return [];
+  const segments = splitPureReadCommandChain(command);
+  if (segments === null) return [];
+  const segmentPaths = segments.map(simpleReadEvidencePaths);
+  if (segmentPaths.some((paths) => paths.length === 0)) return [];
+  return [...new Set(segmentPaths.flat())];
+}
+
+function splitPureReadCommandChain(command) {
+  if (command === null) return null;
+  const text = String(command);
+  if (/[\\\r\n;|`<>$#]/u.test(text)) return null;
+
+  const segments = [];
+  let quote = null;
+  let segmentStart = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === "'" && quote !== "double") {
+      quote = quote === "single" ? null : "single";
+      continue;
+    }
+    if (character === '"' && quote !== "single") {
+      quote = quote === "double" ? null : "double";
+      continue;
+    }
+    if (quote !== null || character !== "&") continue;
+    if (text[index + 1] !== "&") return null;
+    const segment = text.slice(segmentStart, index).trim();
+    if (segment.length === 0) return null;
+    segments.push(segment);
+    index += 1;
+    segmentStart = index + 1;
+  }
+  if (quote !== null) return null;
+  const finalSegment = text.slice(segmentStart).trim();
+  if (finalSegment.length === 0) return null;
+  segments.push(finalSegment);
+  return segments;
+}
+
+function simpleReadEvidencePaths(command) {
   const words = parseSimpleShellWords(command);
   if (words === null) return [];
   let values;
@@ -3274,6 +3332,44 @@ function parseFailedDebugValidation(item, reproductionContract) {
     return null;
   }
   return validation;
+}
+
+function isDebugValidationLauncherError(item, reproductionContract) {
+  const validation = parsePostChangeValidationCommand(
+    item?.command,
+    "debug",
+    reproductionContract,
+  );
+  if (
+    validation === null ||
+    item?.status !== "failed" ||
+    item?.timed_out === true ||
+    !Number.isInteger(item?.exit_code) ||
+    item.exit_code < 1 ||
+    item.exit_code > 255
+  ) {
+    return false;
+  }
+  const output = String(item?.aggregated_output ?? "").trim();
+  if (hasFatalShellDiagnostic(output)) return true;
+  return item.exit_code === 255 && (
+    output.length === 0 || isNpmTestLauncherPreambleOnly(output)
+  );
+}
+
+function isNpmTestLauncherPreambleOnly(output) {
+  const lines = String(output ?? "")
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (
+    lines.length !== 2 ||
+    !/^>\s+(?:[^\s]+\s+)?test(?::[A-Za-z0-9_.-]+)?$/iu.test(lines[0]) ||
+    !lines[1].startsWith("> ")
+  ) {
+    return false;
+  }
+  return canonicalTestValidationCommand(lines[1].slice(2)) !== null;
 }
 
 function parsePostChangeValidationSequence(
