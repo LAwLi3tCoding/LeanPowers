@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   cp,
+  link,
   mkdir,
   mkdtemp,
   readFile,
@@ -29,16 +30,21 @@ import {
   extractDeclaredRisk,
   fingerprintBenchmarkWorkspace,
   inspectBenchmarkGitState,
+  isRetryableCodexCapacityFailure,
   loadDevelopmentSuite,
   makePilotResult,
+  materializeRunArtifacts,
+  materializeDevelopmentSummaryArtifacts,
   materializeWorkspaceSnapshot,
   parseClaudeResult,
   parseCodexResult,
   parseLeanRouteLedger,
+  preflightDevelopmentOutputDirectory,
   resolveDevelopmentOutputDirectory,
   reportsWorkflowActivation,
   renderDevelopmentReport,
   runArtifactRegressionGates,
+  runDevelopmentCaseWithCapacityRetry,
   runProcess,
   runVerifier,
   summarizeArtifactRegressionEvidence,
@@ -1084,6 +1090,18 @@ test("artifact regression gate schema fails closed", async () => {
     );
 
     const invalidCases = [
+      ...[
+        "../escape",
+        "case/path",
+        "Case",
+        "-case",
+        "case_name",
+      ].map((invalidId) => [
+        (candidate) => {
+          candidate.cases[cacheCaseIndex].id = invalidId;
+        },
+        /id must be unique lower-kebab-case/u,
+      ]),
       [
         (candidate) => {
           candidate.schema_version = 1;
@@ -2061,6 +2079,375 @@ test("Codex usage preserves incomplete telemetry and rejects impossible cache va
     }));
     assert.equal(invalid.tokens.total, null, JSON.stringify(usage));
     assert.equal(invalid.tokens.telemetry_complete, false, JSON.stringify(usage));
+  }
+});
+
+test("only the exact terminal Codex capacity failure pair is retryable", () => {
+  const message = "Selected model is at capacity. Please try a different model.";
+  const capacityFailure = [
+    JSON.stringify({ type: "turn.started" }),
+    JSON.stringify({ type: "error", message }),
+    JSON.stringify({ type: "turn.failed", error: { message } }),
+  ].join("\n");
+  const incomplete = parseCodexResult(capacityFailure);
+
+  assert.equal(
+    isRetryableCodexCapacityFailure({ raw: capacityFailure, telemetry: incomplete }),
+    true,
+  );
+  for (const raw of [
+    JSON.stringify({ type: "error", message }),
+    JSON.stringify({ type: "turn.failed", error: { message } }),
+    [
+      JSON.stringify({ type: "error", message: `${message} ` }),
+      JSON.stringify({ type: "turn.failed", error: { message } }),
+    ].join("\n"),
+    [
+      JSON.stringify({ type: "error", message }),
+      JSON.stringify({ type: "turn.failed", error: { message: "request failed" } }),
+    ].join("\n"),
+    [
+      JSON.stringify({ type: "error", message }),
+      JSON.stringify({ type: "turn.failed", error: { message } }),
+      JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "later" } }),
+    ].join("\n"),
+  ]) {
+    assert.equal(
+      isRetryableCodexCapacityFailure({
+        raw,
+        telemetry: parseCodexResult(raw),
+      }),
+      false,
+      raw,
+    );
+  }
+
+  assert.equal(
+    isRetryableCodexCapacityFailure({
+      raw: capacityFailure,
+      telemetry: { ...incomplete, completed: true },
+    }),
+    false,
+  );
+  assert.equal(
+    isRetryableCodexCapacityFailure({
+      raw: capacityFailure,
+      telemetry: {
+        ...incomplete,
+        tokens: { telemetry_complete: true },
+      },
+    }),
+    false,
+  );
+});
+
+test("capacity retry runs at most once and isolates infrastructure wall time", async () => {
+  const artifacts = (label) => ({
+    agent_stderr: `${label}-stderr`,
+    agent_stdout: `${label}-stdout`,
+    final_message: `${label}-final`,
+    verifier: null,
+    workspace_patch: `${label}-patch`,
+  });
+  const attempts = [];
+  const retried = await runDevelopmentCaseWithCapacityRetry(async ({
+    allowCapacityRetry,
+    attemptNumber,
+  }) => {
+    attempts.push({ allowCapacityRetry, attemptNumber });
+    if (attemptNumber === 1) {
+      return {
+        artifacts: artifacts("first"),
+        capacity_retry_eligible: true,
+        result: null,
+        wall_seconds: 2,
+      };
+    }
+    return {
+      artifacts: artifacts("second"),
+      capacity_retry_eligible: false,
+      result: { outcome: { status: "PASS" }, wall_seconds: 3 },
+      wall_seconds: 3,
+    };
+  });
+
+  assert.deepEqual(attempts, [
+    { allowCapacityRetry: true, attemptNumber: 1 },
+    { allowCapacityRetry: false, attemptNumber: 2 },
+  ]);
+  assert.equal(retried.result.attempt_count, 2);
+  assert.equal(retried.result.capacity_retry_count, 1);
+  assert.equal(retried.result.wall_seconds, 3);
+  assert.equal(retried.result.final_attempt_wall_seconds, 3);
+  assert.equal(retried.result.infrastructure_retry_wall_seconds, 2);
+  assert.equal(retried.artifacts.agent_stdout, "second-stdout");
+  assert.deepEqual(retried.priorAttempts, [{
+    artifacts: artifacts("first"),
+    attemptNumber: 1,
+  }]);
+
+  let repeatedCalls = 0;
+  const failedTwice = await runDevelopmentCaseWithCapacityRetry(async ({
+    attemptNumber,
+  }) => {
+    repeatedCalls += 1;
+    return attemptNumber === 1
+      ? {
+          artifacts: artifacts("capacity-1"),
+          capacity_retry_eligible: true,
+          result: null,
+          wall_seconds: 1,
+        }
+      : {
+          artifacts: artifacts("capacity-2"),
+          capacity_retry_eligible: true,
+          result: { outcome: { status: "FAIL" }, wall_seconds: 1.5 },
+          wall_seconds: 1.5,
+        };
+  });
+  assert.equal(repeatedCalls, 2);
+  assert.equal(failedTwice.result.outcome.status, "FAIL");
+  assert.equal(failedTwice.result.attempt_count, 2);
+  assert.equal(failedTwice.result.capacity_retry_count, 1);
+  assert.equal(failedTwice.result.wall_seconds, 1.5);
+  assert.equal(failedTwice.result.final_attempt_wall_seconds, 1.5);
+  assert.equal(failedTwice.result.infrastructure_retry_wall_seconds, 1);
+});
+
+test("ordinary agent, test, verifier, and workflow failures never retry", async () => {
+  for (const failure of ["agent", "test", "verifier", "workflow"]) {
+    let calls = 0;
+    const execution = await runDevelopmentCaseWithCapacityRetry(async () => {
+      calls += 1;
+      return {
+        artifacts: {
+          agent_stderr: "",
+          agent_stdout: "",
+          final_message: "",
+          verifier: null,
+          workspace_patch: "",
+        },
+        capacity_retry_eligible: false,
+        result: { failure, outcome: { status: "FAIL" }, wall_seconds: 1 },
+        wall_seconds: 1,
+      };
+    });
+    assert.equal(calls, 1, failure);
+    assert.equal(execution.result.attempt_count, 1, failure);
+    assert.equal(execution.result.capacity_retry_count, 0, failure);
+    assert.equal(execution.result.wall_seconds, 1, failure);
+    assert.equal(execution.result.final_attempt_wall_seconds, 1, failure);
+    assert.equal(execution.result.infrastructure_retry_wall_seconds, 0, failure);
+  }
+});
+
+test("retried capacity attempt artifacts remain under the run-relative audit tree", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "lp-capacity-artifacts-"));
+  const artifactSet = (label) => ({
+    agent_stderr: `${label} stderr`,
+    agent_stdout: `${label} stdout`,
+    final_message: `${label} final`,
+    verifier: null,
+    workspace_patch: `${label} patch`,
+  });
+  try {
+    await materializeRunArtifacts(root, [{
+      artifacts: artifactSet("final"),
+      priorAttempts: [{ artifacts: artifactSet("capacity"), attemptNumber: 1 }],
+      runId: "r1-case-workflow",
+    }]);
+
+    assert.equal(
+      await readFile(
+        path.join(root, "raw", "r1-case-workflow", "codex.stdout.jsonl"),
+        "utf8",
+      ),
+      "final stdout",
+    );
+    assert.equal(
+      await readFile(
+        path.join(
+          root,
+          "raw",
+          "r1-case-workflow",
+          "attempts",
+          "attempt-1",
+          "codex.stdout.jsonl",
+        ),
+        "utf8",
+      ),
+      "capacity stdout",
+    );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("run artifact materialization rejects unsafe run identifiers", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "lp-artifact-path-"));
+  const artifacts = {
+    agent_stderr: "",
+    agent_stdout: "",
+    final_message: "",
+    verifier: null,
+    workspace_patch: "",
+  };
+  try {
+    for (const runId of [
+      "../escape",
+      "case/path",
+      "case\\path",
+      path.resolve(root, "absolute"),
+      ".",
+      "case..name",
+      "Case",
+    ]) {
+      await assert.rejects(
+        materializeRunArtifacts(root, [{ artifacts, runId }]),
+        /run id must use safe lowercase segments/u,
+      );
+    }
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("run artifact materialization rejects pre-existing directory symlinks", {
+  skip: process.platform === "win32",
+}, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "lp-artifact-symlink-"));
+  const outside = path.join(root, "outside");
+  const raw = path.join(root, "raw");
+  const artifacts = {
+    agent_stderr: "stderr",
+    agent_stdout: "stdout",
+    final_message: "final",
+    verifier: null,
+    workspace_patch: "patch",
+  };
+  try {
+    await mkdir(outside);
+    await mkdir(raw);
+    await symlink("../outside", path.join(raw, "r1-case-workflow"));
+
+    await assert.rejects(
+      materializeRunArtifacts(root, [{
+        artifacts,
+        runId: "r1-case-workflow",
+      }]),
+      /artifact directory must not be a symbolic link/u,
+    );
+    await assert.rejects(
+      readFile(path.join(outside, "codex.stdout.jsonl"), "utf8"),
+      { code: "ENOENT" },
+    );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("run artifact materialization never writes through pre-existing artifact links", {
+  skip: process.platform === "win32",
+}, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "lp-artifact-file-link-"));
+  const raw = path.join(root, "raw");
+  const runDirectory = path.join(raw, "r1-case-workflow");
+  const sentinel = path.join(root, "sentinel.txt");
+  const artifacts = {
+    agent_stderr: "stderr",
+    agent_stdout: "overwritten",
+    final_message: "final",
+    verifier: null,
+    workspace_patch: "patch",
+  };
+  try {
+    await mkdir(runDirectory, { recursive: true });
+    await writeFile(sentinel, "sentinel");
+    await symlink(
+      path.relative(runDirectory, sentinel),
+      path.join(runDirectory, "codex.stdout.jsonl"),
+    );
+
+    await assert.rejects(
+      materializeRunArtifacts(root, [{
+        artifacts,
+        runId: "r1-case-workflow",
+      }]),
+      /artifact directory must be newly created/u,
+    );
+    assert.equal(await readFile(sentinel, "utf8"), "sentinel");
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("development output preflight rejects non-empty paths before live work", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "lp-output-preflight-"));
+  const output = path.join(root, "output");
+  try {
+    await preflightDevelopmentOutputDirectory(output);
+    await writeFile(path.join(output, "existing.txt"), "existing");
+    await assert.rejects(
+      preflightDevelopmentOutputDirectory(output),
+      /output directory must be empty/u,
+    );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("development output preflight reapplies the repository boundary after ancestor links", {
+  skip: process.platform === "win32",
+}, async () => {
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "lp-output-ancestor-"));
+  const repository = fileURLToPath(new URL("../", import.meta.url));
+  try {
+    await symlink(repository, path.join(temporary, "repository-link"));
+    await assert.rejects(
+      preflightDevelopmentOutputDirectory(
+        path.join(temporary, "repository-link", "scripts"),
+      ),
+      /Repository-local benchmark output must stay under ignored evals\/results/u,
+    );
+  } finally {
+    await rm(temporary, { force: true, recursive: true });
+  }
+});
+
+test("development summary artifacts never write through pre-existing links", {
+  skip: process.platform === "win32",
+}, async () => {
+  for (const [fileName, linkKind] of [
+    ["pilot-result.json", "symbolic"],
+    ["pilot-report.md", "symbolic"],
+    ["pilot-result.json", "hard"],
+    ["pilot-report.md", "hard"],
+  ]) {
+    const root = await mkdtemp(path.join(os.tmpdir(), "lp-summary-link-"));
+    const output = path.join(root, "output");
+    const sentinel = path.join(root, "sentinel.txt");
+    try {
+      await mkdir(output);
+      await writeFile(sentinel, "sentinel");
+      if (linkKind === "symbolic") {
+        await symlink(
+          path.relative(output, sentinel),
+          path.join(output, fileName),
+        );
+      } else {
+        await link(sentinel, path.join(output, fileName));
+      }
+      await assert.rejects(
+        materializeDevelopmentSummaryArtifacts(output, {
+          reportMarkdown: "report",
+          resultJson: "{}\n",
+        }),
+        { code: "EEXIST" },
+      );
+      assert.equal(await readFile(sentinel, "utf8"), "sentinel");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
   }
 });
 
@@ -5690,7 +6077,18 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
   assert.match(report, /Max Lean token share/u);
   assert.match(report, /Aggregate Lean token share/u);
   assert.match(report, /Token target/u);
+  assert.match(report, /Results by task category/u);
+  assert.match(
+    report,
+    /Category \| Pairs \| Superpowers quality \| LeanPowers quality \| Superpowers total tokens \| LeanPowers total tokens \| Lean token share/u,
+  );
+  assert.match(report, /Category source diagnostics/u);
+  assert.match(report, /Median fresh tokens \| Median output tokens \| Median tool calls/u);
+  assert.match(report, /build owner aggregate/u);
+  assert.match(report, /debug owner aggregate/u);
   assert.match(report, /Run matrix: \*\*complete\*\*/u);
+  assert.match(report, /Attempts \| Capacity retry wall/u);
+  assert.match(report, /capacity retries are isolated from workflow wall-time comparisons/iu);
   assert.match(report, new RegExp(`Suite manifest: ${suite.suite_sha256}`, "u"));
   assert.match(report, /Workspace snapshot \| Hidden verifier snapshot \| Fault-family snapshot/u);
   assert.match(report, /eligible pairs: 1\/2/u);

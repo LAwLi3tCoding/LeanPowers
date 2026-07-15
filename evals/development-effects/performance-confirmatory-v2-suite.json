@@ -1,0 +1,413 @@
+{
+  "schema_version": 2,
+  "suite_id": "development-effects-performance-confirmatory-v2-2026-07-15",
+  "evidence_level": "paired-development-heldout",
+  "runtime": "codex-cli",
+  "model_default": "gpt-5.3-codex-spark",
+  "effort": "low",
+  "repetitions": 2,
+  "activation_mode": "explicit-entrypoint",
+  "token_target": {
+    "metric": "aggregate-model-token-share",
+    "population": "all-matched-pairs",
+    "max_share_pct": 60
+  },
+  "workflow_entrypoints": {
+    "superpowers-6.1.1": "$superpowers:using-superpowers",
+    "leanpowers-0.2.0": "$leanpowers:route"
+  },
+  "workflow_order": [
+    ["superpowers-6.1.1", "leanpowers-0.2.0"],
+    ["leanpowers-0.2.0", "superpowers-6.1.1"]
+  ],
+  "freeze_contract": {
+    "status": "frozen-before-live-run",
+    "model_default": "gpt-5.3-codex-spark",
+    "effort": "low",
+    "repetitions": 2,
+    "workflow_order": [
+      ["superpowers-6.1.1", "leanpowers-0.2.0"],
+      ["leanpowers-0.2.0", "superpowers-6.1.1"]
+    ],
+    "agent_read_isolation": "codex-minimal-workspace-plugin-toolchain-read-v1",
+    "superpowers_revision": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+    "case_snapshots": {
+      "coalesced-half-open-intervals": {
+        "mutants_sha256": "b6d730105248f9c4dd621c8e90c395e8b7e3cf375a0f41414fc3614adb669937",
+        "verifier_sha256": "d6601ae710dbcaa7d603b1f432a255cbef1f072b422105c84f70245ea54b5cc8",
+        "workspace_sha256": "c3656fd00128b0247a2d644262d12e431515fb96ab649cfedd1d171f9d1bf469"
+      },
+      "escaped-field-parser": {
+        "mutants_sha256": "b03979d6bc93ece6c3a9cf0e4214116068c58c9bf4f66e77110c98868993d87a",
+        "verifier_sha256": "2463ff4b071df34a75afba6ffb02988db95bd764d74a1ac08d5f1c478f9de700",
+        "workspace_sha256": "8e2991981e823e4006dfc76dc74a4dcb81083b8ae77841313967ad6a32dee7f5"
+      },
+      "transactional-batch-flush": {
+        "mutants_sha256": "95e25ae14050943ef57e3b7086c1a4c98964f99e6396c1cd172655fef31670b0",
+        "verifier_sha256": "b79a524e7aae87e6396cbdaaa7a90497c9a59b96ca3a24a768821c45af618f97",
+        "workspace_sha256": "8ee9a973abfa9274e1988f9d6a694f8a42ab3b7fc9a1d4e7c3794c44f67e9ee3"
+      }
+    },
+    "token_target": {
+      "metric": "aggregate-model-token-share",
+      "population": "all-matched-pairs",
+      "max_share_pct": 60
+    }
+  },
+  "cases": [
+    {
+      "id": "coalesced-half-open-intervals",
+      "scenario_class": "small-explicit-feature",
+      "risk_level": "standard",
+      "expected_workflow": "build",
+      "workspace": "cases/coalesced-half-open-intervals/workspace",
+      "verifier_files": [
+        "cases/coalesced-half-open-intervals/verifier/half-open-intervals.hidden.mjs"
+      ],
+      "task": "Extend coalesceHalfOpenIntervals(intervals) so it canonicalizes a collection of half-open intervals. intervals must be a dense array of exact two-element [start, end] tuples whose bounds are non-negative safe integers with start <= end. Sort a copy by start and then end. Coalesce maximal overlapping or adjacent non-empty intervals; adjacency means the next start exactly equals the current end, while a positive gap must remain separate. A zero-length [point, point] tuple remains an independent output even when its point lies inside, at the start of, or at the end of a non-empty interval. Points never join or bridge non-empty intervals, and only exact duplicate points at the same coordinate are deduplicated. Return a dense array sorted by start and then end, never mutate the input collection or its tuples, and return a fresh tuple for every result. Preserve the exact direct and public named export surfaces and keep coalesceHalfOpenIntervals as a direct named export. Add focused regressions that independently prove unordered normalization, overlap and adjacency coalescing, positive-gap preservation, zero-length point independence and deduplication, dense exact-tuple validation, input immutability, and fresh output tuples. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {
+          "id": "unordered-interval-normalization",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "coalesceHalfOpenIntervals",
+              "target": "src/half-open-intervals.mjs",
+              "source": "cases/coalesced-half-open-intervals/verifier/mutants/half-open-intervals.preserve-order.mjs"
+            }
+          ]
+        },
+        {
+          "id": "overlap-coalescing",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "coalesceHalfOpenIntervals",
+              "target": "src/half-open-intervals.mjs",
+              "source": "cases/coalesced-half-open-intervals/verifier/mutants/half-open-intervals.leave-overlap-unmerged.mjs"
+            }
+          ]
+        },
+        {
+          "id": "adjacent-boundary-coalescing",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "coalesceHalfOpenIntervals",
+              "target": "src/half-open-intervals.mjs",
+              "source": "cases/coalesced-half-open-intervals/verifier/mutants/half-open-intervals.overlap-only.mjs"
+            }
+          ]
+        },
+        {
+          "id": "positive-gap-preservation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "coalesceHalfOpenIntervals",
+              "target": "src/half-open-intervals.mjs",
+              "source": "cases/coalesced-half-open-intervals/verifier/mutants/half-open-intervals.bridge-unit-gap.mjs"
+            }
+          ]
+        },
+        {
+          "id": "zero-length-point-independence",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "coalesceHalfOpenIntervals",
+              "target": "src/half-open-intervals.mjs",
+              "source": "cases/coalesced-half-open-intervals/verifier/mutants/half-open-intervals.absorb-points.mjs"
+            }
+          ]
+        },
+        {
+          "id": "exact-point-deduplication",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "coalesceHalfOpenIntervals",
+              "target": "src/half-open-intervals.mjs",
+              "source": "cases/coalesced-half-open-intervals/verifier/mutants/half-open-intervals.keep-duplicate-points.mjs"
+            }
+          ]
+        },
+        {
+          "id": "input-immutability",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "coalesceHalfOpenIntervals",
+              "target": "src/half-open-intervals.mjs",
+              "source": "cases/coalesced-half-open-intervals/verifier/mutants/half-open-intervals.mutate-input.mjs"
+            }
+          ]
+        },
+        {
+          "id": "fresh-output-tuples",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "coalesceHalfOpenIntervals",
+              "target": "src/half-open-intervals.mjs",
+              "source": "cases/coalesced-half-open-intervals/verifier/mutants/half-open-intervals.reuse-input-tuples.mjs"
+            }
+          ]
+        },
+        {
+          "id": "dense-exact-tuple-validation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "coalesceHalfOpenIntervals",
+              "target": "src/half-open-intervals.mjs",
+              "source": "cases/coalesced-half-open-intervals/verifier/mutants/half-open-intervals.loose-tuples.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "escaped-field-parser",
+      "scenario_class": "small-explicit-feature",
+      "risk_level": "standard",
+      "expected_workflow": "build",
+      "workspace": "cases/escaped-field-parser/workspace",
+      "verifier_files": [
+        "cases/escaped-field-parser/verifier/escaped-fields.hidden.mjs"
+      ],
+      "task": "Extend splitEscapedFields(input, separator) so input must be a primitive string and separator must be exactly one Unicode code point other than backslash. Split on unescaped separators. A backslash escapes exactly the next Unicode code point, removes itself from the output, and may escape the separator, another backslash, or any other code point. Preserve empty fields created by leading, trailing, or consecutive separators; an empty input returns one empty field, and input without an unescaped separator returns one processed field. Reject a trailing backslash with TypeError before returning any fields. Preserve the exact direct and public named export surfaces, and keep splitEscapedFields as a direct named export. Add focused regressions that independently prove escaped versus unescaped separators, escape removal for arbitrary and supplementary code points, empty-field preservation, trailing-escape rejection, Unicode code-point separator handling and validation, and the export surface. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {
+          "id": "escaped-separator-parsing",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "splitEscapedFields",
+              "target": "src/escaped-fields.mjs",
+              "source": "cases/escaped-field-parser/verifier/mutants/escaped-fields.naive-split.mjs"
+            }
+          ]
+        },
+        {
+          "id": "escape-removal",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "splitEscapedFields",
+              "target": "src/escaped-fields.mjs",
+              "source": "cases/escaped-field-parser/verifier/mutants/escaped-fields.preserve-escape.mjs"
+            },
+            {
+              "kind": "replace-callable-export",
+              "export_name": "splitEscapedFields",
+              "target": "src/escaped-fields.mjs",
+              "source": "cases/escaped-field-parser/verifier/mutants/escaped-fields.escape-separator-only.mjs"
+            }
+          ]
+        },
+        {
+          "id": "empty-field-preservation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "splitEscapedFields",
+              "target": "src/escaped-fields.mjs",
+              "source": "cases/escaped-field-parser/verifier/mutants/escaped-fields.drop-empty.mjs"
+            }
+          ]
+        },
+        {
+          "id": "trailing-escape-rejection",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "splitEscapedFields",
+              "target": "src/escaped-fields.mjs",
+              "source": "cases/escaped-field-parser/verifier/mutants/escaped-fields.trailing-literal.mjs"
+            }
+          ]
+        },
+        {
+          "id": "unicode-codepoint-separator",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "splitEscapedFields",
+              "target": "src/escaped-fields.mjs",
+              "source": "cases/escaped-field-parser/verifier/mutants/escaped-fields.utf16-input-walk.mjs"
+            },
+            {
+              "kind": "replace-callable-export",
+              "export_name": "splitEscapedFields",
+              "target": "src/escaped-fields.mjs",
+              "source": "cases/escaped-field-parser/verifier/mutants/escaped-fields.utf16-separator-validation.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "transactional-batch-flush",
+      "scenario_class": "unknown-cause-defect",
+      "risk_level": "standard",
+      "expected_workflow": "debug",
+      "workspace": "cases/transactional-batch-flush/workspace",
+      "verifier_files": [
+        "cases/transactional-batch-flush/verifier/batcher.hidden.mjs"
+      ],
+      "task": "Users report that a value added reentrantly from inside deliver can disappear after a successful flush. Before editing, run the included node repro/transactional-batch-flush.mjs and use its structured output to identify the first incorrect transition. Fix createBatcher(deliver) so flush() synchronously delivers a fresh array containing exactly the pending values captured at the start of that flush, in insertion order. Remove that snapshot from pending before invoking deliver, so values added during delivery remain queued for the next flush. If deliver throws, propagate the same error and restore the original snapshot ahead of every value added reentrantly during the failed delivery. Mutating the delivered array must not mutate internal state. A nested flush captures and processes its own current pending snapshot without changing the outer snapshot. An empty flush returns false without calling deliver; a non-empty successful flush returns true. add(value) accepts any value. Preserve deliver validation, the exact batcher method and direct/public named export surfaces, and keep createBatcher as a direct named export. Add focused regressions for reentrant additions, fresh snapshot isolation, failed-delivery rollback order, nested flushes, synchronous delivery and exception flow, empty flushes, and API compatibility. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "reproduction_contract": {
+        "command": "node repro/transactional-batch-flush.mjs",
+        "expected_output": {
+          "scenario": "transactional-batch-flush",
+          "observations": [
+            {
+              "flush": 1,
+              "expected": {
+                "returned": true,
+                "deliveries": [["initial"]]
+              },
+              "observed": {
+                "returned": true,
+                "deliveries": [["initial"]]
+              }
+            },
+            {
+              "flush": 2,
+              "expected": {
+                "returned": true,
+                "deliveries": [["reentrant"]]
+              },
+              "observed": {
+                "returned": false,
+                "deliveries": []
+              }
+            }
+          ],
+          "first_incorrect_transition": {
+            "stage": "post-delivery-clear",
+            "flush": 1,
+            "mutation": "reentrant-add",
+            "lost_pending_value": "reentrant"
+          }
+        }
+      },
+      "artifact_regression_gates": [
+        {
+          "id": "reentrant-addition-preservation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createBatcher",
+              "target": "src/batcher.mjs",
+              "source": "cases/transactional-batch-flush/verifier/mutants/batcher.clear-after-deliver.mjs"
+            },
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createBatcher",
+              "target": "src/batcher.mjs",
+              "source": "cases/transactional-batch-flush/verifier/mutants/batcher.dynamic-add-consumed.mjs"
+            }
+          ]
+        },
+        {
+          "id": "fresh-snapshot-isolation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createBatcher",
+              "target": "src/batcher.mjs",
+              "source": "cases/transactional-batch-flush/verifier/mutants/batcher.live-array-exposure.mjs"
+            }
+          ]
+        },
+        {
+          "id": "failed-delivery-rollback",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createBatcher",
+              "target": "src/batcher.mjs",
+              "source": "cases/transactional-batch-flush/verifier/mutants/batcher.no-rollback.mjs"
+            },
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createBatcher",
+              "target": "src/batcher.mjs",
+              "source": "cases/transactional-batch-flush/verifier/mutants/batcher.wrong-rollback-order.mjs"
+            }
+          ]
+        },
+        {
+          "id": "nested-flush-snapshot",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createBatcher",
+              "target": "src/batcher.mjs",
+              "source": "cases/transactional-batch-flush/verifier/mutants/batcher.reuse-outer-snapshot.mjs"
+            }
+          ]
+        },
+        {
+          "id": "synchronous-delivery",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createBatcher",
+              "target": "src/batcher.mjs",
+              "source": "cases/transactional-batch-flush/verifier/mutants/batcher.async-delivery.mjs"
+            }
+          ]
+        },
+        {
+          "id": "empty-flush-contract",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createBatcher",
+              "target": "src/batcher.mjs",
+              "source": "cases/transactional-batch-flush/verifier/mutants/batcher.call-empty-delivery.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    }
+  ]
+}

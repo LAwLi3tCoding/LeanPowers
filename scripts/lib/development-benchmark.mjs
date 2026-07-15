@@ -46,6 +46,10 @@ const DEVELOPMENT_EVIDENCE_LEVELS = new Set([
   "paired-development-heldout",
   "paired-development-pilot",
 ]);
+const CODEX_CAPACITY_ERROR_MESSAGE =
+  "Selected model is at capacity. Please try a different model.";
+const LOWER_KEBAB_CASE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const SAFE_ARTIFACT_DIRECTORY_NAME = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u;
 export const HELDOUT_PERMISSION_PROFILE = "benchmark";
 export const HELDOUT_AGENT_READ_ISOLATION =
   "codex-minimal-workspace-plugin-toolchain-read-v1";
@@ -180,8 +184,12 @@ export async function loadDevelopmentSuite(input) {
   } else {
     const ids = new Set();
     for (const [index, benchmarkCase] of suite.cases.entries()) {
-      if (!benchmarkCase?.id || ids.has(benchmarkCase.id)) {
-        errors.push(`cases[${index}].id must be unique and non-empty`);
+      if (
+        typeof benchmarkCase?.id !== "string" ||
+        !LOWER_KEBAB_CASE.test(benchmarkCase.id) ||
+        ids.has(benchmarkCase.id)
+      ) {
+        errors.push(`cases[${index}].id must be unique lower-kebab-case`);
       }
       ids.add(benchmarkCase?.id);
       if (!benchmarkCase?.scenario_class || !benchmarkCase?.task) {
@@ -997,16 +1005,7 @@ export function parseCodexResult(
     reviewerWorkspaceMutations = new Map(),
   } = {},
 ) {
-  const events = raw
-    .split(/\r?\n/u)
-    .filter((line) => line.trim().startsWith("{"))
-    .flatMap((line) => {
-      try {
-        return [JSON.parse(line)];
-      } catch {
-        return [];
-      }
-    });
+  const events = parseCodexEvents(raw);
   const parseCurrentValidationCommand = (command) =>
     parsePostChangeValidation(command, expectedWorkflow, reproductionContract)?.command ?? null;
   const usageEvent = [...events].reverse().find((event) => event?.type === "turn.completed");
@@ -1397,6 +1396,31 @@ export function parseCodexResult(
         }
       : null,
   };
+}
+
+export function isRetryableCodexCapacityFailure({ raw, telemetry }) {
+  if (telemetry?.completed !== false || telemetry?.tokens?.telemetry_complete === true) {
+    return false;
+  }
+  const terminalEvents = parseCodexEvents(raw).slice(-2);
+  return terminalEvents.length === 2 &&
+    terminalEvents[0]?.type === "error" &&
+    terminalEvents[0]?.message === CODEX_CAPACITY_ERROR_MESSAGE &&
+    terminalEvents[1]?.type === "turn.failed" &&
+    terminalEvents[1]?.error?.message === CODEX_CAPACITY_ERROR_MESSAGE;
+}
+
+function parseCodexEvents(raw) {
+  return String(raw ?? "")
+    .split(/\r?\n/u)
+    .filter((line) => line.trim().startsWith("{"))
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line)];
+      } catch {
+        return [];
+      }
+    });
 }
 
 function traceCapsuleStage(
@@ -3585,13 +3609,17 @@ function riskRank(risk) {
 
 export function resolveDevelopmentOutputDirectory(outputDirectory) {
   const resolved = path.resolve(outputDirectory);
+  assertDevelopmentOutputBoundary(resolved);
+  return resolved;
+}
+
+function assertDevelopmentOutputBoundary(resolved) {
   if (
     isSameOrAncestor(PROJECT_ROOT, resolved) &&
     !isSameOrAncestor(SAFE_LOCAL_RESULTS_ROOT, resolved)
   ) {
     throw new Error("Repository-local benchmark output must stay under ignored evals/results/");
   }
-  return resolved;
 }
 
 export async function runVerifier({
@@ -4777,6 +4805,7 @@ export async function runDevelopmentPilot({
     ...benchmarkCase,
     artifact_regression_gates: benchmarkCase.artifact_regression_gates ?? [],
   }));
+  outputDirectory = await preflightDevelopmentOutputDirectory(outputDirectory);
 
   const homeRoot = await mkdtemp(path.join(os.tmpdir(), "leanpowers-codex-homes-"));
   try {
@@ -4842,7 +4871,10 @@ export async function runDevelopmentPilot({
         for (const workflow of order) {
           const runId = `r${repetition + 1}-${benchmarkCase.id}-${workflow}`;
           onProgress({ type: "start", runId, workflow, caseId: benchmarkCase.id });
-          const execution = await runSingleCase({
+          const execution = await runDevelopmentCaseWithCapacityRetry(({
+            allowCapacityRetry,
+          }) => runSingleCase({
+            allowCapacityRetry,
             benchmarkCase,
             codexExecutable,
             codexHome: homes[workflow],
@@ -4855,30 +4887,70 @@ export async function runDevelopmentPilot({
             workflow,
             permissionProfile:
               heldout ? HELDOUT_PERMISSION_PROFILE : undefined,
-          });
-          const { result, artifacts } = execution;
+          }));
+          const { result, artifacts, priorAttempts } = execution;
           runs.push(result);
-          pendingArtifacts.push({ runId, artifacts });
+          pendingArtifacts.push({ runId, artifacts, priorAttempts });
           onProgress({ type: "end", ...result });
         }
       }
     }
 
     const result = makePilotResult(suite, runtime, runs, runRepetitions, selectedCases);
-    await mkdir(outputDirectory, { recursive: true });
     await materializeRunArtifacts(outputDirectory, pendingArtifacts);
-    await writeFile(
-      path.join(outputDirectory, "pilot-result.json"),
-      `${JSON.stringify(result, null, 2)}\n`,
-    );
-    await writeFile(
-      path.join(outputDirectory, "pilot-report.md"),
-      renderDevelopmentReport(result),
-    );
+    await materializeDevelopmentSummaryArtifacts(outputDirectory, {
+      reportMarkdown: renderDevelopmentReport(result),
+      resultJson: `${JSON.stringify(result, null, 2)}\n`,
+    });
     return result;
   } finally {
     await rm(homeRoot, { force: true, recursive: true });
   }
+}
+
+export async function runDevelopmentCaseWithCapacityRetry(runAttempt) {
+  const attempts = [];
+  const first = await runAttempt({
+    allowCapacityRetry: true,
+    attemptNumber: 1,
+  });
+  attempts.push(first);
+  if (first.capacity_retry_eligible === true) {
+    attempts.push(await runAttempt({
+      allowCapacityRetry: false,
+      attemptNumber: 2,
+    }));
+  }
+
+  const finalAttempt = attempts.at(-1);
+  if (finalAttempt?.result === null || finalAttempt?.result === undefined) {
+    throw new Error("Final development benchmark attempt did not produce a result");
+  }
+  const attemptWallSeconds = attempts.map((attempt) => {
+    if (!Number.isFinite(attempt.wall_seconds) || attempt.wall_seconds < 0) {
+      throw new Error("Development benchmark attempt has invalid wall time");
+    }
+    return attempt.wall_seconds;
+  });
+  const finalAttemptWallSeconds = attemptWallSeconds.at(-1);
+  const infrastructureRetryWallSeconds = attemptWallSeconds
+    .slice(0, -1)
+    .reduce((total, value) => total + value, 0);
+  return {
+    artifacts: finalAttempt.artifacts,
+    priorAttempts: attempts.slice(0, -1).map((attempt, index) => ({
+      artifacts: attempt.artifacts,
+      attemptNumber: index + 1,
+    })),
+    result: {
+      ...finalAttempt.result,
+      attempt_count: attempts.length,
+      capacity_retry_count: attempts.length - 1,
+      final_attempt_wall_seconds: finalAttemptWallSeconds,
+      infrastructure_retry_wall_seconds: infrastructureRetryWallSeconds,
+      wall_seconds: finalAttemptWallSeconds,
+    },
+  };
 }
 
 export function renderDevelopmentReport(result) {
@@ -4893,6 +4965,16 @@ export function renderDevelopmentReport(result) {
       paired,
       result.completion === "complete",
     );
+  const performanceGoalAssessment =
+    result.suite_id === "development-effects-performance-confirmatory-v2-2026-07-15" &&
+    tokenTargetResult.eligible === true &&
+    Number.isFinite(tokenTargetResult.observed_share_pct)
+      ? tokenTargetResult.observed_share_pct <= 60
+        ? "PASS — target met"
+        : tokenTargetResult.observed_share_pct <= 65
+          ? "REVIEW — near-target evidence requires categorized assessment"
+          : "FAIL — target missed"
+      : null;
   const rows = result.runs.map((run) =>
     [
       run.case_id,
@@ -4909,6 +4991,8 @@ export function renderDevelopmentReport(result) {
       displayMetric(run.telemetry.tokens?.total),
       displayMetric(run.telemetry.tokens?.uncached_plus_output),
       displayMetric(round(run.wall_seconds, 1)),
+      String(run.attempt_count ?? 1),
+      displayMetric(round(run.infrastructure_retry_wall_seconds ?? 0, 1)),
       displayMetric(run.telemetry.tool_calls),
       displayMetric(run.telemetry.workflow_trace?.read_calls),
       String(run.changes.product.length),
@@ -4958,6 +5042,66 @@ export function renderDevelopmentReport(result) {
       ? "This held-out result is incomplete or did not match the freeze contract, so it is diagnostic only and cannot support a confirmatory claim."
       : "This is real coding and independent executable verification, but it is not the full 11-scenario release benchmark.";
   const reportedCases = Array.isArray(result.cases) ? result.cases : [];
+  const categoryResult = (label, selectedRuns) => {
+    const workflowMetrics = categoryWorkflowMetrics(selectedRuns);
+    const categoryPaired = aggregatePairedRuns(selectedRuns, {
+      matrixComplete: result.completion === "complete",
+    }).all_pairs;
+    return {
+      label,
+      paired: categoryPaired,
+      workflowMetrics,
+    };
+  };
+  const categoryResults = reportedCases.map((benchmarkCase) => categoryResult(
+    developmentReportCategory(benchmarkCase.id),
+    result.runs.filter((run) => run.case_id === benchmarkCase.id),
+  ));
+  const ownerResults = [...new Set(reportedCases.map(
+    ({ expected_workflow: owner }) => owner,
+  ))].map((owner) => {
+    const caseIds = new Set(reportedCases
+      .filter(({ expected_workflow: expectedWorkflow }) => expectedWorkflow === owner)
+      .map(({ id }) => id));
+    return categoryResult(
+      `${owner} owner aggregate`,
+      result.runs.filter((run) => caseIds.has(run.case_id)),
+    );
+  });
+  const reportedCategoryResults = [...categoryResults, ...ownerResults];
+  const categoryRows = reportedCategoryResults.map(({ label, paired: metrics, workflowMetrics }) => {
+    const baseline = workflowMetrics["superpowers-6.1.1"];
+    const candidate = workflowMetrics["leanpowers-0.2.0"];
+    return [
+      label,
+      String(metrics.count),
+      `${baseline.passed}/${baseline.total}`,
+      `${candidate.passed}/${candidate.total}`,
+      displayMetric(baseline.total_tokens),
+      displayMetric(candidate.total_tokens),
+      displayPercent(metrics.aggregate_model_token_share_pct),
+      displayMetric(baseline.median_tokens),
+      displayMetric(candidate.median_tokens),
+      displayMetric(baseline.median_wall_seconds),
+      displayMetric(candidate.median_wall_seconds),
+      displayPercent(metrics.median_wall_reduction_pct),
+    ].join(" | ");
+  });
+  const categoryDiagnosticRows = reportedCategoryResults.flatMap(
+    ({ label, workflowMetrics }) => [...WORKFLOWS].map((workflow) => {
+      const metrics = workflowMetrics[workflow];
+      return [
+        label,
+        workflow,
+        displayMetric(metrics.median_fresh_tokens),
+        displayMetric(metrics.median_output_tokens),
+        displayMetric(metrics.median_tool_calls),
+        displayMetric(metrics.median_workflow_reads),
+        String(metrics.capacity_retries),
+        displayMetric(metrics.infrastructure_retry_wall_seconds),
+      ].join(" | ");
+    }),
+  );
   const caseScope = reportedCases.length === 1
     ? "the one reported fixture"
     : `the ${reportedCases.length} reported fixtures`;
@@ -5014,11 +5158,31 @@ export function renderDevelopmentReport(result) {
     "--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:",
     ...summaryRows,
     "",
+    "## Results by task category",
+    "",
+    "Category | Pairs | Superpowers quality | LeanPowers quality | Superpowers total tokens | LeanPowers total tokens | Lean token share | Superpowers median tokens | LeanPowers median tokens | Superpowers median wall | LeanPowers median wall | Lean wall reduction",
+    "--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:",
+    ...categoryRows,
+    "",
+    "## Category source diagnostics",
+    "",
+    "Category | Workflow | Median fresh tokens | Median output tokens | Median tool calls | Median workflow reads | Capacity retries | Infrastructure retry wall",
+    "--- | --- | ---: | ---: | ---: | ---: | ---: | ---:",
+    ...categoryDiagnosticRows,
+    "",
     "## Token target",
     "",
     `Metric: **${tokenTarget.metric}** across **${tokenTarget.population}**; LeanPowers target: at most **${tokenTarget.max_share_pct}%** of Superpowers model tokens.`,
     "",
     `Status: **${tokenTargetResult.status}**; eligible pairs: ${tokenTargetResult.eligible_pair_count}/${tokenTargetResult.required_pair_count}; observed share: ${Number.isFinite(tokenTargetResult.observed_share_pct) ? `${round(tokenTargetResult.observed_share_pct, 1)}%` : "n/a"}.`,
+    ...(performanceGoalAssessment === null
+      ? []
+      : [
+          "",
+          `Performance-goal assessment: **${performanceGoalAssessment}**. The 60–65% band never bypasses quality gates and is not an automatic PASS.`,
+          "",
+          "Wall time is secondary: complete pair telemetry is mandatory; 0% through -20% is an advisory non-improvement, while a slowdown greater than 20% is a material regression.",
+        ]),
     "",
     "## Paired reductions",
     "",
@@ -5036,8 +5200,8 @@ export function renderDevelopmentReport(result) {
     "",
     "## Paired runs",
     "",
-    "Case | Risk | Rep | Workflow | Task | Conformance | Declared | Artifact regression | Model tokens | Fresh tokens | Wall seconds | Tool calls | Workflow reads | Product files | Workflow artifacts | Scope violations",
-    "--- | --- | ---: | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:",
+    "Case | Risk | Rep | Workflow | Task | Conformance | Declared | Artifact regression | Model tokens | Fresh tokens | Wall seconds | Attempts | Capacity retry wall | Tool calls | Workflow reads | Product files | Workflow artifacts | Scope violations",
+    "--- | --- | ---: | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:",
     ...rows,
     "",
     "## Failed-run reasons",
@@ -5053,11 +5217,57 @@ export function renderDevelopmentReport(result) {
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
     `- Paired reductions and Lean token shares are computed within each identical case and repetition. The declared token target uses ${tokenTarget.metric === "aggregate-model-token-share" ? "the ratio of summed LeanPowers tokens to summed Superpowers tokens" : "the maximum paired LeanPowers share"} across ${tokenTarget.population}; every-pair and median shares remain distribution diagnostics rather than substitute quality gates. Complete telemetry and the full target population are required. Failing faster or skipping workflow gates never counts as an improvement.`,
     "- Codex CLI does not expose a deterministic seed, so paired repetitions reduce noise but do not eliminate it.",
+    "- Exact terminal model-capacity failures without complete token telemetry may retry once from a fresh disposable workspace. Capacity retries are isolated from workflow wall-time comparisons, remain visible as separate attempt time, and never apply to agent, test, verifier, or conformance failures.",
     `- The reported cases cover only these scenario classes: ${scenarioScope || "none"}. They do not establish universal non-inferiority.`,
     ...caseSpecificBoundaries,
     "- Raw transcripts remain local and are written only after every run finishes. Disposable workspaces are destroyed after each run and are not publication artifacts.",
     "",
   ].join("\n");
+}
+
+function categoryWorkflowMetrics(runs) {
+  return Object.fromEntries([...WORKFLOWS].map((workflow) => {
+    const selected = runs.filter((run) => run.workflow === workflow);
+    const tokenTotals = selected.map((run) => run.telemetry.tokens?.total);
+    const totalTokens = selected.length > 0 && tokenTotals.every((value) =>
+      Number.isFinite(value) && value > 0
+    )
+      ? tokenTotals.reduce((total, value) => total + value, 0)
+      : null;
+    return [workflow, {
+      total: selected.length,
+      passed: selected.filter((run) => run.outcome.status === "PASS").length,
+      total_tokens: totalTokens,
+      median_tokens: median(tokenTotals),
+      median_fresh_tokens: median(
+        selected.map((run) => run.telemetry.tokens?.uncached_plus_output),
+      ),
+      median_output_tokens: median(
+        selected.map((run) => run.telemetry.tokens?.output),
+      ),
+      median_wall_seconds: round(median(selected.map((run) => run.wall_seconds)), 1),
+      median_tool_calls: median(selected.map((run) => run.telemetry.tool_calls)),
+      median_workflow_reads: median(
+        selected.map((run) => run.telemetry.workflow_trace?.read_calls),
+      ),
+      capacity_retries: selected.reduce(
+        (total, run) => total + (run.capacity_retry_count ?? 0),
+        0,
+      ),
+      infrastructure_retry_wall_seconds: round(selected.reduce(
+        (total, run) => total + (run.infrastructure_retry_wall_seconds ?? 0),
+        0,
+      ), 1),
+    }];
+  }));
+}
+
+function developmentReportCategory(caseId) {
+  return ({
+    "coalesced-half-open-intervals": "collection-transform build",
+    "escaped-field-parser": "Unicode parser build",
+    "transactional-batch-flush": "transactional-state debug",
+  })[caseId] ?? caseId;
 }
 
 function pairedRow(label, metrics) {
@@ -5077,6 +5287,7 @@ function pairedRow(label, metrics) {
 }
 
 async function runSingleCase({
+  allowCapacityRetry = false,
   benchmarkCase,
   codexExecutable,
   codexHome,
@@ -5154,6 +5365,30 @@ async function runSingleCase({
       reproductionContract: benchmarkCase.reproduction_contract,
       reviewerWorkspaceMutations: reviewerMutationTracker?.mutations(),
     });
+    const capacityRetryEligible = isRetryableCodexCapacityFailure({
+      raw: agent.stdout,
+      telemetry,
+    });
+    if (allowCapacityRetry && capacityRetryEligible) {
+      const gitState = await inspectBenchmarkGitState({
+        baselineHead,
+        environment: toolchain.environment,
+        gitExecutable: toolchain.git,
+        workspace,
+      });
+      return {
+        artifacts: {
+          agent_stderr: agent.stderr,
+          agent_stdout: agent.stdout,
+          final_message: telemetry.final_message,
+          verifier: null,
+          workspace_patch: gitState.workspace_patch,
+        },
+        capacity_retry_eligible: true,
+        result: null,
+        wall_seconds: wallSeconds,
+      };
+    }
     const routeLedger = parseLeanRouteLedger(telemetry.first_progress_message);
     const declaredRisk = extractDeclaredRisk(telemetry.first_progress_message);
     const activationReported = reportsWorkflowActivation({
@@ -5260,6 +5495,7 @@ async function runSingleCase({
       ),
     };
     return {
+      capacity_retry_eligible: capacityRetryEligible,
       result,
       artifacts: {
         agent_stderr: agent.stderr,
@@ -5268,6 +5504,7 @@ async function runSingleCase({
         verifier: verifierEvidence,
         workspace_patch: workspacePatch,
       },
+      wall_seconds: wallSeconds,
     };
   } finally {
     await rm(runRoot, { force: true, recursive: true });
@@ -5890,21 +6127,154 @@ async function gitWorkspacePatch(workspace, baselineHead, toolchain) {
   return diff.stdout;
 }
 
-async function materializeRunArtifacts(outputDirectory, pendingArtifacts) {
-  for (const { runId, artifacts } of pendingArtifacts) {
-    const runDirectory = path.join(outputDirectory, "raw", runId);
-    await mkdir(runDirectory, { recursive: true });
-    await Promise.all([
-      writeFile(path.join(runDirectory, "codex.stdout.jsonl"), artifacts.agent_stdout),
-      writeFile(path.join(runDirectory, "codex.stderr.log"), artifacts.agent_stderr),
-      writeFile(path.join(runDirectory, "final-message.md"), artifacts.final_message),
-      writeFile(
-        path.join(runDirectory, "verifier.json"),
-        `${JSON.stringify(artifacts.verifier, null, 2)}\n`,
-      ),
-      writeFile(path.join(runDirectory, "workspace.patch"), artifacts.workspace_patch),
-    ]);
+export async function materializeRunArtifacts(outputDirectory, pendingArtifacts) {
+  const rawDirectory = path.resolve(outputDirectory, "raw");
+  await mkdir(rawDirectory, { recursive: true });
+  const rawStat = await lstat(rawDirectory);
+  if (rawStat.isSymbolicLink() || !rawStat.isDirectory()) {
+    throw new Error("Development benchmark raw artifact root must be a real directory");
   }
+  const rawRoot = await realpath(rawDirectory);
+
+  for (const { runId, artifacts, priorAttempts = [] } of pendingArtifacts) {
+    if (
+      typeof runId !== "string" ||
+      !SAFE_ARTIFACT_DIRECTORY_NAME.test(runId)
+    ) {
+      throw new Error(
+        "Development benchmark run id must use safe lowercase segments",
+      );
+    }
+    const runDirectory = await ensureArtifactChildDirectory(rawRoot, runId);
+    await writeRunArtifactSet(runDirectory, artifacts);
+    const attemptsDirectory = priorAttempts.length === 0
+      ? null
+      : await ensureArtifactChildDirectory(runDirectory, "attempts");
+    for (const { attemptNumber, artifacts: attemptArtifacts } of priorAttempts) {
+      if (!Number.isSafeInteger(attemptNumber) || attemptNumber < 1) {
+        throw new Error("Development benchmark attempt number must be a positive safe integer");
+      }
+      const attemptDirectory = await ensureArtifactChildDirectory(
+        attemptsDirectory,
+        `attempt-${attemptNumber}`,
+      );
+      await writeRunArtifactSet(attemptDirectory, attemptArtifacts);
+    }
+  }
+}
+
+export async function preflightDevelopmentOutputDirectory(outputDirectory) {
+  const resolved = resolveDevelopmentOutputDirectory(outputDirectory);
+  assertDevelopmentOutputBoundary(await prospectiveCanonicalPath(resolved));
+  await mkdir(resolved, { recursive: true });
+  const stat = await lstat(resolved);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    throw new Error("Development benchmark output must be a real directory");
+  }
+  if ((await readdir(resolved)).length > 0) {
+    throw new Error("Development benchmark output directory must be empty");
+  }
+  const canonical = await realpath(resolved);
+  assertDevelopmentOutputBoundary(canonical);
+  return canonical;
+}
+
+async function prospectiveCanonicalPath(target) {
+  let existing = target;
+  const suffix = [];
+  while (true) {
+    try {
+      await lstat(existing);
+      break;
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      const parent = path.dirname(existing);
+      if (parent === existing) throw error;
+      suffix.unshift(path.basename(existing));
+      existing = parent;
+    }
+  }
+  return path.resolve(await realpath(existing), ...suffix);
+}
+
+export async function materializeDevelopmentSummaryArtifacts(
+  outputDirectory,
+  { reportMarkdown, resultJson },
+) {
+  await Promise.all([
+    writeFile(
+      path.join(outputDirectory, "pilot-result.json"),
+      resultJson,
+      { flag: "wx" },
+    ),
+    writeFile(
+      path.join(outputDirectory, "pilot-report.md"),
+      reportMarkdown,
+      { flag: "wx" },
+    ),
+  ]);
+}
+
+async function ensureArtifactChildDirectory(parentDirectory, name) {
+  if (!SAFE_ARTIFACT_DIRECTORY_NAME.test(name)) {
+    throw new Error("Development benchmark artifact directory name is unsafe");
+  }
+  const candidate = path.resolve(parentDirectory, name);
+  if (!isStrictDescendant(parentDirectory, candidate)) {
+    throw new Error("Development benchmark artifact directory escaped its parent");
+  }
+  try {
+    await mkdir(candidate);
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+    const existing = await lstat(candidate);
+    if (existing.isSymbolicLink()) {
+      throw new Error("Development benchmark artifact directory must not be a symbolic link");
+    }
+    throw new Error("Development benchmark artifact directory must be newly created");
+  }
+  const stat = await lstat(candidate);
+  if (stat.isSymbolicLink()) {
+    throw new Error("Development benchmark artifact directory must not be a symbolic link");
+  }
+  if (!stat.isDirectory()) {
+    throw new Error("Development benchmark artifact path must be a directory");
+  }
+  const resolved = await realpath(candidate);
+  if (!isStrictDescendant(parentDirectory, resolved)) {
+    throw new Error("Development benchmark artifact directory escaped its parent");
+  }
+  return resolved;
+}
+
+async function writeRunArtifactSet(runDirectory, artifacts) {
+  await Promise.all([
+    writeFile(
+      path.join(runDirectory, "codex.stdout.jsonl"),
+      artifacts.agent_stdout,
+      { flag: "wx" },
+    ),
+    writeFile(
+      path.join(runDirectory, "codex.stderr.log"),
+      artifacts.agent_stderr,
+      { flag: "wx" },
+    ),
+    writeFile(
+      path.join(runDirectory, "final-message.md"),
+      artifacts.final_message,
+      { flag: "wx" },
+    ),
+    writeFile(
+      path.join(runDirectory, "verifier.json"),
+      `${JSON.stringify(artifacts.verifier, null, 2)}\n`,
+      { flag: "wx" },
+    ),
+    writeFile(
+      path.join(runDirectory, "workspace.patch"),
+      artifacts.workspace_patch,
+      { flag: "wx" },
+    ),
+  ]);
 }
 
 async function resolveBenchmarkToolchain(codexExecutable) {
@@ -6886,4 +7256,9 @@ function toFileUrl(input) {
 function isSameOrAncestor(parent, child) {
   const relative = path.relative(parent, child);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function isStrictDescendant(parent, child) {
+  const relative = path.relative(parent, child);
+  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
 }

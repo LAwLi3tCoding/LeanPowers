@@ -1,0 +1,8 @@
+{
+  "name": "transactional-batch-flush-benchmark",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}
