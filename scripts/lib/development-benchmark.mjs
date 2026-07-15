@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, realpathSync } from "node:fs";
 import {
   access,
   chmod,
@@ -11,6 +11,7 @@ import {
   readdir,
   readFile,
   readlink,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -35,6 +36,45 @@ const FALLBACK_BENCHMARK_PATH = [
   "/usr/sbin",
   "/sbin",
 ].join(path.delimiter);
+const VERIFIER_OUTPUT_LIMIT_BYTES = 2_000_000;
+const VERIFIER_SANDBOX_MODES = new Set([
+  "linux-bubblewrap-hermetic-v2",
+  "macos-seatbelt-hermetic-v2",
+]);
+const MACOS_VERIFIER_SANDBOX_PROFILE = [
+  "(version 1)",
+  "(deny default)",
+  "(import \"system.sb\")",
+  "(allow process*)",
+  "(allow signal)",
+  "(deny network*)",
+  "(allow file-read-metadata)",
+  "(allow file-read*",
+  "  (subpath (param \"WORKSPACE\"))",
+  "  (subpath (param \"SANDBOX_HOME\"))",
+  "  (subpath \"/opt/homebrew\")",
+  "  (subpath \"/usr/local\"))",
+  "(deny file-read* (require-all",
+  "  (subpath \"/Users\")",
+  "  (require-not (subpath (param \"WORKSPACE\")))",
+  "  (require-not (subpath (param \"SANDBOX_HOME\")))))",
+  "(deny file-read* (subpath \"/Volumes\"))",
+  "(deny file-read* (subpath \"/Network\"))",
+  "(deny file-read* (require-all",
+  "  (subpath \"/private/tmp\")",
+  "  (require-not (subpath (param \"SANDBOX_ROOT\")))))",
+  "(deny file-read* (require-all",
+  "  (subpath (param \"HOST_TMP\"))",
+  "  (require-not (subpath (param \"SANDBOX_ROOT\")))))",
+  "(deny file-read*",
+  "  (literal \"/private/etc/passwd\")",
+  "  (literal \"/private/etc/master.passwd\")",
+  "  (literal \"/private/etc/group\")",
+  "  (literal \"/private/etc/hosts\"))",
+  "(allow file-write*",
+  "  (subpath (param \"SANDBOX_HOME\"))",
+  "  (literal \"/dev/null\"))",
+].join("\n");
 
 export function benchmarkEnvironment(home, overrides = {}) {
   return {
@@ -56,8 +96,11 @@ export function benchmarkEnvironment(home, overrides = {}) {
 
 export async function loadDevelopmentSuite(input) {
   const suiteUrl = toFileUrl(input);
-  const suite = JSON.parse(await readFile(suiteUrl, "utf8"));
+  const suiteSource = await readFile(suiteUrl, "utf8");
+  const suite = JSON.parse(suiteSource);
+  suite.suite_sha256 = createHash("sha256").update(suiteSource).digest("hex");
   const errors = [];
+  const suiteRoot = await realpath(fileURLToPath(new URL(".", suiteUrl)));
 
   if (suite.schema_version !== 1) errors.push("schema_version must equal 1");
   if (suite.evidence_level !== "paired-development-pilot") {
@@ -116,6 +159,54 @@ export async function loadDevelopmentSuite(input) {
       if (!Array.isArray(benchmarkCase?.verifier_files) || benchmarkCase.verifier_files.length === 0) {
         errors.push(`cases[${index}].verifier_files must be non-empty`);
       }
+      let workspacePath = null;
+      try {
+        const workspaceUrl = new URL(benchmarkCase.workspace, suiteUrl);
+        const workspaceStat = await lstat(workspaceUrl);
+        workspacePath = await realpath(fileURLToPath(workspaceUrl));
+        if (
+          !workspaceStat.isDirectory() ||
+          !isSameOrAncestor(suiteRoot, workspacePath)
+        ) {
+          errors.push(`cases[${index}].workspace must be a direct directory inside the suite root`);
+          workspacePath = null;
+        } else {
+          benchmarkCase.workspace_snapshot = await snapshotWorkspaceDirectory(
+            workspacePath,
+          );
+        }
+      } catch {
+        errors.push(`cases[${index}].workspace must be a readable direct directory`);
+      }
+      if (Array.isArray(benchmarkCase?.verifier_files)) {
+        benchmarkCase.verifier_snapshots = [];
+        for (const [verifierIndex, verifierFile] of benchmarkCase.verifier_files.entries()) {
+          try {
+            const verifierUrl = new URL(verifierFile, suiteUrl);
+            const verifierStat = await lstat(verifierUrl);
+            const verifierPath = await realpath(fileURLToPath(verifierUrl));
+            if (
+              !verifierStat.isFile() ||
+              !isSameOrAncestor(suiteRoot, verifierPath) ||
+              (workspacePath !== null && isSameOrAncestor(workspacePath, verifierPath))
+            ) {
+              errors.push(
+                `cases[${index}].verifier_files[${verifierIndex}] must be a direct file inside the suite root and outside the candidate workspace`,
+              );
+            } else {
+              const source = await readFile(verifierPath, "utf8");
+              benchmarkCase.verifier_snapshots.push({
+                sha256: createHash("sha256").update(source).digest("hex"),
+                source,
+              });
+            }
+          } catch {
+            errors.push(
+              `cases[${index}].verifier_files[${verifierIndex}] must be a readable direct file`,
+            );
+          }
+        }
+      }
       if (
         !Array.isArray(benchmarkCase?.change_policy?.product) ||
         benchmarkCase.change_policy.product.length === 0 ||
@@ -142,6 +233,67 @@ export async function loadDevelopmentSuite(input) {
           errors.push(`cases[${index}].reproduction_contract.expected_output must be an object`);
         }
       }
+      const artifactGates = benchmarkCase?.artifact_regression_gates;
+      if (artifactGates !== undefined) {
+        if (!Array.isArray(artifactGates) || artifactGates.length === 0) {
+          errors.push(`cases[${index}].artifact_regression_gates must be a non-empty array`);
+        } else {
+          const gateIds = new Set();
+          for (const [gateIndex, gate] of artifactGates.entries()) {
+            const label = `cases[${index}].artifact_regression_gates[${gateIndex}]`;
+            if (
+              typeof gate?.id !== "string" ||
+              !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(gate.id) ||
+              gateIds.has(gate.id)
+            ) {
+              errors.push(`${label}.id must be unique lower-kebab-case`);
+            }
+            gateIds.add(gate?.id);
+            const mutation = gate?.mutation;
+            if (
+              mutation?.kind !== "replace-file" ||
+              !isSafeRelativePath(mutation?.target) ||
+              !isSafeRelativePath(mutation?.source)
+            ) {
+              errors.push(`${label}.mutation must declare safe replace-file target and source paths`);
+              continue;
+            }
+            const productPatterns = benchmarkCase?.change_policy?.product ?? [];
+            const testPatterns = benchmarkCase?.change_policy?.tests ?? [];
+            const workflowPatterns = benchmarkCase?.change_policy?.workflow ?? [];
+            if (
+              !productPatterns.some((pattern) => matchGlob(mutation.target, pattern)) ||
+              testPatterns.some((pattern) => matchGlob(mutation.target, pattern)) ||
+              workflowPatterns.some((pattern) => matchGlob(mutation.target, pattern))
+            ) {
+              errors.push(`${label}.mutation.target must address product code, not tests or workflow files`);
+            }
+            try {
+              const sourceUrl = new URL(mutation.source, suiteUrl);
+              const sourceStat = await lstat(sourceUrl);
+              if (!sourceStat.isFile()) {
+                errors.push(`${label}.mutation.source must be a regular file`);
+                continue;
+              }
+              const sourcePath = await realpath(fileURLToPath(sourceUrl));
+              if (!isSameOrAncestor(suiteRoot, sourcePath)) {
+                errors.push(`${label}.mutation.source must resolve inside the suite root`);
+                continue;
+              }
+              if (workspacePath !== null && isSameOrAncestor(workspacePath, sourcePath)) {
+                errors.push(`${label}.mutation.source must stay outside the candidate workspace`);
+                continue;
+              }
+              const replacement = await readFile(sourcePath, "utf8");
+              mutation.replacement = replacement;
+              mutation.replacement_sha256 =
+                createHash("sha256").update(replacement).digest("hex");
+            } catch {
+              errors.push(`${label}.mutation.source must be a readable regular file`);
+            }
+          }
+        }
+      }
     }
   }
 
@@ -149,6 +301,133 @@ export async function loadDevelopmentSuite(input) {
     throw new Error(`Invalid development benchmark suite:\n${errors.join("\n")}`);
   }
   return suite;
+}
+
+async function snapshotWorkspaceDirectory(workspace) {
+  const entries = [];
+  const visit = async (directory, relativeDirectory = "") => {
+    const children = await readdir(directory, { withFileTypes: true });
+    children.sort((left, right) =>
+      left.name < right.name ? -1 : left.name > right.name ? 1 : 0
+    );
+    for (const child of children) {
+      const relativePath = relativeDirectory
+        ? `${relativeDirectory}/${child.name}`
+        : child.name;
+      if (!isSafeWorkspaceSnapshotPath(relativePath)) {
+        throw new Error("workspace snapshot contained a reserved or unsafe path");
+      }
+      const target = path.join(directory, child.name);
+      const stat = await lstat(target);
+      if (stat.isSymbolicLink()) {
+        throw new Error("workspace snapshots do not support symlinks");
+      }
+      if (stat.isDirectory()) {
+        entries.push({ kind: "directory", path: relativePath });
+        await visit(target, relativePath);
+      } else if (stat.isFile()) {
+        entries.push({
+          contents_base64: (await readFile(target)).toString("base64"),
+          executable: (stat.mode & 0o111) !== 0,
+          kind: "file",
+          path: relativePath,
+        });
+      } else {
+        throw new Error("workspace snapshot contained an unsupported entry");
+      }
+    }
+  };
+  await visit(workspace);
+  entries.sort((left, right) =>
+    left.path < right.path ? -1 : left.path > right.path ? 1 : 0
+  );
+  return {
+    entries,
+    sha256: workspaceSnapshotSha256(entries),
+  };
+}
+
+function workspaceSnapshotSha256(entries) {
+  if (!Array.isArray(entries)) {
+    throw new Error("workspace snapshot entries were malformed");
+  }
+  const hash = createHash("sha256");
+  const paths = new Set();
+  const directories = new Set();
+  let previousPath = null;
+  for (const entry of entries) {
+    if (
+      entry === null ||
+      typeof entry !== "object" ||
+      !isSafeWorkspaceSnapshotPath(entry.path) ||
+      paths.has(entry.path) ||
+      (previousPath !== null && entry.path <= previousPath) ||
+      !["directory", "file"].includes(entry.kind)
+    ) {
+      throw new Error("workspace snapshot entry was malformed or duplicated");
+    }
+    const parent = path.posix.dirname(entry.path);
+    if (parent !== "." && !directories.has(parent)) {
+      throw new Error("workspace snapshot entry was missing its parent directory");
+    }
+    previousPath = entry.path;
+    paths.add(entry.path);
+    if (entry.kind === "directory") {
+      if (Object.keys(entry).sort().join(",") !== "kind,path") {
+        throw new Error("workspace snapshot directory entry was not closed");
+      }
+      directories.add(entry.path);
+      updateFingerprint(hash, `directory:${entry.path}`, "");
+      continue;
+    }
+    if (
+      Object.keys(entry).sort().join(",") !==
+        "contents_base64,executable,kind,path" ||
+      typeof entry.executable !== "boolean" ||
+      typeof entry.contents_base64 !== "string"
+    ) {
+      throw new Error("workspace snapshot file entry was not closed");
+    }
+    const contents = Buffer.from(entry.contents_base64, "base64");
+    if (contents.toString("base64") !== entry.contents_base64) {
+      throw new Error("workspace snapshot file content was not canonical base64");
+    }
+    updateFingerprint(
+      hash,
+      `file:${entry.path}:${entry.executable ? "executable" : "regular"}`,
+      contents,
+    );
+  }
+  return hash.digest("hex");
+}
+
+function isSafeWorkspaceSnapshotPath(value) {
+  return isSafeRelativePath(value) &&
+    !value.includes("\\") &&
+    path.posix.normalize(value) === value &&
+    value.split("/")[0] !== ".git";
+}
+
+export async function materializeWorkspaceSnapshot(snapshot, workspace) {
+  if (
+    snapshot === null ||
+    typeof snapshot !== "object" ||
+    !/^[a-f0-9]{64}$/u.test(String(snapshot.sha256 ?? "")) ||
+    workspaceSnapshotSha256(snapshot.entries) !== snapshot.sha256
+  ) {
+    throw new Error("workspace snapshot manifest did not match its entries");
+  }
+  await mkdir(workspace, { recursive: true });
+  for (const entry of snapshot.entries) {
+    const target = path.join(workspace, entry.path);
+    if (entry.kind === "directory") {
+      await mkdir(target, { recursive: true });
+      continue;
+    }
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, Buffer.from(entry.contents_base64, "base64"));
+    await chmod(target, entry.executable ? 0o755 : 0o644);
+  }
 }
 
 export function buildClaudeArgs({
@@ -237,14 +516,22 @@ export function parseClaudeResult(raw) {
     };
   }
   const usage = parsed?.usage;
-  const tokenFields = {
-    input: finiteNumber(usage?.input_tokens),
-    output: finiteNumber(usage?.output_tokens),
-    cache_creation_input: finiteNumber(usage?.cache_creation_input_tokens),
-    cache_read_input: finiteNumber(usage?.cache_read_input_tokens),
+  const rawTokenFields = {
+    input: usage?.input_tokens,
+    output: usage?.output_tokens,
+    cache_creation_input: usage?.cache_creation_input_tokens,
+    cache_read_input: usage?.cache_read_input_tokens,
   };
-  const hasTokenTelemetry = Object.values(tokenFields).some((value) => value !== null);
-  const tokens = hasTokenTelemetry
+  const hasTokenTelemetry = Object.values(rawTokenFields).some(
+    (value) => value !== undefined,
+  );
+  const tokenFields = Object.fromEntries(Object.entries(rawTokenFields).map(
+    ([key, value]) => [key, nonNegativeSafeInteger(value)],
+  ));
+  const tokenTelemetryValid = Object.values(rawTokenFields).every(
+    (value) => value === undefined || nonNegativeSafeInteger(value) !== null,
+  );
+  const tokens = hasTokenTelemetry && tokenTelemetryValid
     ? {
         input: tokenFields.input ?? 0,
         output: tokenFields.output ?? 0,
@@ -297,12 +584,15 @@ export function parseCodexResult(
     usage.cached_input_tokens,
     usage.output_tokens,
     usage.reasoning_output_tokens,
-  ].some(Number.isFinite);
-  const input = finiteNumber(usage?.input_tokens);
-  const cachedInput = finiteNumber(usage?.cached_input_tokens);
-  const output = finiteNumber(usage?.output_tokens);
+  ].some((value) => value !== undefined);
+  const input = nonNegativeSafeInteger(usage?.input_tokens);
+  const cachedInput = nonNegativeSafeInteger(usage?.cached_input_tokens);
+  const output = nonNegativeSafeInteger(usage?.output_tokens);
   const cacheValid = input !== null && cachedInput !== null && cachedInput >= 0 && cachedInput <= input;
-  const telemetryComplete = cacheValid && output !== null;
+  const total = input !== null && output !== null && input + output > 0
+    ? input + output
+    : null;
+  const telemetryComplete = cacheValid && output !== null && total !== null;
   const completedItems = events.filter((event) => event?.type === "item.completed");
   const toolItems = completedItems.filter(
     (event) => !["agent_message", "reasoning"].includes(event?.item?.type),
@@ -627,8 +917,8 @@ export function parseCodexResult(
           input,
           cached_input: cachedInput,
           output,
-          reasoning_output: finiteNumber(usage?.reasoning_output_tokens),
-          total: input !== null && output !== null ? input + output : null,
+          reasoning_output: nonNegativeSafeInteger(usage?.reasoning_output_tokens),
+          total,
           uncached_plus_output: telemetryComplete ? input - cachedInput + output : null,
           telemetry_complete: telemetryComplete,
         }
@@ -652,42 +942,21 @@ function traceCapsuleStage(
     ["item.started", "item.completed"].includes(event?.type) &&
     !["agent_message", "reasoning"].includes(event?.item?.type)
   )?.index ?? events.length;
-  const routeLedgers = indexed.flatMap(({ event, index }) => {
-    if (
-      event?.type !== "item.completed" ||
-      event?.item?.type !== "agent_message"
-    ) {
-      return [];
-    }
-    const ledger = parseLeanRouteLedgerCandidate(event.item.text);
-    return ledger === null ? [] : [{ event, index, ledger }];
-  });
-  const routeLedgerOccurrences = routeLedgers.length;
-  const initialRouteLedger = routeLedgers.find(({ index }) => index < firstToolIndex);
+  const routeTimeline = analyzeLeanRouteTimeline(indexed, firstToolIndex);
+  const routeLedgerOccurrences = routeTimeline.route_ledger_occurrences;
+  const initialRouteLedger = routeTimeline.initial_route_ledger;
+  const routeDeclarationsConsistent =
+    routeTimeline.route_declarations_consistent;
+  const riskMonotonicObserved = routeTimeline.risk_monotonic_observed;
   const ledgerBeforeToolsObserved =
-    routeLedgers.length === 1 &&
     initialRouteLedger !== undefined &&
-    parseLeanRouteLedger(initialRouteLedger.event.item.text) !== null;
+    initialRouteLedger.ledger !== null;
   const canonicalRouteDeclarationObserved =
     initialRouteLedger !== undefined &&
-    isCanonicalLeanRouteDeclaration(initialRouteLedger.event.item.text);
-  const declaredRisk = highestPresentedLeanRouteRisk(indexed) ??
-    (initialRouteLedger ?? routeLedgers[0])?.ledger.risk ?? null;
+    isCanonicalLeanRouteDeclaration(initialRouteLedger.presentation);
+  const declaredRisk = routeTimeline.highest_presented_risk;
   const ledgerKeysAfterInitialObserved =
-    initialRouteLedger !== undefined && (
-      hasForbiddenLeanRouteLedgerKey(
-        String(initialRouteLedger.event.item.text ?? "")
-          .split(/\r?\n/u)
-          .slice(4)
-          .join("\n"),
-      ) ||
-      indexed.some(({ event, index }) =>
-        index > initialRouteLedger.index &&
-        event?.type === "item.completed" &&
-        event?.item?.type === "agent_message" &&
-        hasForbiddenLeanRouteLedgerKey(event.item.text)
-      )
-    );
+    routeTimeline.ledger_keys_after_initial_observed;
   const firstChangeIndex = indexed.find(
     ({ event }) => isCompletedFileChange(event),
   )?.index ?? -1;
@@ -857,13 +1126,12 @@ function traceCapsuleStage(
     ? null
     : validationObserved && postValidationToolCalls === 0;
   const protocolObserved =
-    routeLedgerOccurrences === 1 &&
+    routeDeclarationsConsistent &&
+    riskMonotonicObserved &&
     ledgerBeforeToolsObserved &&
     workflowReads.length === 0 &&
     preChangeStage.protocol_observed &&
     prePatchClauseTestLedgerObserved &&
-    clauseCoverageObserved &&
-    prePatchCounterexampleObserved &&
     !postPatchClauseTestLedgerObserved &&
     multiFilePatchObserved &&
     validationObserved &&
@@ -872,6 +1140,8 @@ function traceCapsuleStage(
   return {
     workflow: expectedWorkflow,
     route_ledger_occurrences: routeLedgerOccurrences,
+    route_declarations_consistent: routeDeclarationsConsistent,
+    risk_monotonic_observed: riskMonotonicObserved,
     ledger_before_tools_observed: ledgerBeforeToolsObserved,
     canonical_route_declaration_observed: canonicalRouteDeclarationObserved,
     ledger_keys_after_initial_observed: ledgerKeysAfterInitialObserved,
@@ -944,17 +1214,27 @@ function isClauseTestLedgerHeaderLine(value) {
 
 function visibleAssertionLines(value) {
   const visible = [];
-  let fenceCharacter = null;
+  let fence = null;
   for (const line of String(value ?? "").split(/\r?\n/u)) {
-    const fence = line.match(/^\s*(`{3,}|~{3,})/u)?.[1] ?? null;
     if (fence !== null) {
-      const character = fence[0];
-      if (fenceCharacter === null) fenceCharacter = character;
-      else if (fenceCharacter === character) fenceCharacter = null;
+      const closing = line.match(/^ {0,12}(`{3,}|~{3,})[ \t]*$/u)?.[1] ?? null;
+      if (
+        closing !== null &&
+        closing[0] === fence.character &&
+        closing.length >= fence.length
+      ) {
+        fence = null;
+      }
+      continue;
+    }
+    const opening = line.match(
+      /^ {0,3}(?:(?:[-*+]|\d+[.)])[ \t]+)?(`{3,}|~{3,})/u,
+    )?.[1] ?? null;
+    if (opening !== null) {
+      fence = { character: opening[0], length: opening.length };
       continue;
     }
     if (
-      fenceCharacter !== null ||
       /^(?: {4}|\t)/u.test(line) ||
       /^\s*>/u.test(line)
     ) {
@@ -1227,23 +1507,28 @@ function tracePreChangeStages(
 
   const attempts = { discover: 0, read: 0, reproduce: 0 };
   const successfulItems = new Map();
-  let currentStage = 0;
   let extraReadCalls = 0;
   let malformedReadCalls = 0;
   let outOfOrderStageCalls = 0;
   let unexpectedCalls = 0;
   for (const { event } of commands) {
     const item = event?.item;
-    const stage = stages[currentStage];
-    if (stage === undefined || !stage.matches(item)) {
+    const matchingStages = stages.filter(({ matches }) => matches(item));
+    if (matchingStages.length !== 1) {
       unexpectedCalls += 1;
-      const matchedStage = stages.find(({ matches }) => matches(item));
-      if (matchedStage !== undefined) {
-        if (matchedStage.name === "read" && successfulItems.has("read")) {
-          extraReadCalls += 1;
-        } else {
-          outOfOrderStageCalls += 1;
-        }
+      continue;
+    }
+    const stage = matchingStages[0];
+    const discoverReady = successfulItems.has("discover");
+    if (
+      (stage.name !== "discover" && !discoverReady) ||
+      successfulItems.has(stage.name)
+    ) {
+      unexpectedCalls += 1;
+      if (stage.name === "read" && successfulItems.has("read")) {
+        extraReadCalls += 1;
+      } else {
+        outOfOrderStageCalls += 1;
       }
       continue;
     }
@@ -1254,7 +1539,6 @@ function tracePreChangeStages(
     }
     if (stage.passes(item)) {
       successfulItems.set(stage.name, item);
-      currentStage += 1;
     } else {
       if (stage.name === "read") malformedReadCalls += 1;
       if (!isStageRetryAuthorized(item)) {
@@ -1303,7 +1587,7 @@ function tracePreChangeStages(
   const retryCalls = Object.values(attempts)
     .reduce((total, count) => total + Math.max(0, count - 1), 0);
   const protocolObserved =
-    currentStage === stages.length &&
+    stages.every(({ name }) => successfulItems.has(name)) &&
     unexpectedCalls === 0 &&
     validationMetadataReadObserved &&
     patchTargetsReadObserved &&
@@ -1958,19 +2242,242 @@ export function evaluateChangedPaths(changedPaths, policy) {
 
 export function evaluateRunOutcome(run) {
   const reasons = [];
+  const verifier = run?.verifier ?? {};
+  const visible = verifier?.visible ?? {};
+  const hidden = verifier?.hidden ?? {};
   if (run.agent_exit_code !== 0) reasons.push("agent exited non-zero");
   if (run.agent_timed_out) reasons.push("agent timed out");
   if (!run.agent_completed) reasons.push("agent did not complete a turn");
   if (!run.head_unchanged) reasons.push("agent moved the benchmark Git HEAD");
-  if (run.verifier.visible.timed_out) reasons.push("visible regression suite timed out");
-  if (run.verifier.hidden.timed_out) reasons.push("hidden verifier timed out");
-  if (run.verifier.visible.exit_code !== 0) reasons.push("visible regression suite failed");
-  if (run.verifier.hidden.exit_code !== 0) reasons.push("hidden verifier failed");
-  if (run.changes.violations.length > 0) reasons.push("changed paths violated scope policy");
+  if (!validCaseSnapshotEvidence(run.case_snapshot)) {
+    reasons.push("case snapshot evidence was missing or malformed");
+  }
+  if (run.verifier_workspace_unchanged !== true) {
+    reasons.push("verifier changed the original candidate workspace");
+  }
+  if (!completeVerifierCommandEvidence(visible)) {
+    reasons.push("visible regression evidence was incomplete");
+  }
+  if (!completeVerifierCommandEvidence(hidden)) {
+    reasons.push("hidden verifier evidence was incomplete");
+  }
+  if (visible.timed_out === true) reasons.push("visible regression suite timed out");
+  if (hidden.timed_out === true) reasons.push("hidden verifier timed out");
+  if (visible.output_limited === true) reasons.push("visible regression suite exceeded its output limit");
+  if (hidden.output_limited === true) reasons.push("hidden verifier exceeded its output limit");
+  if (!isVerifierSandboxMode(visible.sandbox) || hidden.sandbox !== visible.sandbox) {
+    reasons.push("verifier sandbox evidence was missing or inconsistent");
+  }
+  if (visible.exit_code !== 0) reasons.push("visible regression suite failed");
+  if (hidden.exit_code !== 0) reasons.push("hidden verifier failed");
+  const rawRequiredArtifactGateIds =
+    run.required_artifact_regression_gate_ids;
+  const requiredArtifactGateIds = Array.isArray(rawRequiredArtifactGateIds)
+    ? rawRequiredArtifactGateIds
+    : [];
+  if (
+    !Array.isArray(rawRequiredArtifactGateIds)
+  ) {
+    reasons.push("required artifact regression gate ids were malformed");
+  }
+  const requiredArtifactGates = Array.isArray(
+    run.required_artifact_regression_gates,
+  )
+    ? run.required_artifact_regression_gates
+    : [];
+  if (
+    !Array.isArray(run.required_artifact_regression_gates)
+  ) {
+    reasons.push("required artifact regression gate contracts were malformed");
+  }
+  const validRequiredIds = requiredArtifactGateIds.every((id) =>
+    typeof id === "string" && /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(id)
+  );
+  if (!validRequiredIds) {
+    reasons.push("required artifact regression gate ids were malformed");
+  }
+  if (new Set(requiredArtifactGateIds).size !== requiredArtifactGateIds.length) {
+    reasons.push("required artifact regression gate ids were duplicated");
+  }
+  const contractsMatchIds =
+    requiredArtifactGates.length === requiredArtifactGateIds.length &&
+    requiredArtifactGates.every((contract, index) =>
+      contract !== null &&
+      typeof contract === "object" &&
+      contract.id === requiredArtifactGateIds[index] &&
+      isSafeRelativePath(contract.target) &&
+      /^[a-f0-9]{64}$/u.test(String(contract.replacement_sha256 ?? ""))
+    );
+  if (!contractsMatchIds) {
+    reasons.push("required artifact regression gate contracts did not match ids");
+  }
+  if (requiredArtifactGateIds.length > 0) {
+    const artifactRegression = verifier.artifact_regression;
+    if (
+      artifactRegression === null ||
+      typeof artifactRegression !== "object" ||
+      Array.isArray(artifactRegression)
+    ) {
+      reasons.push("artifact regression evidence was missing");
+    } else {
+      const expectedIds = new Set(requiredArtifactGateIds);
+      if (
+        !Array.isArray(artifactRegression.required_gate_ids) ||
+        artifactRegression.required_gate_ids.length !== requiredArtifactGateIds.length ||
+        new Set(artifactRegression.required_gate_ids).size !==
+          artifactRegression.required_gate_ids.length ||
+        artifactRegression.required_gate_ids.some(
+          (id) => typeof id !== "string" || !expectedIds.has(id),
+        ) ||
+        requiredArtifactGateIds.some(
+          (id) => !artifactRegression.required_gate_ids.includes(id),
+        )
+      ) {
+        reasons.push("artifact regression required-gate manifest did not match the case");
+      }
+      if (artifactRegression.status !== "PASS") {
+        reasons.push("artifact regression evidence did not pass");
+      }
+      const observedGates = Array.isArray(artifactRegression.gates)
+        ? artifactRegression.gates
+        : [];
+      if (!Array.isArray(artifactRegression.gates)) {
+        reasons.push("artifact regression gate evidence was malformed");
+      }
+      for (const gateId of expectedIds) {
+        const matching = observedGates.filter((gate) => gate?.id === gateId);
+        if (matching.length !== 1) {
+          reasons.push(`artifact regression gate ${gateId} was missing or duplicated`);
+        } else if (matching[0].status !== "PASS") {
+          const gateReasons = matching[0].reasons?.length > 0
+            ? matching[0].reasons
+            : ["failed"];
+          for (const reason of gateReasons) {
+            reasons.push(`artifact regression gate ${gateId}: ${reason}`);
+          }
+        } else {
+          const expectedGate = requiredArtifactGates.find(
+            (gate) => gate?.id === gateId,
+          );
+          for (const reason of artifactGateEvidenceProblems(
+            matching[0],
+            expectedGate,
+          )) {
+            reasons.push(`artifact regression gate ${gateId}: ${reason}`);
+          }
+        }
+      }
+      if (observedGates.some((gate) => !expectedIds.has(gate?.id))) {
+        reasons.push("artifact regression evidence contained an unexpected gate");
+      }
+    }
+  } else if (verifier.artifact_regression !== null &&
+    verifier.artifact_regression !== undefined) {
+    reasons.push("unexpected artifact regression evidence was present");
+  }
+  if (!Array.isArray(run?.changes?.violations) || run.changes.violations.length > 0) {
+    reasons.push("changed paths violated scope policy");
+  }
   return {
     status: reasons.length === 0 ? "PASS" : "FAIL",
     reasons,
   };
+}
+
+function validCaseSnapshotEvidence(snapshot) {
+  return snapshot !== null &&
+    typeof snapshot === "object" &&
+    !Array.isArray(snapshot) &&
+    Object.keys(snapshot).sort().join(",") ===
+      "mutants_sha256,verifier_sha256,workspace_sha256" &&
+    [
+      snapshot.mutants_sha256,
+      snapshot.verifier_sha256,
+      snapshot.workspace_sha256,
+    ].every((value) => /^[a-f0-9]{64}$/u.test(String(value ?? "")));
+}
+
+function completeVerifierCommandEvidence(evidence) {
+  return evidence !== null &&
+    typeof evidence === "object" &&
+    Number.isInteger(evidence.exit_code) &&
+    evidence.output_limited === false &&
+    isVerifierSandboxMode(evidence.sandbox) &&
+    evidence.timed_out === false &&
+    evidence.signal === null &&
+    typeof evidence.output === "string";
+}
+
+function isVerifierSandboxMode(value) {
+  return typeof value === "string" && VERIFIER_SANDBOX_MODES.has(value);
+}
+
+function artifactGateEvidenceProblems(gate, expectedGate) {
+  const reasons = [];
+  if (
+    expectedGate === undefined ||
+    !isSafeRelativePath(gate.target) ||
+    gate.target !== expectedGate?.target
+  ) {
+    reasons.push("mutation target evidence was missing or inconsistent");
+  }
+  if (
+    !/^[a-f0-9]{64}$/u.test(String(gate.replacement_sha256 ?? "")) ||
+    gate.replacement_sha256 !== expectedGate?.replacement_sha256
+  ) {
+    reasons.push("mutation snapshot hash evidence was missing or inconsistent");
+  }
+  if (Object.hasOwn(gate, "replacement")) {
+    reasons.push("mutation replacement content leaked into result evidence");
+  }
+  const changedTestPaths = gate.changed_visible_test_paths;
+  const candidateTestPaths = gate.candidate_visible_test_paths;
+  if (
+    !Array.isArray(changedTestPaths) ||
+    !Array.isArray(candidateTestPaths) ||
+    candidateTestPaths.length === 0 ||
+    new Set(changedTestPaths).size !== changedTestPaths.length ||
+    new Set(candidateTestPaths).size !== candidateTestPaths.length ||
+    [...changedTestPaths, ...candidateTestPaths].some(
+      (candidate) => !isSafeRelativePath(candidate),
+    ) ||
+    candidateTestPaths.some((candidate) => !changedTestPaths.includes(candidate))
+  ) {
+    reasons.push("candidate visible test delta evidence was missing or inconsistent");
+  }
+  if (!Array.isArray(gate.reasons) || gate.reasons.length !== 0) {
+    reasons.push("passing artifact gate retained failure reasons");
+  }
+  if (!passingBaselineMutantEvidence(gate.baseline_tests_mutant_visible)) {
+    reasons.push("baseline-test counterfactual evidence was incomplete or non-passing");
+  }
+  if (!killedCandidateMutantEvidence(gate.candidate_tests_mutant_visible)) {
+    reasons.push("candidate-test mutant evidence was incomplete or non-killing");
+  }
+  return reasons;
+}
+
+function passingBaselineMutantEvidence(evidence) {
+  return evidence !== null &&
+    typeof evidence === "object" &&
+    evidence.exit_code === 0 &&
+    evidence.output_limited === false &&
+    isVerifierSandboxMode(evidence.sandbox) &&
+    evidence.timed_out === false &&
+    evidence.signal === null &&
+    typeof evidence.output === "string";
+}
+
+function killedCandidateMutantEvidence(evidence) {
+  return evidence !== null &&
+    typeof evidence === "object" &&
+    Number.isInteger(evidence.exit_code) &&
+    evidence.exit_code !== 0 &&
+    evidence.output_limited === false &&
+    isVerifierSandboxMode(evidence.sandbox) &&
+    evidence.timed_out === false &&
+    evidence.signal === null &&
+    typeof evidence.output === "string";
 }
 
 export function evaluateWorkflowConformance(run) {
@@ -2004,8 +2511,11 @@ export function evaluateWorkflowConformance(run) {
       if (!capsule) {
         reasons.push("capsule stage trace was unavailable");
       } else {
-        if (capsule.route_ledger_occurrences !== 1) {
-          reasons.push("route ledger was not emitted exactly once");
+        if (!capsule.route_declarations_consistent) {
+          reasons.push("route declarations were missing or conflicting");
+        }
+        if (!capsule.risk_monotonic_observed) {
+          reasons.push("route risk was downgraded after an upgrade");
         }
         if (!capsule.ledger_before_tools_observed) {
           reasons.push("route ledger was not emitted before task tools");
@@ -2014,7 +2524,7 @@ export function evaluateWorkflowConformance(run) {
           reasons.push("capsule reloaded a Skill or reference");
         }
         if (!capsule.pre_change_stage_protocol_observed) {
-          reasons.push("ordered pre-change stages with bounded evidence-backed retries were not observed");
+          reasons.push("quality-bearing pre-change stages with bounded evidence-backed retries were not observed");
         }
         if (!capsule.discover_observed) {
           reasons.push("content-aware DISCOVER was not observed");
@@ -2036,12 +2546,6 @@ export function evaluateWorkflowConformance(run) {
         }
         if (!capsule.pre_patch_clause_test_ledger_observed) {
           reasons.push("pre-PATCH clause-to-test ledger was not observed");
-        }
-        if (!capsule.clause_coverage_observed) {
-          reasons.push("pre-PATCH clause-to-test ledger did not cover required boundaries");
-        }
-        if (!capsule.pre_patch_counterexample_observed) {
-          reasons.push("grounded pre-PATCH counterexample was not observed");
         }
         if (capsule.post_patch_clause_test_ledger_observed) {
           reasons.push("clause-to-test ledger was repeated after PATCH");
@@ -2130,39 +2634,639 @@ export function resolveDevelopmentOutputDirectory(outputDirectory) {
   return resolved;
 }
 
-export async function runVerifier({ environment = {}, workspace, verifierFiles }) {
-  const injected = [];
-  const verifierHome = await mkdtemp(path.join(os.tmpdir(), "leanpowers-verifier-home-"));
+export async function runVerifier({
+  environment = {},
+  workspace,
+  verifierFiles,
+  verifierSnapshots,
+}) {
+  const verifierRoot = await mkdtemp(path.join(os.tmpdir(), "lp-eval-"));
+  const sandboxHome = path.join(verifierRoot, "home");
+  const sandboxWorkspace = path.join(verifierRoot, "workspace");
   try {
-    await mkdir(path.join(verifierHome, "tmp"), { recursive: true });
-    const env = benchmarkEnvironment(verifierHome, environment);
-    const visible = await runProcess("npm", ["test"], {
-      cwd: workspace,
-      env,
-      timeoutMs: 120_000,
-    });
-    for (const [index, verifierFile] of verifierFiles.entries()) {
-      const target = path.join(
-        workspace,
-        "test",
-        `benchmark-hidden-${String(index + 1).padStart(2, "0")}.test.mjs`,
+    if (await workspaceContainsSymlink(workspace)) {
+      const rejected = failedPublicCommandResult(
+        "workspace symlinks are unsupported by the verifier",
       );
-      await cp(verifierFile, target);
-      injected.push(target);
+      return { visible: rejected, hidden: rejected };
     }
-    const hidden = await runProcess("npm", ["test"], {
-      cwd: workspace,
-      env,
+    const snapshots = verifierSnapshots ?? await snapshotVerifierFiles(verifierFiles);
+    validateVerifierSnapshots(snapshots);
+    await prepareVerifierSandboxCopy({
+      sandboxHome,
+      sandboxWorkspace,
+      workspace,
+    });
+    const visible = await runSandboxedNpmTest({
+      cwd: sandboxWorkspace,
+      env: verifierEnvironment(sandboxHome, environment),
       timeoutMs: 120_000,
     });
+    await prepareVerifierSandboxCopy({
+      sandboxHome,
+      sandboxWorkspace,
+      workspace,
+    });
+    const hidden = await runSandboxedNpmTest({
+      cwd: sandboxWorkspace,
+      env: verifierEnvironment(sandboxHome, environment),
+      verifierSnapshots: snapshots,
+      timeoutMs: 120_000,
+    });
+    const redactPaths = [
+      verifierRoot,
+      sandboxHome,
+      sandboxWorkspace,
+      workspace,
+    ];
     return {
-      visible: publicCommandResult(visible),
-      hidden: publicCommandResult(hidden),
+      visible: publicCommandResult(visible, { redactPaths }),
+      hidden: publicCommandResult(hidden, { redactPaths }),
     };
   } finally {
-    await Promise.all(injected.map((target) => rm(target, { force: true })));
-    await rm(verifierHome, { force: true, recursive: true });
+    await rm(verifierRoot, { force: true, recursive: true });
   }
+}
+
+async function prepareVerifierSandboxCopy({ sandboxHome, sandboxWorkspace, workspace }) {
+  await Promise.all([
+    rm(sandboxHome, { force: true, recursive: true }),
+    rm(sandboxWorkspace, { force: true, recursive: true }),
+  ]);
+  await Promise.all([
+    cp(workspace, sandboxWorkspace, {
+      recursive: true,
+      verbatimSymlinks: true,
+    }),
+    mkdir(path.join(sandboxHome, "tmp"), { recursive: true }),
+  ]);
+  if (await workspaceContainsSymlink(sandboxWorkspace)) {
+    throw new Error("workspace changed to contain a symlink while the verifier copied it");
+  }
+}
+
+async function snapshotVerifierFiles(verifierFiles) {
+  if (!Array.isArray(verifierFiles) || verifierFiles.length === 0) {
+    throw new Error("verifier files must be a non-empty array");
+  }
+  const snapshots = [];
+  for (const verifierFile of verifierFiles) {
+    const stat = await lstat(verifierFile);
+    if (!stat.isFile()) throw new Error("verifier input was not a direct regular file");
+    const source = await readFile(verifierFile, "utf8");
+    snapshots.push({
+      sha256: createHash("sha256").update(source).digest("hex"),
+      source,
+    });
+  }
+  return snapshots;
+}
+
+function validateVerifierSnapshots(snapshots) {
+  if (!Array.isArray(snapshots) || snapshots.length === 0) {
+    throw new Error("verifier snapshots must be a non-empty array");
+  }
+  for (const snapshot of snapshots) {
+    const digest = typeof snapshot?.source === "string"
+      ? createHash("sha256").update(snapshot.source).digest("hex")
+      : null;
+    if (digest === null || digest !== snapshot?.sha256) {
+      throw new Error("verifier snapshot hash did not match its source");
+    }
+  }
+}
+
+function verifierSnapshotManifestSha256(snapshots) {
+  validateVerifierSnapshots(snapshots);
+  const hash = createHash("sha256");
+  for (const [index, snapshot] of snapshots.entries()) {
+    updateFingerprint(hash, `verifier:${index + 1}`, snapshot.sha256);
+  }
+  return hash.digest("hex");
+}
+
+export function caseSnapshotContract(benchmarkCase) {
+  const workspaceSha256 = benchmarkCase?.workspace_snapshot?.sha256;
+  const verifierSha256 = verifierSnapshotManifestSha256(
+    benchmarkCase?.verifier_snapshots,
+  );
+  if (!/^[a-f0-9]{64}$/u.test(String(workspaceSha256 ?? ""))) {
+    throw new Error("benchmark case workspace snapshot hash was missing");
+  }
+  return {
+    mutants_sha256: artifactMutationManifestSha256(
+      benchmarkCase?.artifact_regression_gates ?? [],
+    ),
+    verifier_sha256: verifierSha256,
+    workspace_sha256: workspaceSha256,
+  };
+}
+
+function artifactMutationManifestSha256(gates) {
+  if (!Array.isArray(gates)) {
+    throw new Error("artifact mutation gates were malformed");
+  }
+  const hash = createHash("sha256");
+  for (const [index, gate] of gates.entries()) {
+    const replacementSha256 = gate?.mutation?.replacement_sha256;
+    if (
+      typeof gate?.id !== "string" ||
+      !isSafeRelativePath(gate?.mutation?.target) ||
+      !/^[a-f0-9]{64}$/u.test(String(replacementSha256 ?? ""))
+    ) {
+      throw new Error("artifact mutation manifest was incomplete");
+    }
+    updateFingerprint(
+      hash,
+      `mutant:${index + 1}:${gate.id}:${gate.mutation.target}`,
+      replacementSha256,
+    );
+  }
+  return hash.digest("hex");
+}
+
+function verifierEnvironment(home, environment) {
+  return benchmarkEnvironment(home, {
+    HOSTNAME: "leanpowers-sandbox",
+    LOGNAME: "sandbox",
+    PATH: typeof environment?.PATH === "string"
+      ? environment.PATH
+      : FALLBACK_BENCHMARK_PATH,
+    SHELL: typeof environment?.SHELL === "string"
+      ? environment.SHELL
+      : process.platform === "win32" ? "cmd.exe" : "/bin/sh",
+    USER: "sandbox",
+  });
+}
+
+async function runSandboxedNpmTest({ cwd, env, timeoutMs, verifierSnapshots }) {
+  const workspace = await realpath(cwd);
+  const sandboxHome = await realpath(env.HOME);
+  let command;
+  let args;
+  let input;
+  let sandboxMode;
+  if (process.platform === "darwin") {
+    command = "/usr/bin/sandbox-exec";
+    try {
+      await access(command, fsConstants.X_OK);
+    } catch {
+      return unavailableVerifierSandboxResult("macOS sandbox-exec is unavailable");
+    }
+    sandboxMode = "macos-seatbelt-hermetic-v2";
+    const nestedCommand = verifierSnapshots
+      ? hiddenVerifierCommand(verifierSnapshots, workspace)
+      : { args: ["test"], command: "npm", input: undefined };
+    args = [
+      "-p",
+      MACOS_VERIFIER_SANDBOX_PROFILE,
+      `-DWORKSPACE=${workspace}`,
+      `-DSANDBOX_HOME=${sandboxHome}`,
+      `-DSANDBOX_ROOT=${path.dirname(workspace)}`,
+      `-DHOST_TMP=${realpathSync(os.tmpdir())}`,
+      "--",
+      nestedCommand.command,
+      ...nestedCommand.args,
+    ];
+    input = nestedCommand.input;
+  } else if (process.platform === "linux") {
+    command = "/usr/bin/bwrap";
+    try {
+      await access(command, fsConstants.X_OK);
+    } catch {
+      return unavailableVerifierSandboxResult("Linux bubblewrap is unavailable");
+    }
+    sandboxMode = "linux-bubblewrap-hermetic-v2";
+    const sandboxWorkspace = "/workspace";
+    const sandboxHomePath = path.posix.join("/", "home", "sandbox");
+    const linuxRuntime = await resolveLinuxVerifierRuntime(env);
+    const nestedCommand = verifierSnapshots
+      ? {
+          ...hiddenVerifierCommand(verifierSnapshots, sandboxWorkspace),
+          command: linuxRuntime.node,
+        }
+      : { args: ["test"], command: linuxRuntime.npm, input: undefined };
+    env = {
+      ...env,
+      CODEX_HOME: sandboxHomePath,
+      HOME: sandboxHomePath,
+      HOSTNAME: "leanpowers-sandbox",
+      LOGNAME: "sandbox",
+      PATH: linuxRuntime.path,
+      TMPDIR: `${sandboxHomePath}/tmp`,
+      USER: "sandbox",
+    };
+    args = [
+      "--die-with-parent",
+      "--new-session",
+      "--unshare-net",
+      "--unshare-pid",
+      "--unshare-ipc",
+      "--unshare-uts",
+      "--hostname", "leanpowers-sandbox",
+      "--unshare-cgroup-try",
+      "--ro-bind", "/usr", "/usr",
+      "--dir", "/etc",
+      "--tmpfs", "/home",
+      "--dir",
+      sandboxHomePath,
+      "--tmpfs", sandboxWorkspace,
+      "--dev", "/dev",
+      "--proc", "/proc",
+      ...linuxRuntime.mountArgs,
+      "--ro-bind", workspace, sandboxWorkspace,
+      "--bind", sandboxHome, sandboxHomePath,
+      "--tmpfs", "/tmp",
+      "--tmpfs", "/var/tmp",
+      "--chdir", sandboxWorkspace,
+      "--",
+      nestedCommand.command,
+      ...nestedCommand.args,
+    ];
+    input = nestedCommand.input;
+  } else {
+    return unavailableVerifierSandboxResult(
+      `verifier sandbox is unsupported on ${process.platform}`,
+    );
+  }
+  const result = await runProcess(command, args, {
+    cwd: workspace,
+    env,
+    input,
+    maxOutputBytes: VERIFIER_OUTPUT_LIMIT_BYTES,
+    timeoutMs,
+  });
+  return { ...result, sandboxMode };
+}
+
+function hiddenVerifierCommand(verifierSnapshots, sandboxWorkspace) {
+  validateVerifierSnapshots(verifierSnapshots);
+  const moduleUrls = verifierSnapshots.map(({ source }) => {
+    const compiled = rewriteVerifierModuleSource(source, sandboxWorkspace);
+    return `data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`;
+  });
+  return {
+    args: ["--input-type=module"],
+    command: "node",
+    input: [
+      `process.chdir(${JSON.stringify(sandboxWorkspace)});`,
+      ...moduleUrls.map((url) => `await import(${JSON.stringify(url)});`),
+      "",
+    ].join("\n"),
+  };
+}
+
+function rewriteVerifierModuleSource(source, sandboxWorkspace) {
+  const virtualDirectory = path.join(sandboxWorkspace, "test");
+  const resolveSpecifier = (specifier) => {
+    const resolved = path.resolve(virtualDirectory, specifier);
+    if (!isSameOrAncestor(sandboxWorkspace, resolved)) {
+      throw new Error("verifier module import escaped the sandbox workspace");
+    }
+    return pathToFileURL(resolved).href;
+  };
+  let compiled = String(source).replace(
+    /new\s+URL\(\s*(["'])(\.\.?\/[^"']+)\1\s*,\s*import\.meta\.url\s*\)/gu,
+    (_match, _quote, specifier) => `new URL(${JSON.stringify(resolveSpecifier(specifier))})`,
+  );
+  compiled = compiled.replace(
+    /(\bfrom\s*|\bimport\s*)(["'])(\.\.?\/[^"']+)\2/gu,
+    (_match, prefix, _quote, specifier) =>
+      `${prefix}${JSON.stringify(resolveSpecifier(specifier))}`,
+  );
+  compiled = compiled.replace(
+    /(\bimport\s*\(\s*)(["'])(\.\.?\/[^"']+)\2(\s*\))/gu,
+    (_match, prefix, _quote, specifier, suffix) =>
+      `${prefix}${JSON.stringify(resolveSpecifier(specifier))}${suffix}`,
+  );
+  return compiled;
+}
+
+async function resolveLinuxVerifierRuntime(environment) {
+  const args = [];
+  for (const systemPath of ["/bin", "/sbin", "/lib", "/lib64"]) {
+    try {
+      const stat = await lstat(systemPath);
+      if (stat.isSymbolicLink()) {
+        args.push("--symlink", await readlink(systemPath), systemPath);
+      } else {
+        args.push("--ro-bind", systemPath, systemPath);
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  for (const systemFile of ["/etc/ld.so.cache", "/etc/localtime"]) {
+    try {
+      const stat = await lstat(systemFile);
+      if (stat.isFile()) args.push("--ro-bind", systemFile, systemFile);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  const executables = {};
+  const runtimeRoots = new Set();
+  for (const executable of ["node", "npm"]) {
+    const resolved = await resolveExecutableFromPath(executable, environment.PATH);
+    const real = await realpath(resolved);
+    executables[executable] = real;
+    if (isSameOrAncestor("/usr", real)) continue;
+    runtimeRoots.add(approvedLinuxRuntimeRoot(real));
+  }
+  const minimalRuntimeRoots = [...runtimeRoots].filter((root) =>
+    ![...runtimeRoots].some((other) =>
+      other !== root && isSameOrAncestor(other, root)
+    )
+  ).sort();
+  for (const root of minimalRuntimeRoots) {
+    args.push("--ro-bind", root, root);
+  }
+  return {
+    mountArgs: args,
+    node: executables.node,
+    npm: executables.npm,
+    path: [...new Set([
+      path.dirname(executables.node),
+      path.dirname(executables.npm),
+      "/usr/local/bin",
+      "/usr/bin",
+      "/bin",
+    ])].join(path.delimiter),
+  };
+}
+
+export function approvedLinuxRuntimeRoot(executable) {
+  const marker = `${path.sep}bin${path.sep}`;
+  const markerIndex = executable.lastIndexOf(marker);
+  if (markerIndex <= 0) {
+    throw new Error("verifier runtime executable was outside a bounded bin directory");
+  }
+  const root = executable.slice(0, markerIndex);
+  const broadRoots = new Set([
+    "/",
+    "/home",
+    "/media",
+    "/mnt",
+    "/root",
+    "/run",
+    "/tmp",
+    "/var",
+    "/var/tmp",
+  ]);
+  if (
+    broadRoots.has(root) ||
+    /^\/(?:home|Users)\/[^/]+$/u.test(root) ||
+    isSameOrAncestor(root, os.homedir()) ||
+    isSameOrAncestor(root, realpathSync(os.tmpdir())) ||
+    !isSameOrAncestor(root, executable)
+  ) {
+    throw new Error("verifier runtime root was too broad to mount safely");
+  }
+  return root;
+}
+
+async function resolveExecutableFromPath(command, searchPath) {
+  for (const directory of String(searchPath ?? "").split(path.delimiter)) {
+    if (!path.isAbsolute(directory)) continue;
+    const candidate = path.join(directory, command);
+    try {
+      await access(candidate, fsConstants.X_OK);
+      return candidate;
+    } catch {
+      // Continue to the next fixed PATH entry.
+    }
+  }
+  throw new Error(`Required verifier executable is unavailable: ${command}`);
+}
+
+function unavailableVerifierSandboxResult(message) {
+  return {
+    exitCode: 1,
+    outputLimitExceeded: false,
+    sandboxMode: null,
+    signal: null,
+    stderr: String(message),
+    stdout: "",
+    timedOut: false,
+  };
+}
+
+export async function runArtifactRegressionGates({
+  baselineHead,
+  changedPaths,
+  environment = {},
+  gates,
+  gitExecutable = "git",
+  testGlobs,
+  workspace,
+}) {
+  if (!Array.isArray(gates) || gates.length === 0) return null;
+  const changedTestPaths = [...new Set(changedPaths.filter((changedPath) =>
+    testGlobs.some((pattern) => matchGlob(changedPath, pattern))
+  ))].sort();
+  const candidateTestPaths = [];
+  const invalidTestPaths = [];
+  for (const changedPath of changedTestPaths) {
+    try {
+      const stat = await lstat(path.join(workspace, changedPath));
+      if (stat.isFile()) candidateTestPaths.push(changedPath);
+      else invalidTestPaths.push(changedPath);
+    } catch (error) {
+      if (error?.code !== "ENOENT") invalidTestPaths.push(changedPath);
+    }
+  }
+  candidateTestPaths.sort();
+  invalidTestPaths.sort();
+  const workspaceSymlinkObserved = await workspaceContainsSymlink(workspace);
+
+  const results = [];
+  for (const gate of gates) {
+    results.push(await runArtifactRegressionGate({
+      baselineHead,
+      candidateTestPaths,
+      changedTestPaths,
+      environment,
+      gate,
+      gitExecutable,
+      invalidTestPaths,
+      workspace,
+      workspaceSymlinkObserved,
+    }));
+  }
+  return {
+    required_gate_ids: gates.map(({ id }) => id),
+    status: results.every(({ status }) => status === "PASS") ? "PASS" : "FAIL",
+    gates: results,
+  };
+}
+
+async function runArtifactRegressionGate({
+  baselineHead,
+  candidateTestPaths,
+  changedTestPaths,
+  environment,
+  gate,
+  gitExecutable,
+  invalidTestPaths,
+  workspace,
+  workspaceSymlinkObserved,
+}) {
+  const replacement = gate?.mutation?.replacement;
+  const replacementSha256 = typeof replacement === "string"
+    ? createHash("sha256").update(replacement).digest("hex")
+    : null;
+  const result = {
+    id: gate.id,
+    status: "FAIL",
+    target: gate.mutation.target,
+    replacement_sha256: replacementSha256,
+    changed_visible_test_paths: changedTestPaths,
+    candidate_visible_test_paths: candidateTestPaths,
+    baseline_tests_mutant_visible: null,
+    candidate_tests_mutant_visible: null,
+    reasons: [],
+  };
+  if (candidateTestPaths.length === 0) {
+    result.reasons.push("no candidate visible test delta");
+  }
+  if (invalidTestPaths.length > 0) {
+    result.reasons.push("a changed visible test path was not a regular file");
+  }
+  if (workspaceSymlinkObserved) {
+    result.reasons.push("workspace symlinks are unsupported by artifact regression gates");
+  }
+  if (
+    replacementSha256 === null ||
+    replacementSha256 !== gate.mutation.replacement_sha256
+  ) {
+    result.reasons.push("mutation snapshot hash did not match replacement content");
+  }
+  if (result.reasons.length > 0) return result;
+
+  const evaluationRoot = await mkdtemp(path.join(os.tmpdir(), "lp-eval-"));
+  const sandboxHome = path.join(evaluationRoot, "home");
+  const sandboxWorkspace = path.join(evaluationRoot, "workspace");
+  try {
+    const prepareMutationWorkspace = async ({ baselineTests }) => {
+      await Promise.all([
+        rm(sandboxHome, { force: true, recursive: true }),
+        rm(sandboxWorkspace, { force: true, recursive: true }),
+      ]);
+      await Promise.all([
+        cp(workspace, sandboxWorkspace, {
+          recursive: true,
+          verbatimSymlinks: true,
+        }),
+        mkdir(path.join(sandboxHome, "tmp"), { recursive: true }),
+      ]);
+      if (await workspaceContainsSymlink(sandboxWorkspace)) {
+        throw new Error("workspace changed to contain a symlink while the artifact gate copied it");
+      }
+      if (baselineTests) {
+        await restoreBaselineTests({
+          baselineHead,
+          environment: benchmarkEnvironment(sandboxHome, environment),
+          gitExecutable,
+          testPaths: changedTestPaths,
+          workspace: sandboxWorkspace,
+        });
+      }
+      const target = path.join(sandboxWorkspace, gate.mutation.target);
+      const targetStat = await lstat(target);
+      if (!targetStat.isFile()) {
+        throw new Error("mutation target was not a regular file");
+      }
+      await writeFile(target, replacement);
+    };
+
+    await prepareMutationWorkspace({ baselineTests: true });
+    const baselineTestsMutant = await runSandboxedNpmTest({
+      cwd: sandboxWorkspace,
+      env: verifierEnvironment(sandboxHome, environment),
+      timeoutMs: 120_000,
+    });
+    result.baseline_tests_mutant_visible = publicArtifactCommandResult(
+      baselineTestsMutant,
+      {
+        redactPaths: [evaluationRoot, sandboxHome, sandboxWorkspace, workspace],
+      },
+    );
+
+    await prepareMutationWorkspace({ baselineTests: false });
+    const candidateTestsMutant = await runSandboxedNpmTest({
+      cwd: sandboxWorkspace,
+      env: verifierEnvironment(sandboxHome, environment),
+      timeoutMs: 120_000,
+    });
+    result.candidate_tests_mutant_visible = publicArtifactCommandResult(
+      candidateTestsMutant,
+      {
+        redactPaths: [evaluationRoot, sandboxHome, sandboxWorkspace, workspace],
+      },
+    );
+    if (baselineTestsMutant.timedOut) {
+      result.reasons.push("baseline-test counterfactual timed out");
+    } else if (baselineTestsMutant.signal !== null) {
+      result.reasons.push("baseline-test counterfactual was terminated by a signal");
+    } else if (baselineTestsMutant.exitCode !== 0) {
+      result.reasons.push("baseline-test counterfactual already killed the mutant");
+    }
+    if (candidateTestsMutant.timedOut) {
+      result.reasons.push("candidate-test mutant run timed out");
+    } else if (candidateTestsMutant.signal !== null) {
+      result.reasons.push("candidate-test mutant run was terminated by a signal");
+    } else if (candidateTestsMutant.exitCode === 0) {
+      result.reasons.push("candidate visible tests did not kill the mutant");
+    }
+    if (result.reasons.length === 0) result.status = "PASS";
+    return result;
+  } catch {
+    result.reasons.push("artifact regression gate execution failed");
+    return result;
+  } finally {
+    await rm(evaluationRoot, { force: true, recursive: true });
+  }
+}
+
+async function restoreBaselineTests({
+  baselineHead,
+  environment,
+  gitExecutable,
+  testPaths,
+  workspace,
+}) {
+  for (const testPath of testPaths) {
+    const tree = await runProcess(
+      gitExecutable,
+      ["ls-tree", "--name-only", "-z", baselineHead, "--", testPath],
+      { cwd: workspace, env: environment, timeoutMs: 30_000 },
+    );
+    if (tree.exitCode !== 0 || tree.timedOut || tree.signal !== null) {
+      throw new Error("cannot inspect baseline test path");
+    }
+    const target = path.join(workspace, testPath);
+    if (tree.stdout.length === 0) {
+      await rm(target, { force: true, recursive: true });
+      continue;
+    }
+    const baseline = await runProcess(
+      gitExecutable,
+      ["show", `${baselineHead}:${testPath}`],
+      { cwd: workspace, env: environment, timeoutMs: 30_000 },
+    );
+    if (baseline.exitCode !== 0 || baseline.timedOut || baseline.signal !== null) {
+      throw new Error("cannot restore baseline test path");
+    }
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, baseline.stdout);
+  }
+}
+
+function publicArtifactCommandResult(result, options) {
+  return {
+    ...publicCommandResult(result, options),
+    signal: result.signal ?? null,
+  };
 }
 
 export async function runDevelopmentPilot({
@@ -2183,7 +3287,7 @@ export async function runDevelopmentPilot({
   outputDirectory = resolveDevelopmentOutputDirectory(outputDirectory);
   const suiteUrl = toFileUrl(suitePath);
   const suite = await loadDevelopmentSuite(suiteUrl);
-  const selectedCases = caseIds?.length
+  let selectedCases = caseIds?.length
     ? suite.cases.filter((benchmarkCase) => caseIds.includes(benchmarkCase.id))
     : suite.cases;
   if (selectedCases.length === 0) {
@@ -2193,6 +3297,10 @@ export async function runDevelopmentPilot({
   if (!Number.isInteger(runRepetitions) || runRepetitions < 1 || runRepetitions > suite.repetitions) {
     throw new Error(`repetitions must be between 1 and ${suite.repetitions}`);
   }
+  selectedCases = selectedCases.map((benchmarkCase) => ({
+    ...benchmarkCase,
+    artifact_regression_gates: benchmarkCase.artifact_regression_gates ?? [],
+  }));
 
   const homeRoot = await mkdtemp(path.join(os.tmpdir(), "leanpowers-codex-homes-"));
   try {
@@ -2241,7 +3349,6 @@ export async function runDevelopmentPilot({
             model: runtime.model,
             repetition: repetition + 1,
             runId,
-            suiteUrl,
             toolchain,
             workflow,
           });
@@ -2272,7 +3379,9 @@ export async function runDevelopmentPilot({
 
 export function renderDevelopmentReport(result) {
   const aggregate = aggregateRuns(result.runs);
-  const paired = aggregatePairedRuns(result.runs);
+  const paired = aggregatePairedRuns(result.runs, {
+    matrixComplete: result.completion === "complete",
+  });
   const rows = result.runs.map((run) =>
     [
       run.case_id,
@@ -2282,6 +3391,10 @@ export function renderDevelopmentReport(result) {
       run.outcome.status,
       run.workflow_conformance.status,
       run.activation_reported ? "yes" : "no",
+      run.verifier.artifact_regression === null ||
+        run.verifier.artifact_regression === undefined
+        ? "n/a"
+        : run.verifier.artifact_regression.status,
       displayMetric(run.telemetry.tokens?.total),
       displayMetric(run.telemetry.tokens?.uncached_plus_output),
       displayMetric(round(run.wall_seconds, 1)),
@@ -2310,14 +3423,31 @@ export function renderDevelopmentReport(result) {
   const failures = result.runs
     .filter((run) => run.outcome.status === "FAIL")
     .map((run) => `- ${run.run_id}: ${run.outcome.reasons.join("; ")}`);
+  const manifestRows = (Array.isArray(result.case_snapshots)
+    ? result.case_snapshots
+    : []
+  ).map((snapshot) => [
+    snapshot.id,
+    snapshot.workspace_sha256,
+    snapshot.verifier_sha256,
+    snapshot.mutants_sha256,
+  ].join(" | "));
   return [
     "# Paired development-effects pilot",
     "",
     `Evidence level: **${result.evidence_level}**. This is real coding and independent executable verification, but it is not the full 11-scenario release benchmark.`,
     "",
+    `Run matrix: **${result.completion}**. Stable token-target conclusions are unavailable unless the declared matrix is complete.`,
+    "",
     `Runtime: ${result.runtime.codex_version}; model: ${result.runtime.model}; effort: ${result.runtime.effort}.`,
     "",
     `Revisions: Superpowers ${result.runtime.workflow_revisions["superpowers-6.1.1"]}; LeanPowers ${result.runtime.workflow_revisions["leanpowers-0.2.0"]}.`,
+    "",
+    `Suite manifest: ${result.suite_sha256}.`,
+    "",
+    "Case | Workspace snapshot | Hidden verifier snapshot | Mutant snapshot",
+    "--- | --- | --- | ---",
+    ...manifestRows,
     "",
     `Activation: ${result.activation_mode}. Each run explicitly invokes its installed top-level workflow entrypoint and must name it in the first agent progress message before the identical engineering task.`,
     "",
@@ -2331,9 +3461,12 @@ export function renderDevelopmentReport(result) {
     "",
     "## Paired reductions",
     "",
-    "Population | Matched pairs | Median model-token reduction | Median fresh-token reduction | Median wall reduction | Median tool-call reduction | Median workflow-read reduction",
-    "--- | ---: | ---: | ---: | ---: | ---: | ---:",
-    pairedRow("Task PASS + workflow conformant (primary)", paired.conformant_pass_pairs),
+    "Population | Eligible/required pairs | Median model-token reduction | Max Lean token share | Lean ≤60% pairs | Stable ≤60% | Median fresh-token reduction | Median wall reduction | Median tool-call reduction | Median workflow-read reduction",
+    "--- | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---:",
+    pairedRow(
+      "Both Task PASS + Lean quality-bearing conformance + Superpowers activation (primary)",
+      paired.conformant_pass_pairs,
+    ),
     pairedRow("Primary: lean", paired.by_risk.lean.conformant_pass_pairs),
     pairedRow("Primary: standard", paired.by_risk.standard.conformant_pass_pairs),
     pairedRow("Primary: strict", paired.by_risk.strict.conformant_pass_pairs),
@@ -2342,8 +3475,8 @@ export function renderDevelopmentReport(result) {
     "",
     "## Paired runs",
     "",
-    "Case | Risk | Rep | Workflow | Task | Conformance | Declared | Model tokens | Fresh tokens | Wall seconds | Tool calls | Workflow reads | Product files | Workflow artifacts | Scope violations",
-    "--- | --- | ---: | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:",
+    "Case | Risk | Rep | Workflow | Task | Conformance | Declared | Artifact regression | Model tokens | Fresh tokens | Wall seconds | Tool calls | Workflow reads | Product files | Workflow artifacts | Scope violations",
+    "--- | --- | ---: | --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:",
     ...rows,
     "",
     "## Failed-run reasons",
@@ -2352,12 +3485,12 @@ export function renderDevelopmentReport(result) {
     "",
     "## Interpretation boundary",
     "",
-    "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    "- LeanPowers conformance requires one unambiguous semantic route declaration before any task tool; canonical-format adherence remains diagnostic only. Build/debug capsule traces must show no Skill/reference reload, the exact root-relative `rg --files .; rg -n -- 'TERMS' .` discovery shape with a nontrivial literal pattern and option terminator, batched reads, fixture-owned structured pre-edit reproduction for debug, exactly one literal pre-PATCH clause-to-test packet with distinct grounded task-boundary mappings and one task-grounded shared-context single-change counterexample shape, one contiguous multi-file patch batch, and supported successful validation. Debug may validate with one exact reproduction-plus-test composite or two ordered successful calls; call count remains an efficiency metric, not a correctness gate. Replay telemetry proves only that the exact reproduction command ran, not that its diagnostic meaning changed; task effect remains verifier-owned. Lexical ledger and counterexample checks reject missing, unrelated, or broad multi-change packets but do not prove semantic completeness. Codex JSONL emits one file-change item per changed file and no patch-call identifier, so contiguous file-change items are an explicit call-cardinality proxy; immediately adjacent independent patch calls with no intervening JSONL event are indistinguishable and may be coalesced. The proxy does not prove exact patch-call cardinality. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Each strict review cycle additionally requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
+    "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, any case-owned seeded mutant to be killed by visible regression tests, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
+    "- LeanPowers quality-bearing conformance requires an unambiguous semantic route declaration before any task tool, rejects conflicting declarations, and forbids risk downgrade after an upgrade; canonical spelling and consistent repeated mentions remain diagnostic. Build/debug traces must show no Skill/reference reload, the exact root-relative `rg --files .; rg -n -- 'TERMS' .` discovery shape with a nontrivial literal pattern and option terminator, batched reads, fixture-owned structured pre-edit reproduction for debug, a grounded pre-PATCH clause-to-test packet, one contiguous implementation-plus-test patch batch, and supported successful validation. After DISCOVER, debug READ and REPRODUCE may occur in either order but both must finish before PATCH. Clause completeness and structured counterexample telemetry remain diagnostic. Representation-boundary adequacy is instead measured workflow-neutrally in Task PASS: a candidate-test mutant must fail while the same mutant with candidate test deltas removed still passes, in addition to normal visible and hidden verification. Debug may validate with one exact reproduction-plus-test composite or two ordered successful calls; call count remains an efficiency metric, not a correctness gate. Replay telemetry proves only that the exact reproduction command ran, not that its diagnostic meaning changed. Codex JSONL emits one file-change item per changed file and no patch-call identifier, so contiguous file-change items are an explicit call-cardinality proxy; immediately adjacent independent patch calls with no intervening JSONL event are indistinguishable and may be coalesced. The proxy does not prove exact patch-call cardinality. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Each strict review cycle additionally requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
     "- Codex JSONL does not expose raw spawn arguments such as `fork_context`; observable spawn/wait behavior is checked dynamically, while exact argument shape is covered by static workflow tests and remains a runtime telemetry gap.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
-    "- Paired reductions are computed within each identical case and repetition before taking the median. Each metric shows its own valid sample count; incomplete telemetry is excluded from that metric only. The task-PASS-and-conformant population is primary, so failing faster or skipping workflow gates never counts as an improvement.",
+    "- Paired reductions and Lean token shares are computed within each identical case and repetition before aggregation. The stable ≤60% target passes only when model-token telemetry exists for every pair in the population and every Lean/Superpowers share is at most 60%; a median cannot hide an over-target pair. Each other metric shows its own valid sample count. The task-PASS-and-conformant population is primary, so failing faster or skipping workflow gates never counts as an improvement.",
     "- Codex CLI does not expose a deterministic seed, so paired repetitions reduce noise but do not eliminate it.",
     "- The three cases cover a small feature, an unknown-cause cache defect, and a security-compatible API extension. They do not establish universal non-inferiority.",
     "- The localized-cache hidden verifier samples representative single-, control-, repeated-, and multi-character separators. Passing those samples is not mathematical proof of collision freedom for every possible string; the task contract still requires an unambiguous structural identity.",
@@ -2369,8 +3502,13 @@ export function renderDevelopmentReport(result) {
 function pairedRow(label, metrics) {
   return [
     label,
-    String(metrics.count),
+    `${metrics.count}/${metrics.required_pair_count}`,
     displayPairedMetric(metrics.median_token_reduction_pct, metrics.token_pairs),
+    displayPairedMetric(metrics.max_token_share_pct, metrics.token_pairs),
+    `${metrics.token_share_at_or_below_60_count}/${metrics.required_pair_count}`,
+    metrics.stable_token_share_at_or_below_60 === null
+      ? "n/a"
+      : metrics.stable_token_share_at_or_below_60 ? "yes" : "no",
     displayPairedMetric(metrics.median_fresh_token_reduction_pct, metrics.fresh_token_pairs),
     displayPairedMetric(metrics.median_wall_reduction_pct, metrics.wall_pairs),
     displayPairedMetric(metrics.median_tool_call_reduction_pct, metrics.tool_call_pairs),
@@ -2387,7 +3525,6 @@ async function runSingleCase({
   model,
   repetition,
   runId,
-  suiteUrl,
   toolchain,
   workflow,
 }) {
@@ -2395,7 +3532,10 @@ async function runSingleCase({
   const workspace = path.join(runRoot, "workspace");
   const runHome = path.join(runRoot, "home");
   try {
-    await cp(new URL(benchmarkCase.workspace, suiteUrl), workspace, { recursive: true });
+    await materializeWorkspaceSnapshot(
+      benchmarkCase.workspace_snapshot,
+      workspace,
+    );
     await cp(codexHome, runHome, { recursive: true });
     const baselineHead = await initializeGit(workspace, toolchain);
     await mkdir(path.join(runHome, "tmp"), { recursive: true });
@@ -2461,11 +3601,37 @@ async function runSingleCase({
     const headUnchanged = gitState.final_head === baselineHead;
     const changedPaths = gitState.changed_paths;
     const changes = evaluateChangedPaths(changedPaths, benchmarkCase.change_policy);
+    const verifierFingerprintBefore = await fingerprintBenchmarkWorkspace({
+      baselineHead,
+      environment: toolchain.environment,
+      gitExecutable: toolchain.git,
+      workspace,
+    });
     const verifier = await runVerifier({
       environment: toolchain.environment,
       workspace,
-      verifierFiles: benchmarkCase.verifier_files.map((file) => new URL(file, suiteUrl)),
+      verifierSnapshots: benchmarkCase.verifier_snapshots,
     });
+    const artifactRegression = await runArtifactRegressionGates({
+      baselineHead,
+      changedPaths,
+      environment: toolchain.environment,
+      gates: benchmarkCase.artifact_regression_gates,
+      gitExecutable: toolchain.git,
+      testGlobs: benchmarkCase.change_policy.tests,
+      workspace,
+    });
+    const verifierEvidence = {
+      ...verifier,
+      artifact_regression: artifactRegression,
+    };
+    const verifierWorkspaceUnchanged = verifierFingerprintBefore ===
+      await fingerprintBenchmarkWorkspace({
+        baselineHead,
+        environment: toolchain.environment,
+        gitExecutable: toolchain.git,
+        workspace,
+      });
     const workspacePatch = gitState.workspace_patch;
     const result = {
       run_id: runId,
@@ -2483,6 +3649,7 @@ async function runSingleCase({
       agent_timed_out: agent.timedOut,
       agent_completed: telemetry.completed,
       activation_reported: activationReported,
+      case_snapshot: caseSnapshotContract(benchmarkCase),
       head_unchanged: headUnchanged,
       wall_seconds: wallSeconds,
       telemetry: {
@@ -2493,7 +3660,16 @@ async function runSingleCase({
         tokens: telemetry.tokens,
       },
       changes,
-      verifier,
+      required_artifact_regression_gate_ids:
+        benchmarkCase.artifact_regression_gates.map(({ id }) => id),
+      required_artifact_regression_gates:
+        benchmarkCase.artifact_regression_gates.map(({ id, mutation }) => ({
+          id,
+          target: mutation.target,
+          replacement_sha256: mutation.replacement_sha256,
+        })),
+      verifier: verifierEvidence,
+      verifier_workspace_unchanged: verifierWorkspaceUnchanged,
     };
     result.outcome = evaluateRunOutcome(result);
     result.workflow_conformance = evaluateWorkflowConformance(result);
@@ -2503,7 +3679,7 @@ async function runSingleCase({
         agent_stderr: agent.stderr,
         agent_stdout: agent.stdout,
         final_message: telemetry.final_message,
-        verifier,
+        verifier: verifierEvidence,
         workspace_patch: workspacePatch,
       },
     };
@@ -2513,14 +3689,19 @@ async function runSingleCase({
 }
 
 export function makePilotResult(suite, runtime, runs, repetitions, selectedCases) {
+  const caseSnapshots = selectedCases.map((benchmarkCase) => ({
+    id: benchmarkCase.id,
+    ...caseSnapshotContract(benchmarkCase),
+  }));
+  const matrixComplete = /^[a-f0-9]{64}$/u.test(String(suite.suite_sha256 ?? "")) &&
+    hasCompleteRunMatrix(runs, selectedCases, repetitions);
   return {
     schema_version: 1,
     suite_id: suite.suite_id,
+    suite_sha256: suite.suite_sha256,
     evidence_level: suite.evidence_level,
     activation_mode: suite.activation_mode,
-    completion: hasCompleteRunMatrix(runs, selectedCases, repetitions)
-      ? "complete"
-      : "incomplete",
+    completion: matrixComplete ? "complete" : "incomplete",
     runtime,
     repetitions,
     cases: selectedCases.map(({ id, scenario_class, risk_level, expected_workflow }) => ({
@@ -2529,9 +3710,10 @@ export function makePilotResult(suite, runtime, runs, repetitions, selectedCases
       risk_level,
       expected_workflow,
     })),
+    case_snapshots: caseSnapshots,
     runs,
     aggregate: aggregateRuns(runs),
-    paired: aggregatePairedRuns(runs),
+    paired: aggregatePairedRuns(runs, { matrixComplete }),
   };
 }
 
@@ -2568,7 +3750,7 @@ function aggregateRuns(runs) {
   }));
 }
 
-function aggregatePairedRuns(runs) {
+function aggregatePairedRuns(runs, { matrixComplete }) {
   const groups = new Map();
   for (const run of runs) {
     const key = `${run.case_id}\u0000${run.repetition}`;
@@ -2594,28 +3776,44 @@ function aggregatePairedRuns(runs) {
   const byRisk = Object.fromEntries(["lean", "standard", "strict"].map((risk) => {
     const selected = pairs.filter((pair) => pair["leanpowers-0.2.0"].risk_level === risk);
     return [risk, {
-      all_pairs: summarizePairs(selected),
+      all_pairs: summarizePairs(selected, {
+        matrixComplete,
+        requiredPairCount: selected.length,
+      }),
       both_pass_pairs: summarizePairs(selected.filter((pair) =>
         [...WORKFLOWS].every((workflow) => pair[workflow].outcome.status === "PASS")
-      )),
+      ), { matrixComplete, requiredPairCount: selected.length }),
       conformant_pass_pairs: summarizePairs(selected.filter((pair) =>
         [...WORKFLOWS].every((workflow) =>
           pair[workflow].outcome.status === "PASS" &&
           pair[workflow].workflow_conformance?.status === "PASS"
         )
-      )),
+      ), { matrixComplete, requiredPairCount: selected.length }),
     }];
   }));
   return {
-    all_pairs: summarizePairs(pairs),
-    both_pass_pairs: summarizePairs(bothPass),
-    conformant_pass_pairs: summarizePairs(conformantPass),
+    all_pairs: summarizePairs(pairs, {
+      matrixComplete,
+      requiredPairCount: pairs.length,
+    }),
+    both_pass_pairs: summarizePairs(bothPass, {
+      matrixComplete,
+      requiredPairCount: pairs.length,
+    }),
+    conformant_pass_pairs: summarizePairs(conformantPass, {
+      matrixComplete,
+      requiredPairCount: pairs.length,
+    }),
     by_risk: byRisk,
   };
 }
 
 function hasCompleteRunMatrix(runs, selectedCases, repetitions) {
   const expected = new Map();
+  const caseSnapshots = new Map(selectedCases.map((benchmarkCase) => [
+    benchmarkCase.id,
+    caseSnapshotContract(benchmarkCase),
+  ]));
   for (let repetition = 1; repetition <= repetitions; repetition += 1) {
     for (const benchmarkCase of selectedCases) {
       for (const workflow of WORKFLOWS) {
@@ -2625,29 +3823,78 @@ function hasCompleteRunMatrix(runs, selectedCases, repetitions) {
   }
   for (const run of runs) {
     const key = `${run.case_id}\u0000${run.repetition}\u0000${run.workflow}`;
-    if (!expected.has(key)) return false;
+    if (
+      !expected.has(key) ||
+      !isDeepStrictEqual(run.case_snapshot, caseSnapshots.get(run.case_id))
+    ) {
+      return false;
+    }
     expected.set(key, expected.get(key) + 1);
   }
   return [...expected.values()].every((count) => count === 1);
 }
 
-function summarizePairs(pairs) {
+function summarizePairs(
+  pairs,
+  { matrixComplete, requiredPairCount },
+) {
   const reduction = (selector) => pairs.flatMap((pair) => {
     const baseline = selector(pair["superpowers-6.1.1"]);
     const candidate = selector(pair["leanpowers-0.2.0"]);
-    if (!Number.isFinite(baseline) || !Number.isFinite(candidate) || baseline <= 0) {
+    if (
+      !Number.isFinite(baseline) ||
+      !Number.isFinite(candidate) ||
+      baseline <= 0 ||
+      candidate <= 0
+    ) {
       return [];
     }
     return [(1 - candidate / baseline) * 100];
   });
   const token = reduction((run) => run.telemetry.tokens?.total);
+  const modelTokenShares = pairs.flatMap((pair) => {
+    const baseline = pair["superpowers-6.1.1"].telemetry.tokens?.total;
+    const candidate = pair["leanpowers-0.2.0"].telemetry.tokens?.total;
+    if (
+      !Number.isFinite(baseline) ||
+      !Number.isFinite(candidate) ||
+      baseline <= 0 ||
+      candidate <= 0
+    ) {
+      return [];
+    }
+    const sharePct = candidate / baseline * 100;
+    return [{
+      at_or_below_60: sharePct <= 60,
+      case_id: pair["leanpowers-0.2.0"].case_id,
+      repetition: pair["leanpowers-0.2.0"].repetition,
+      share_pct: sharePct,
+    }];
+  });
   const fresh = reduction((run) => run.telemetry.tokens?.uncached_plus_output);
   const wall = reduction((run) => run.wall_seconds);
   const tools = reduction((run) => run.telemetry.tool_calls);
   const workflowReads = reduction((run) => run.telemetry.workflow_trace?.read_calls);
   return {
     count: pairs.length,
+    required_pair_count: requiredPairCount,
     token_pairs: token.length,
+    model_token_shares: modelTokenShares,
+    median_token_share_pct: median(
+      modelTokenShares.map(({ share_pct }) => share_pct),
+    ),
+    max_token_share_pct: modelTokenShares.length === 0
+      ? null
+      : Math.max(...modelTokenShares.map(({ share_pct }) => share_pct)),
+    token_share_at_or_below_60_count: modelTokenShares.filter(
+      ({ at_or_below_60 }) => at_or_below_60,
+    ).length,
+    stable_token_share_at_or_below_60:
+      !matrixComplete || requiredPairCount === 0
+      ? null
+      : pairs.length === requiredPairCount &&
+        modelTokenShares.length === requiredPairCount &&
+        modelTokenShares.every(({ at_or_below_60 }) => at_or_below_60),
     fresh_token_pairs: fresh.length,
     wall_pairs: wall.length,
     tool_call_pairs: tools.length,
@@ -2924,7 +4171,7 @@ async function gitChangedPaths(workspace, baselineHead, toolchain) {
   const env = benchmarkEnvironment(workspace, toolchain.environment);
   const tracked = await runProcess(
     toolchain.git,
-    ["diff", "--name-only", "--relative", baselineHead, "--", "."],
+    ["diff", "--no-renames", "--name-only", "--relative", baselineHead, "--", "."],
     { cwd: workspace, env, timeoutMs: 30_000 },
   );
   const untracked = await runProcess(
@@ -3041,6 +4288,8 @@ export async function runProcess(
   {
     cwd,
     env = process.env,
+    input,
+    maxOutputBytes = Number.POSITIVE_INFINITY,
     onStdoutLine,
     timeoutMs = 120_000,
   } = {},
@@ -3051,13 +4300,15 @@ export async function runProcess(
       cwd,
       detached,
       env,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
     let stdout = "";
     let stdoutLineBuffer = "";
     let stderr = "";
     let timedOut = false;
     let forceKillTimer;
+    let outputLimitExceeded = false;
+    let outputLimitTerminationStarted = false;
     let callbackError = null;
     let callbackSequence = Promise.resolve();
     let settled = false;
@@ -3076,8 +4327,27 @@ export async function runProcess(
     }, timeoutMs);
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
+    const terminateForOutputLimit = () => {
+      outputLimitExceeded = true;
+      if (outputLimitTerminationStarted) return;
+      outputLimitTerminationStarted = true;
+      killProcessTree(child, "SIGTERM");
+      forceKillTimer = setTimeout(() => killProcessTree(child, "SIGKILL"), 5_000);
+    };
+    const appendOutput = (current, chunk) => {
+      if (!Number.isFinite(maxOutputBytes)) return `${current}${chunk}`;
+      const remaining = maxOutputBytes - Buffer.byteLength(current);
+      if (remaining <= 0) {
+        terminateForOutputLimit();
+        return current;
+      }
+      const bytes = Buffer.from(chunk);
+      if (bytes.length <= remaining) return `${current}${chunk}`;
+      terminateForOutputLimit();
+      return `${current}${bytes.subarray(0, remaining).toString("utf8")}`;
+    };
     child.stdout.on("data", (chunk) => {
-      stdout += chunk;
+      stdout = appendOutput(stdout, chunk);
       if (typeof onStdoutLine !== "function") return;
       stdoutLineBuffer += chunk;
       let newlineIndex;
@@ -3088,8 +4358,14 @@ export async function runProcess(
       }
     });
     child.stderr.on("data", (chunk) => {
-      stderr += chunk;
+      stderr = appendOutput(stderr, chunk);
     });
+    if (input !== undefined) {
+      child.stdin.on("error", (error) => {
+        if (error?.code !== "EPIPE" && !settled) callbackError ??= error;
+      });
+      child.stdin.end(String(input));
+    }
     child.on("error", (error) => {
       if (settled) return;
       settled = true;
@@ -3120,6 +4396,7 @@ export async function runProcess(
         stderr,
         stdout,
         timedOut,
+        outputLimitExceeded,
       });
     });
   });
@@ -3138,12 +4415,75 @@ function killProcessTree(child, signal) {
   child.kill(signal);
 }
 
-function publicCommandResult(result) {
+function publicCommandResult(result, { redactPaths = [] } = {}) {
+  const output = sanitizeBenchmarkOutput(
+    `${result.stdout}${result.stderr}`,
+    redactPaths,
+  );
   return {
     exit_code: result.exitCode,
+    output_limited: result.outputLimitExceeded === true,
+    sandbox: result.sandboxMode ?? null,
+    signal: result.signal ?? null,
     timed_out: result.timedOut,
-    output: `${result.stdout}${result.stderr}`.slice(-20_000),
+    output: output.slice(-20_000),
   };
+}
+
+function failedPublicCommandResult(message) {
+  return {
+    exit_code: 1,
+    output_limited: false,
+    sandbox: null,
+    signal: null,
+    timed_out: false,
+    output: String(message),
+  };
+}
+
+function sanitizeBenchmarkOutput(value, redactPaths) {
+  let output = String(value ?? "");
+  const roots = [
+    PROJECT_ROOT,
+    os.homedir(),
+    os.tmpdir(),
+    ...redactPaths,
+  ].filter((candidate) => typeof candidate === "string" && path.isAbsolute(candidate));
+  const paths = [...new Set(roots.flatMap((candidate) => {
+    try {
+      return [candidate, realpathSync(candidate)];
+    } catch {
+      return [candidate];
+    }
+  }))]
+    .sort((left, right) => right.length - left.length);
+  for (const sensitivePath of paths) {
+    for (const presentation of [
+      pathToFileURL(sensitivePath).href.replace(/\/$/u, ""),
+      sensitivePath,
+    ]) {
+      output = output.replaceAll(presentation, "<redacted-path>");
+    }
+  }
+  const hostUser = os.userInfo().username;
+  if (typeof hostUser === "string" && hostUser.length >= 3) {
+    output = output.replaceAll(hostUser, "<redacted-user>");
+  }
+  return output
+    .replace(/data:text\/javascript;base64,[a-z0-9+/=]+/giu, "<hidden-verifier>")
+    .replace(/file:\/\/\/[^\s)\]}]+/gu, "<redacted-path>");
+}
+
+async function workspaceContainsSymlink(workspace, directory = workspace) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const target = path.join(directory, entry.name);
+    const stat = await lstat(target);
+    if (stat.isSymbolicLink()) return true;
+    if (stat.isDirectory() && await workspaceContainsSymlink(workspace, target)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function matchGlob(value, pattern) {
@@ -3168,10 +4508,14 @@ function finiteNumber(value) {
   return Number.isFinite(value) ? value : null;
 }
 
+function nonNegativeSafeInteger(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
 export function extractDeclaredRisk(message) {
   const routeDeclaration = parseLeanRouteLedger(message);
   if (routeDeclaration !== null) return routeDeclaration.risk;
-  const text = String(message ?? "");
+  const text = visibleAssertionLines(message).join("\n");
   const afterRisk = text.match(
     /\brisk(?:\s+(?:profile|level))?\s*(?:[:=]|\bis\b)?\s*`?(lean|standard|strict)`?/iu,
   );
@@ -3183,18 +4527,10 @@ export function extractDeclaredRisk(message) {
 }
 
 export function parseLeanRouteLedger(message) {
-  const text = String(message ?? "");
+  const text = visibleAssertionLines(message).join("\n");
   const firstLine = text.split(/\r?\n/u)[0];
-  if (
-    /\bactivation\s+(?:failed|did\s+not\s+succeed|was\s+unsuccessful)\b/iu.test(text) ||
-    /\b(?:invok(?:e|ed|ing)|activat(?:e|ed|ing)|select(?:ed|ing)|follow(?:ed|ing)|us(?:e|ed|ing))\s+`?leanpowers:route`?\s*(?:[:—-]\s*)?(?:has\s+)?(?:failed|did\s+not\s+succeed|was\s+unsuccessful)\b/iu.test(text) ||
-    /\b(?:(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(?:OWNER|WORKFLOW)\b|risk\s*(?:[:=]|\bis\b)\s*`?RISK\b)/u.test(text) ||
-    /\bleanpowers:route\b[^\r\n.]{0,48}\b(?:not|never)\s+activat(?:e|ed|ing)\b/iu.test(text) ||
-    /\b(?:(?:do|does|did|am|is|are|was|were|will|would|have|has)\s+not|(?:don't|doesn't|didn't|isn't|aren't|wasn't|weren't|won't|wouldn't|haven't|hasn't))\s+(?:use|using|activate|activating|select|selecting|invoke|invoking|follow|following)\s+(?:it|this\s+(?:route|workflow)|that\s+(?:route|workflow)|the\s+(?:route(?:\s+workflow)?|workflow)|leanpowers:route)\b/iu.test(text)
-  ) {
-    return null;
-  }
-  const exact = parseExactLeanRouteLedger(message);
+  if (leanRouteMessageDeniesActivation(text)) return null;
+  const exact = parseExactLeanRouteLedger(text);
   if (exact !== null) return exact;
 
   const routeMatch = /\bleanpowers:route\b/iu.exec(firstLine);
@@ -3326,6 +4662,19 @@ export function parseLeanRouteLedger(message) {
   return { workflow, risk, required_gates: expectedGates };
 }
 
+function leanRouteMessageDeniesActivation(message) {
+  const text = String(message ?? "");
+  return (
+    /\bactivation\s+(?:failed|did\s+not\s+succeed|(?:is|was)\s+(?:unsuccessful|not\s+successful|false))\b/iu.test(text) ||
+    /\b(?:invok(?:e|ed|ing)|activat(?:e|ed|ing)|select(?:ed|ing)|follow(?:ed|ing)|us(?:e|ed|ing))\s+`?leanpowers:route`?\s*(?:[:—-]\s*)?(?:has\s+)?(?:failed|did\s+not\s+succeed|was\s+unsuccessful)\b/iu.test(text) ||
+    /\b(?:not|never|without|skip(?:ping)?|declin(?:e|ing))\s+(?:(?:use|using|select|selecting|activate|activating|invoke|invoking)\s+)?`?leanpowers:route`?\b/iu.test(text) ||
+    /\b(?:(?:workflow|owner)\s*(?:[:=]|\bis\b)\s*`?(?:OWNER|WORKFLOW)\b|risk\s*(?:[:=]|\bis\b)\s*`?RISK\b)/u.test(text) ||
+    /\bleanpowers:route\b[^\r\n.]{0,48}\b(?:not|never)\s+activat(?:e|ed|ing)\b/iu.test(text) ||
+    /\b(?:(?:do|does|did|am|is|are|was|were|will|would|have|has)\s+not|(?:don['’]t|doesn['’]t|didn['’]t|isn['’]t|aren['’]t|wasn['’]t|weren['’]t|won['’]t|wouldn['’]t|haven['’]t|hasn['’]t))\s+(?:(?:intend|mean|plan)\s+to\s+)?(?:use|used|using|activate|activated|activating|select|selected|selecting|invoke|invoked|invoking|follow|followed|following)\s+(?:it|this\s+(?:route|workflow)|that\s+(?:route|workflow)|the\s+(?:route(?:\s+workflow)?|workflow)|leanpowers:route)\b/iu.test(text) ||
+    /\b(?:this|that|the)\s+(?:route|workflow)\s+(?:(?:is|was)\s+not|(?:isn['’]t|wasn['’]t))\s+active\b/iu.test(text)
+  );
+}
+
 function negatesLeanRouteDeclaration(text, { workflow, risk, expectedGates }) {
   const negatedWorkflows = [
     ...String(text ?? "").matchAll(
@@ -3367,15 +4716,10 @@ function isAssertiveLeanRoutePrefix(value) {
 
 function parseExactLeanRouteLedger(message) {
   const lines = String(message ?? "").split(/\r?\n/u);
-  const suffix = lines.slice(4);
-  const suffixValid =
-    suffix.length === 0 ||
-    (suffix.length === 1 && suffix[0] === "") ||
-    (suffix.length >= 2 && suffix[0] === "" && suffix[1].trim().length > 0);
   if (
     lines.length < 4 ||
     lines[0] !== "entrypoint: leanpowers:route" ||
-    !suffixValid
+    !isValidLeanRouteSuffix(lines.slice(4))
   ) {
     return null;
   }
@@ -3388,6 +4732,12 @@ function parseExactLeanRouteLedger(message) {
   const expectedGates = expectedLeanRouteGates(risk);
   if (requiredGates !== expectedGates) return null;
   return { workflow, risk, required_gates: requiredGates };
+}
+
+function isValidLeanRouteSuffix(suffix) {
+  return suffix.length === 0 ||
+    (suffix.length === 1 && suffix[0] === "") ||
+    (suffix.length >= 2 && suffix[0] === "" && suffix[1].trim().length > 0);
 }
 
 function expectedLeanRouteGates(risk) {
@@ -3422,8 +4772,11 @@ function parseLeanRouteLedgerCandidate(message) {
   if (semantic !== null) return semantic;
   const lines = String(message ?? "").split(/\r?\n/u);
   if (lines.length < 4) return null;
-  return parseExactLeanRouteLedger(
-    lines.slice(0, 4).map((line) => line.trimEnd()).join("\n"),
+  return parseLeanRouteLedger(
+    [
+      ...lines.slice(0, 4).map((line) => line.trimEnd()),
+      ...lines.slice(4),
+    ].join("\n"),
   );
 }
 
@@ -3434,34 +4787,184 @@ function hasForbiddenLeanRouteLedgerKey(message) {
   );
 }
 
-function highestPresentedLeanRouteRisk(indexedEvents) {
+function analyzeLeanRouteTimeline(indexedEvents, firstToolIndex) {
   const order = ["lean", "standard", "strict"];
-  let highest = null;
-  for (const { event } of indexedEvents) {
+  const presentations = [];
+  const visibleMessages = [];
+  for (const { event, index } of indexedEvents) {
     if (
       event?.type !== "item.completed" ||
       event?.item?.type !== "agent_message"
     ) {
       continue;
     }
-    for (const risk of affirmativePresentedLeanRouteRisks(event.item.text)) {
-      if (risk !== null && (highest === null || order.indexOf(risk) > order.indexOf(highest))) {
-        highest = risk;
+    const message = String(event.item.text ?? "");
+    const lines = visibleAssertionLines(message);
+    visibleMessages.push({ event_index: index, lines });
+    const denialObserved = leanRouteMessageDeniesActivation(lines.join("\n"));
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      const line = lines[lineIndex];
+      const multilineStructuredPacket =
+        /\bleanpowers:route\b/iu.test(line) &&
+        !isStructuredLeanRoutePacketShape(line) &&
+        isStructuredLeanRoutePacketShape(
+          lines.slice(lineIndex, lineIndex + 4).join("\n"),
+        );
+      if (isLeanRouteDeclarationShape(line) || multilineStructuredPacket) {
+        const legacy = /^\s*entrypoint:\s*leanpowers:route\b/iu.test(line);
+        const lineEnd = legacy || multilineStructuredPacket
+          ? Math.min(lines.length - 1, lineIndex + 3)
+          : lineIndex;
+        const packet = lines.slice(lineIndex, lineEnd + 1)
+          .map((packetLine) => packetLine.trimEnd())
+          .join("\n");
+        presentations.push({
+          event,
+          event_index: index,
+          kind: "route",
+          legacy_suffix_valid:
+            !legacy || isValidLeanRouteSuffix(lines.slice(lineEnd + 1)),
+          line_index: lineIndex,
+          line_end: lineEnd,
+          message_denies_activation: denialObserved,
+          presentation: packet,
+        });
+        if (legacy || multilineStructuredPacket) lineIndex = lineEnd;
+        continue;
+      }
+      const marker = line.trim().match(
+        /^leanpowers:risk \| risk=(lean|standard|strict)$/u,
+      );
+      if (marker !== null) {
+        presentations.push({
+          event,
+          event_index: index,
+          kind: "marker",
+          line_index: lineIndex,
+          line_end: lineIndex,
+          risk: marker[1],
+        });
       }
     }
   }
-  return highest;
+  presentations.sort((left, right) =>
+    left.event_index - right.event_index ||
+    left.line_index - right.line_index ||
+    (left.kind === "route" ? -1 : 1)
+  );
+
+  let declarationsConsistent = true;
+  let highestPresentedRisk = null;
+  let highestRank = -1;
+  let initialRouteLedger;
+  let owner = null;
+  let riskMonotonicObserved = true;
+  let routeLedgerOccurrences = 0;
+  for (const presentation of presentations) {
+    if (presentation.kind === "marker") {
+      const rank = order.indexOf(presentation.risk);
+      if (rank < highestRank) riskMonotonicObserved = false;
+      highestRank = Math.max(highestRank, rank);
+      highestPresentedRisk = order[highestRank];
+      continue;
+    }
+
+    routeLedgerOccurrences += 1;
+    const ledger = presentation.message_denies_activation ||
+        presentation.legacy_suffix_valid === false
+      ? null
+      : parseLeanRouteLedgerCandidate(presentation.presentation);
+    if (routeLedgerOccurrences === 1 && ledger !== null) {
+      if (presentation.event_index < firstToolIndex) {
+        initialRouteLedger = { ...presentation, ledger };
+      }
+    }
+    if (ledger === null) {
+      declarationsConsistent = false;
+      for (const presentedRisk of presentedLeanRouteRiskTokens(
+        presentation.presentation,
+      )) {
+        const rank = order.indexOf(presentedRisk);
+        if (rank < highestRank) riskMonotonicObserved = false;
+        highestRank = Math.max(highestRank, rank);
+        highestPresentedRisk = order[highestRank];
+      }
+      continue;
+    }
+    const rank = order.indexOf(ledger.risk);
+    if (rank < highestRank) riskMonotonicObserved = false;
+    highestRank = Math.max(highestRank, rank);
+    highestPresentedRisk = order[highestRank];
+    if (owner === null) owner = ledger.workflow;
+    else if (ledger.workflow !== owner) declarationsConsistent = false;
+  }
+
+  const recognizedRouteLines = new Map();
+  for (const presentation of presentations.filter(({ kind }) => kind === "route")) {
+    const lines = recognizedRouteLines.get(presentation.event_index) ?? new Set();
+    for (
+      let lineIndex = presentation.line_index;
+      lineIndex <= presentation.line_end;
+      lineIndex += 1
+    ) {
+      lines.add(lineIndex);
+    }
+    recognizedRouteLines.set(presentation.event_index, lines);
+  }
+  const ledgerKeysAfterInitialObserved = initialRouteLedger !== undefined &&
+    visibleMessages.some(({ event_index: eventIndex, lines }) => {
+      if (eventIndex < initialRouteLedger.event_index) return false;
+      const recognized = recognizedRouteLines.get(eventIndex) ?? new Set();
+      return lines.some((line, lineIndex) => {
+        if (
+          eventIndex === initialRouteLedger.event_index &&
+          lineIndex <= initialRouteLedger.line_end
+        ) {
+          return false;
+        }
+        return !recognized.has(lineIndex) && hasForbiddenLeanRouteLedgerKey(line);
+      });
+    });
+
+  return {
+    highest_presented_risk: highestPresentedRisk,
+    initial_route_ledger: initialRouteLedger,
+    ledger_keys_after_initial_observed: ledgerKeysAfterInitialObserved,
+    risk_monotonic_observed:
+      routeLedgerOccurrences > 0 && riskMonotonicObserved,
+    route_declarations_consistent:
+      routeLedgerOccurrences > 0 && declarationsConsistent,
+    route_ledger_occurrences: routeLedgerOccurrences,
+  };
 }
 
-function affirmativePresentedLeanRouteRisks(message) {
+function isLeanRouteDeclarationShape(line) {
+  const text = String(line ?? "");
+  if (/^\s*entrypoint:\s*leanpowers:route\b/iu.test(text)) return true;
+  const routeMatch = /\bleanpowers:route\b/iu.exec(text);
+  if (routeMatch === null) return false;
+  if (isAssertiveLeanRoutePrefix(
+    text.slice(0, routeMatch.index + routeMatch[0].length),
+  )) {
+    return true;
+  }
+  const fields = text.slice(routeMatch.index + routeMatch[0].length);
+  return isStructuredLeanRoutePacketShape(fields);
+}
+
+function isStructuredLeanRoutePacketShape(value) {
+  const text = String(value ?? "");
+  return /\b(?:workflow|owner)\s*(?:[:=]|\bis\b)/iu.test(text) &&
+    /\brisk\s*(?:[:=]|\bis\b)/iu.test(text);
+}
+
+function presentedLeanRouteRiskTokens(message) {
   const risks = [];
-  const route = parseLeanRouteLedger(message);
-  if (route !== null) risks.push(route.risk);
-  for (const rawLine of visibleAssertionLines(message)) {
-    const marker = rawLine.trim().match(
-      /^leanpowers:risk \| risk=(lean|standard|strict)$/u,
-    );
-    if (marker !== null) risks.push(marker[1]);
+  const text = visibleAssertionLines(message).join("\n");
+  for (const match of text.matchAll(
+    /\brisk(?:\s+(?:profile|level))?\s*(?:[:=]|\bis\b)\s*`?(lean|standard|strict)`?/giu,
+  )) {
+    risks.push(match[1].toLocaleLowerCase("en-US"));
   }
   return risks;
 }
@@ -3480,9 +4983,11 @@ function normalizeLeanRouteLedgerPresentation(line) {
 }
 
 export function reportsWorkflowActivation({ entrypoint, message, workflow }) {
-  const text = String(message ?? "");
+  const text = visibleAssertionLines(message).join("\n");
+  if (workflow === "leanpowers-0.2.0") {
+    return parseLeanRouteLedger(text) !== null;
+  }
   const aliases = [entrypoint.slice(1)];
-  if (workflow === "leanpowers-0.2.0") aliases.push("route");
   const target = aliases
     .map((alias) => `\`?${escapeRegex(alias)}\`?(?:\\s+workflow)?`)
     .join("|");
@@ -3495,9 +5000,6 @@ export function reportsWorkflowActivation({ entrypoint, message, workflow }) {
     "iu",
   );
   if (negatedBefore.test(text) || unavailableAfter.test(text)) return false;
-  if (workflow === "leanpowers-0.2.0") {
-    return parseLeanRouteLedger(text) !== null;
-  }
   const structured = new RegExp(
     `(?:^|\\n)\\s*(?:[-*]\\s*)?(?:entrypoint|workflow|skill)\\s*[:=]\\s*(?:${target})(?:\\s|$)`,
     "iu",

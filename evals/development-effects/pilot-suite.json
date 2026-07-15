@@ -69,6 +69,16 @@
           }
         }
       },
+      "artifact_regression_gates": [
+        {
+          "id": "naive-colon-cache-key",
+          "mutation": {
+            "kind": "replace-file",
+            "target": "src/cache-key.mjs",
+            "source": "cases/localized-template-cache/verifier/mutants/cache-key.naive-colon.mjs"
+          }
+        }
+      ],
       "change_policy": {
         "product": ["src/**", "test/**"],
         "tests": ["test/**"],
