@@ -5800,7 +5800,11 @@ export function adjudicateDevelopmentResult(result) {
     .map(({ case_id: caseId, repetition }) =>
       developmentPairKey(caseId, repetition)
     ));
-  const paired = aggregatePairedRuns(runs, { matrixComplete, validPairKeys });
+  const paired = aggregatePairedRuns(runs, {
+    matrixComplete,
+    validPairKeys,
+    expectedPairCount: pairValidity.total_pair_count,
+  });
   const tokenTarget = result?.token_target ?? defaultDevelopmentTokenTarget();
   return {
     aggregate: aggregateRuns(runs),
@@ -6101,6 +6105,22 @@ export function renderDevelopmentReport(
       String(metrics.scope_violations),
     ].join(" | ");
   });
+  const qualityDiagnostics = paired.quality_diagnostics;
+  const qualityQuadrantRows = Object.entries(
+    qualityDiagnostics.outcome_quadrants,
+  ).map(([quadrant, count]) => `${quadrant} | ${count}`);
+  const qualityWorkflowRows = [...WORKFLOWS].map((workflow) => {
+    const metrics = qualityDiagnostics.workflow_task_pass[workflow];
+    return [
+      workflow,
+      `${metrics.passed}/${metrics.total}`,
+      displayPercent(round(metrics.rate_pct, 1)),
+    ].join(" | ");
+  });
+  const qualityInterpretation = (value) => {
+    if (!qualityDiagnostics.eligible) return "ineligible";
+    return value ? "yes" : "no";
+  };
   const failures = runs
     .filter((run) => run.outcome.status === "FAIL")
     .map((run) => `- ${run.run_id}: ${run.outcome.reasons.join("; ")}`);
@@ -6342,6 +6362,24 @@ export function renderDevelopmentReport(
     "Workflow | Task PASS | Median model tokens | Median fresh tokens | Median wall seconds | Median tool calls | Median workflow reads | Declaration failures | Conformance failures | Scope violations",
     "--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:",
     ...summaryRows,
+    "",
+    "## Layered quality diagnostics",
+    "",
+    `Population: **complete valid matched pairs**; interpretation eligibility: **${qualityDiagnostics.eligible ? "yes" : "no"}** (${qualityDiagnostics.valid_matched_pair_count}/${qualityDiagnostics.required_pair_count}).`,
+    "",
+    "Paired outcome quadrant | Count",
+    "--- | ---:",
+    ...qualityQuadrantRows,
+    "",
+    "Workflow | Task PASS | Task PASS rate",
+    "--- | ---: | ---:",
+    ...qualityWorkflowRows,
+    "",
+    `Shared floor (both Task PASS rates <20%): **${qualityInterpretation(qualityDiagnostics.shared_floor)}**.`,
+    "",
+    `Shared ceiling (both Task PASS rates >80%): **${qualityInterpretation(qualityDiagnostics.shared_ceiling)}**.`,
+    "",
+    `Directional asymmetry: **${qualityDiagnostics.directional_asymmetry.present ? "yes" : "no"}**; Superpowers PASS / LeanPowers FAIL: **${qualityDiagnostics.directional_asymmetry.superpowers_pass_lean_fail}**; LeanPowers PASS / Superpowers FAIL: **${qualityDiagnostics.directional_asymmetry.lean_pass_superpowers_fail}**.`,
     "",
     "## Results by task category",
     "",
@@ -6860,6 +6898,19 @@ export function makePilotResult(suite, runtime, runs, repetitions, selectedCases
     id: benchmarkCase.id,
     ...caseSnapshotContract(benchmarkCase),
   }));
+  const reportedCases = selectedCases.map(({
+    id,
+    scenario_class,
+    risk_level,
+    expected_workflow,
+    reporting_category,
+  }) => ({
+    id,
+    scenario_class,
+    risk_level,
+    expected_workflow,
+    ...(reporting_category === undefined ? {} : { reporting_category }),
+  }));
   const heldout = suite.evidence_level === "paired-development-heldout";
   const frozenCaseIds = Array.isArray(suite.cases)
     ? suite.cases.map(({ id }) => id).sort()
@@ -6899,7 +6950,20 @@ export function makePilotResult(suite, runtime, runs, repetitions, selectedCases
   const matrixComplete = /^[a-f0-9]{64}$/u.test(String(suite.suite_sha256 ?? "")) &&
     hasCompleteRunMatrix(runs, selectedCases, repetitions) &&
     heldoutContractVerified;
-  const paired = aggregatePairedRuns(runs, { matrixComplete });
+  const pairValidity = classifyDevelopmentPairValidity({
+    cases: reportedCases,
+    repetitions,
+  }, runs);
+  const validPairKeys = new Set(pairValidity.entries
+    .filter(({ status }) => status === "VALID")
+    .map(({ case_id: caseId, repetition }) =>
+      developmentPairKey(caseId, repetition)
+    ));
+  const paired = aggregatePairedRuns(runs, {
+    matrixComplete,
+    validPairKeys,
+    expectedPairCount: pairValidity.total_pair_count,
+  });
   const tokenTarget = suite.token_target ?? defaultDevelopmentTokenTarget();
   return {
     schema_version: 2,
@@ -6912,19 +6976,7 @@ export function makePilotResult(suite, runtime, runs, repetitions, selectedCases
     confirmatory_eligible: heldout ? matrixComplete : null,
     runtime,
     repetitions,
-    cases: selectedCases.map(({
-      id,
-      scenario_class,
-      risk_level,
-      expected_workflow,
-      reporting_category,
-    }) => ({
-      id,
-      scenario_class,
-      risk_level,
-      expected_workflow,
-      ...(reporting_category === undefined ? {} : { reporting_category }),
-    })),
+    cases: reportedCases,
     case_snapshots: caseSnapshots,
     runs,
     aggregate: aggregateRuns(runs),
@@ -7005,7 +7057,10 @@ function aggregateRuns(runs) {
   }));
 }
 
-function aggregatePairedRuns(runs, { matrixComplete, validPairKeys } = {}) {
+function aggregatePairedRuns(
+  runs,
+  { expectedPairCount, matrixComplete, validPairKeys } = {},
+) {
   const groups = new Map();
   for (const run of runs) {
     const key = developmentPairKey(run.case_id, run.repetition);
@@ -7077,7 +7132,70 @@ function aggregatePairedRuns(runs, { matrixComplete, validPairKeys } = {}) {
       matrixComplete,
       requiredPairCount,
     }),
+    quality_diagnostics: summarizeLayeredQualityDiagnostics(pairs, {
+      matrixComplete,
+      requiredPairCount: Number.isSafeInteger(expectedPairCount) &&
+          expectedPairCount >= 0
+        ? expectedPairCount
+        : requiredPairCount,
+    }),
     by_risk: byRisk,
+  };
+}
+
+function summarizeLayeredQualityDiagnostics(
+  pairs,
+  { matrixComplete, requiredPairCount },
+) {
+  const outcomeQuadrants = {
+    both_pass: 0,
+    superpowers_pass_lean_fail: 0,
+    lean_pass_superpowers_fail: 0,
+    both_fail: 0,
+  };
+  for (const pair of pairs) {
+    const superpowersPass =
+      pair["superpowers-6.1.1"]?.outcome?.status === "PASS";
+    const leanpowersPass =
+      pair["leanpowers-0.2.0"]?.outcome?.status === "PASS";
+    const quadrant = superpowersPass
+      ? leanpowersPass ? "both_pass" : "superpowers_pass_lean_fail"
+      : leanpowersPass ? "lean_pass_superpowers_fail" : "both_fail";
+    outcomeQuadrants[quadrant] += 1;
+  }
+  const workflowTaskPass = Object.fromEntries([...WORKFLOWS].map((workflow) => {
+    const passed = pairs.filter((pair) =>
+      pair[workflow]?.outcome?.status === "PASS"
+    ).length;
+    return [workflow, {
+      passed,
+      total: pairs.length,
+      rate_pct: pairs.length === 0 ? null : passed / pairs.length * 100,
+    }];
+  }));
+  const eligible = matrixComplete === true &&
+    requiredPairCount > 0 &&
+    pairs.length === requiredPairCount;
+  const rates = [...WORKFLOWS].map((workflow) =>
+    workflowTaskPass[workflow].rate_pct
+  );
+  return {
+    population: "complete-valid-matched-pairs",
+    eligible,
+    valid_matched_pair_count: pairs.length,
+    required_pair_count: requiredPairCount,
+    outcome_quadrants: outcomeQuadrants,
+    workflow_task_pass: workflowTaskPass,
+    shared_floor: eligible && rates.every((rate) => rate < 20),
+    shared_ceiling: eligible && rates.every((rate) => rate > 80),
+    directional_asymmetry: {
+      present: outcomeQuadrants.superpowers_pass_lean_fail > 0 ||
+        outcomeQuadrants.lean_pass_superpowers_fail > 0,
+      superpowers_pass_lean_fail:
+        outcomeQuadrants.superpowers_pass_lean_fail,
+      lean_pass_superpowers_fail:
+        outcomeQuadrants.lean_pass_superpowers_fail,
+    },
   };
 }
 

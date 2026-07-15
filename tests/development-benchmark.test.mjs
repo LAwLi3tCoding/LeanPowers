@@ -19,6 +19,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  adjudicateDevelopmentResult,
   approvedLinuxRuntimeRoot,
   benchmarkEnvironment,
   buildClaudeArgs,
@@ -7072,14 +7073,33 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
     outcome: { status, reasons: [] },
     verifier: { artifact_regression: null },
     workflow_conformance: { status: "PASS", reasons: [] },
+    attempt_count: 1,
+    capacity_retry_count: 0,
+    final_attempt_wall_seconds: wall,
+    infrastructure_retry_wall_seconds: 0,
     telemetry: {
-      tokens: { total, uncached_plus_output: fresh },
+      tokens: {
+        input: total,
+        cached_input: total - fresh,
+        output: 0,
+        reasoning_output: 0,
+        total,
+        uncached_plus_output: fresh,
+        telemetry_complete: true,
+      },
       turns: 1,
       tool_calls: tools,
       workflow_trace: { read_calls: reads },
     },
     wall_seconds: wall,
   });
+  const setTokenTotal = (candidate, total) => {
+    const tokens = candidate.telemetry.tokens;
+    tokens.input = total;
+    tokens.cached_input = total - tokens.uncached_plus_output;
+    tokens.output = 0;
+    tokens.total = total;
+  };
   const runs = [
     run("superpowers-6.1.1", selectedCases[0].id, 1, 100, 80, 10, 10, 4, "PASS"),
     run("leanpowers-0.2.0", selectedCases[0].id, 1, 60, 60, 8, 8, 2, "PASS"),
@@ -7130,10 +7150,10 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
   );
 
   const overTargetRuns = structuredClone(runs);
-  overTargetRuns.find((candidate) =>
+  setTokenTotal(overTargetRuns.find((candidate) =>
     candidate.workflow === "leanpowers-0.2.0" &&
     candidate.case_id === selectedCases[0].id
-  ).telemetry.tokens.total = 61;
+  ), 61);
   const overTarget = makePilotResult(suite, {}, overTargetRuns, 1, selectedCases);
   assert.equal(
     overTarget.paired.both_pass_pairs.stable_token_share_at_or_below_60,
@@ -7165,8 +7185,8 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
     },
   };
   const unevenAggregateRuns = structuredClone(allTaskPassingRuns);
-  unevenAggregateRuns[1].telemetry.tokens.total = 80;
-  unevenAggregateRuns[3].telemetry.tokens.total = 20;
+  setTokenTotal(unevenAggregateRuns[1], 80);
+  setTokenTotal(unevenAggregateRuns[3], 20);
   const aggregateTarget = makePilotResult(
     aggregateTargetSuite,
     {},
@@ -7191,8 +7211,8 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
   });
 
   const roundedBoundaryRuns = structuredClone(allTaskPassingRuns);
-  roundedBoundaryRuns[0].telemetry.tokens.total = 10_000;
-  roundedBoundaryRuns[1].telemetry.tokens.total = 6_001;
+  setTokenTotal(roundedBoundaryRuns[0], 10_000);
+  setTokenTotal(roundedBoundaryRuns[1], 6_001);
   const roundedBoundary = makePilotResult(
     suite,
     {},
@@ -7240,7 +7260,7 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
   }
 
   const nonconformantHighTokenRuns = structuredClone(allTaskPassingRuns);
-  nonconformantHighTokenRuns.at(-1).telemetry.tokens.total = 180;
+  setTokenTotal(nonconformantHighTokenRuns.at(-1), 180);
   nonconformantHighTokenRuns.at(-1).workflow_conformance.status = "FAIL";
   const nonconformantHighToken = makePilotResult(
     suite,
@@ -7314,7 +7334,7 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
   assert.match(report, new RegExp(`Suite manifest: ${suite.suite_sha256}`, "u"));
   assert.match(report, /Workspace snapshot \| Hidden verifier snapshot \| Fault-family snapshot/u);
   assert.match(report, /eligible pairs: 0\/2/u);
-  assert.match(report, /Invalid or excluded pairs: \*\*2\*\*/u);
+  assert.match(report, /Invalid or excluded pairs: \*\*0\*\*/u);
   const incompleteReport = renderDevelopmentReport({
     ...incomplete,
     activation_mode: "explicit-entrypoint",
@@ -7349,6 +7369,138 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
     },
   });
   assert.match(artifactReport, /superpowers-6\.1\.1 \| FAIL \| PASS \| yes \| PASS/u);
+});
+
+test("layered quality diagnostics use strict boundaries and preserve both asymmetry directions", async () => {
+  const suite = await loadDevelopmentSuite(suitePath);
+  const selectedCases = [suite.cases[0]];
+  const makeRun = (workflow, repetition, status) => ({
+    workflow,
+    case_id: selectedCases[0].id,
+    case_snapshot: caseSnapshotContract(selectedCases[0]),
+    risk_level: selectedCases[0].risk_level,
+    repetition,
+    activation_reported: true,
+    changes: { product: [], violations: [], workflow: [] },
+    outcome: { status, reasons: [] },
+    attempt_count: 1,
+    capacity_retry_count: 0,
+    final_attempt_wall_seconds: 1,
+    infrastructure_retry_wall_seconds: 0,
+    telemetry: {
+      tokens: {
+        input: 80,
+        cached_input: 30,
+        output: 20,
+        reasoning_output: 0,
+        total: 100,
+        uncached_plus_output: 70,
+        telemetry_complete: true,
+      },
+      tool_calls: 1,
+      workflow_trace: { read_calls: 1 },
+    },
+    wall_seconds: 1,
+    workflow_conformance: { status: "PASS", reasons: [] },
+  });
+  const diagnosticsFor = (superpowersPasses, leanpowersPasses, { omitLast = false } = {}) => {
+    const passRepetitions = {
+      "superpowers-6.1.1": new Set(superpowersPasses),
+      "leanpowers-0.2.0": new Set(leanpowersPasses),
+    };
+    const runs = [];
+    for (let repetition = 1; repetition <= 10; repetition += 1) {
+      for (const workflow of Object.keys(passRepetitions)) {
+        if (omitLast && repetition === 10 && workflow === "leanpowers-0.2.0") continue;
+        runs.push(makeRun(
+          workflow,
+          repetition,
+          passRepetitions[workflow].has(repetition) ? "PASS" : "FAIL",
+        ));
+      }
+    }
+    return makePilotResult(suite, {}, runs, 10, selectedCases)
+      .paired.quality_diagnostics;
+  };
+
+  const sharedFloor = diagnosticsFor([1], [1]);
+  assert.equal(sharedFloor.eligible, true);
+  assert.deepEqual(sharedFloor.outcome_quadrants, {
+    both_pass: 1,
+    superpowers_pass_lean_fail: 0,
+    lean_pass_superpowers_fail: 0,
+    both_fail: 9,
+  });
+  assert.deepEqual(sharedFloor.workflow_task_pass["superpowers-6.1.1"], {
+    passed: 1,
+    total: 10,
+    rate_pct: 10,
+  });
+  assert.equal(sharedFloor.shared_floor, true);
+  assert.equal(sharedFloor.shared_ceiling, false);
+
+  const floorBoundary = diagnosticsFor([1], [1, 2]);
+  assert.equal(floorBoundary.workflow_task_pass["leanpowers-0.2.0"].rate_pct, 20);
+  assert.equal(floorBoundary.shared_floor, false);
+  assert.deepEqual(floorBoundary.directional_asymmetry, {
+    present: true,
+    superpowers_pass_lean_fail: 0,
+    lean_pass_superpowers_fail: 1,
+  });
+
+  const ceilingBoundary = diagnosticsFor(
+    [1, 2, 3, 4, 5, 6, 7, 8],
+    [1, 2, 3, 4, 5, 6, 7, 8, 9],
+  );
+  assert.equal(
+    ceilingBoundary.workflow_task_pass["superpowers-6.1.1"].rate_pct,
+    80,
+  );
+  assert.equal(ceilingBoundary.shared_ceiling, false);
+  assert.equal(
+    diagnosticsFor(
+      [1, 2, 3, 4, 5, 6, 7, 8, 9],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9],
+    ).shared_ceiling,
+    true,
+  );
+
+  const bidirectional = diagnosticsFor([1, 3], [2, 3]);
+  assert.deepEqual(bidirectional.outcome_quadrants, {
+    both_pass: 1,
+    superpowers_pass_lean_fail: 1,
+    lean_pass_superpowers_fail: 1,
+    both_fail: 7,
+  });
+  assert.deepEqual(bidirectional.directional_asymmetry, {
+    present: true,
+    superpowers_pass_lean_fail: 1,
+    lean_pass_superpowers_fail: 1,
+  });
+
+  const incomplete = diagnosticsFor([1], [1], { omitLast: true });
+  assert.equal(incomplete.eligible, false);
+  assert.equal(incomplete.valid_matched_pair_count, 9);
+  assert.equal(incomplete.required_pair_count, 10);
+  assert.equal(incomplete.shared_floor, false);
+  assert.equal(incomplete.shared_ceiling, false);
+
+  const telemetryGapRuns = [
+    makeRun("superpowers-6.1.1", 1, "PASS"),
+    makeRun("leanpowers-0.2.0", 1, "PASS"),
+  ];
+  telemetryGapRuns[0].telemetry.tokens.telemetry_complete = false;
+  const stored = makePilotResult(suite, {}, telemetryGapRuns, 1, selectedCases);
+  const adjudicated = adjudicateDevelopmentResult(stored);
+  assert.deepEqual(
+    stored.paired.quality_diagnostics,
+    adjudicated.paired.quality_diagnostics,
+  );
+  assert.equal(stored.paired.quality_diagnostics.eligible, false);
+  assert.equal(stored.paired.quality_diagnostics.valid_matched_pair_count, 0);
+  assert.equal(stored.paired.quality_diagnostics.required_pair_count, 1);
+  assert.equal(stored.paired.quality_diagnostics.shared_floor, false);
+  assert.equal(stored.paired.quality_diagnostics.shared_ceiling, false);
 });
 
 test("completion and pairing reject duplicate runs that mask a missing counterpart", async () => {

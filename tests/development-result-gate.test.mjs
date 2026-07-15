@@ -477,6 +477,17 @@ test("categorized exact report contract requires the canonical rendered artifact
   result.suite_sha256 = suite.suite_sha256;
   const report = renderDevelopmentReport(result);
 
+  assert.match(report, /## Layered quality diagnostics/u);
+  assert.match(report, /both_pass \| 6/u);
+  assert.match(report, /superpowers_pass_lean_fail \| 0/u);
+  assert.match(report, /lean_pass_superpowers_fail \| 0/u);
+  assert.match(report, /both_fail \| 0/u);
+  assert.match(report, /superpowers-6\.1\.1 \| 6\/6 \| 100%/u);
+  assert.match(report, /leanpowers-0\.2\.0 \| 6\/6 \| 100%/u);
+  assert.match(report, /Shared floor \(both Task PASS rates <20%\): \*\*no\*\*/u);
+  assert.match(report, /Shared ceiling \(both Task PASS rates >80%\): \*\*yes\*\*/u);
+  assert.match(report, /Directional asymmetry: \*\*no\*\*/u);
+
   assert.equal(
     evaluateDevelopmentResultGate(result, { report, suite }).status,
     "PASS",
@@ -548,6 +559,11 @@ test("telemetry gaps invalidate the affected pair in the canonical report", () =
   assert.equal(adjudication.pair_validity.invalid_pair_count, 1);
   assert.equal(adjudication.paired.all_pairs.count, 5);
   assert.equal(adjudication.paired.all_pairs.required_pair_count, 6);
+  assert.equal(adjudication.paired.quality_diagnostics.valid_matched_pair_count, 5);
+  assert.equal(adjudication.paired.quality_diagnostics.required_pair_count, 6);
+  assert.equal(adjudication.paired.quality_diagnostics.outcome_quadrants.both_pass, 5);
+  assert.equal(adjudication.paired.quality_diagnostics.eligible, false);
+  assert.equal(adjudication.paired.quality_diagnostics.shared_ceiling, false);
   assert.equal(adjudication.token_target_result.eligible, false);
   assert.equal(adjudication.token_target_result.status, "INELIGIBLE");
   const preliminary = adjudicateDevelopmentResultGate(result, { suite });
