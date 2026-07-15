@@ -143,6 +143,8 @@ function passingCapsuleStage(workflow = "build") {
     distinct_boundary_coverage_observed: true,
     clause_coverage_observed: true,
     counterexample_presentation_count: 1,
+    pre_patch_counterexample_structure_observed: true,
+    pre_patch_counterexample_transition_observed: true,
     pre_patch_counterexample_observed: true,
     post_patch_clause_test_ledger_observed: false,
     patch_batches: 1,
@@ -202,7 +204,7 @@ function capsuleTraceEvents({
     "Clause→test ledger:",
     "- preserve behavior → existing regression",
     "- benchmark fixture change → focused change test",
-    "Counterexample: behavior=current→changed→preserve current behavior",
+    "Counterexample: behavior=fixture-current→fixture-changed→preserve current behavior",
   ].join("\n"),
   postValidationReview = false,
   readCommand = "tail -n +1 -- src/index.mjs test/index.test.mjs package.json",
@@ -1104,6 +1106,18 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
       "Clause→test ledger:",
       "- preserve behavior → existing regression",
       "- benchmark fixture change → focused change test",
+      "Counterexample: cache locale→banana→must keep locale normalization",
+    ].join("\n"),
+    [
+      "Clause→test ledger:",
+      "- preserve behavior → existing regression",
+      "- benchmark fixture change → focused change test",
+      "Counterexample: behavior=fixture locale en→locale en fixture→preserve current behavior",
+    ].join("\n"),
+    [
+      "Clause→test ledger:",
+      "- preserve behavior → existing regression",
+      "- benchmark fixture change → focused change test",
       "Counterexample: behavior=current→changed→preserve current behavior",
       "Counterexample: fixture=old→new→focused change",
     ].join("\n"),
@@ -1121,8 +1135,48 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
     capsuleTraceOptions("debug"),
   ).workflow_trace.capsule_stage;
   assert.equal(validCounterexample.pre_patch_counterexample_observed, true);
+  assert.equal(validCounterexample.pre_patch_counterexample_transition_observed, true);
   assert.equal(validCounterexample.counterexample_presentation_count, 1);
   assert.equal(validCounterexample.clause_test_mapping_count, 2);
+
+  const observedBugRestatement = parseCodexResult(
+    capsuleTraceEvents({
+      prePatchLedger: [
+        "Clause→test ledger:",
+        "- locale normalization remains intact → locale normalization regression",
+        "- unambiguous cache identity → separator characters test",
+        "Counterexample: same-name+different-locale+separator chars→templateCacheKey returning name causes locale collision→must key by both name and normalized locale",
+      ].join("\n"),
+    }).map(JSON.stringify).join("\n"),
+    {
+      ...capsuleTraceOptions("debug"),
+      expectedReviewContract:
+        "Keep locale normalization intact. Cache identity must remain unambiguous with separator characters.",
+    },
+  ).workflow_trace.capsule_stage;
+  assert.equal(observedBugRestatement.pre_patch_counterexample_structure_observed, false);
+  assert.equal(observedBugRestatement.pre_patch_counterexample_observed, false);
+  assert.equal(observedBugRestatement.protocol_observed, false);
+
+  const disguisedBugRestatement = parseCodexResult(
+    capsuleTraceEvents({
+      prePatchLedger: [
+        "Clause→test ledger:",
+        "- locale normalization remains intact → locale normalization regression",
+        "- unambiguous cache identity → separator characters test",
+        "Counterexample: cache identity=same-name+different-locale+separator chars→templateCacheKey returning name causes locale collision→must preserve unambiguous cache identity",
+      ].join("\n"),
+    }).map(JSON.stringify).join("\n"),
+    {
+      ...capsuleTraceOptions("debug"),
+      expectedReviewContract:
+        "Keep locale normalization intact. Cache identity must remain unambiguous with separator characters.",
+    },
+  ).workflow_trace.capsule_stage;
+  assert.equal(disguisedBugRestatement.pre_patch_counterexample_structure_observed, true);
+  assert.equal(disguisedBugRestatement.pre_patch_counterexample_transition_observed, false);
+  assert.equal(disguisedBugRestatement.pre_patch_counterexample_observed, false);
+  assert.equal(disguisedBugRestatement.protocol_observed, false);
 
   const repeatedPacket = parseCodexResult(
     capsuleTraceEvents({
@@ -1300,7 +1354,7 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
         "Clause→test ledger:",
         "- preserve cache identity → same-locale cache test",
         "- unambiguous cache identity → separator regression test",
-        "Counterexample: cache=welcome-en→welcome-fr→unambiguous cache identity",
+        "Counterexample: cache identity=welcome-en→welcome-fr→unambiguous cache identity",
       ].join("\n"),
     }).map(JSON.stringify).join("\n"),
     {

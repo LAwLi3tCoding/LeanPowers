@@ -808,11 +808,17 @@ function traceCapsuleStage(
       expectedWorkflow === "debug" ? 2 : 1,
       taskBoundaryCount,
     ) && distinctBoundaryCoverageObserved;
-  const prePatchCounterexampleObserved =
+  const prePatchCounterexampleStructureObserved =
     prePatchClauseTestLedger?.counterexample !== null &&
+    prePatchClauseTestLedger?.counterexample !== undefined;
+  const prePatchCounterexampleTransitionObserved =
+    prePatchCounterexampleStructureObserved &&
+    counterexampleSingleChangeObserved(prePatchClauseTestLedger.counterexample);
+  const prePatchCounterexampleObserved =
+    prePatchCounterexampleTransitionObserved &&
     groundedCounterexample(
       expectedReviewContract,
-      prePatchClauseTestLedger?.counterexample,
+      prePatchClauseTestLedger.counterexample,
     );
   const postPatchClauseTestLedgerObserved =
     taskFirstPatchIndex >= 0 &&
@@ -902,6 +908,10 @@ function traceCapsuleStage(
     clause_coverage_observed: clauseCoverageObserved,
     counterexample_presentation_count:
       prePatchClauseTestLedger?.counterexample_presentation_count ?? 0,
+    pre_patch_counterexample_structure_observed:
+      prePatchCounterexampleStructureObserved,
+    pre_patch_counterexample_transition_observed:
+      prePatchCounterexampleTransitionObserved,
     pre_patch_counterexample_observed: prePatchCounterexampleObserved,
     post_patch_clause_test_ledger_observed: postPatchClauseTestLedgerObserved,
     patch_batches: patchBatches.length,
@@ -1077,6 +1087,29 @@ function groundedCounterexample(task, counterexample) {
   const taskTokens = ledgerContentTokens(task);
   return tokenOverlapCount(taskTokens, counterexample.property) >= 1 &&
     tokenOverlapCount(taskTokens, counterexample.boundary) >= 2;
+}
+
+function counterexampleSingleChangeObserved(counterexample) {
+  const passingTokens = counterexampleTransitionTokens(counterexample.passing);
+  const mutationTokens = counterexampleTransitionTokens(counterexample.mutation);
+  if (passingTokens.size === 0 || mutationTokens.size === 0) return false;
+  let shared = 0;
+  for (const token of passingTokens) {
+    if (mutationTokens.has(token)) shared += 1;
+  }
+  const changedTokens =
+    passingTokens.size - shared + mutationTokens.size - shared;
+  return shared >= 1 && changedTokens >= 1 && changedTokens <= 2;
+}
+
+function counterexampleTransitionTokens(value) {
+  const normalized = String(value ?? "")
+    .replace(/([\p{Ll}\d])([\p{Lu}])/gu, "$1 $2")
+    .toLocaleLowerCase("en-US");
+  return new Set(
+    (normalized.match(/[\p{L}\p{N}]+/gu) ?? [])
+      .filter((token) => token.length >= 2 && !LEDGER_TOKEN_STOPWORDS.has(token)),
+  );
 }
 
 function tokenOverlapCount(referenceTokens, value) {
@@ -2271,7 +2304,7 @@ export function renderDevelopmentReport(result) {
     "## Interpretation boundary",
     "",
     "- Task PASS requires successful agent completion, no timeout, both visible and hidden test success, and no changed-path scope violation. Workflow declaration and risk-routing conformance are reported separately.",
-    "- LeanPowers conformance requires one unambiguous semantic route declaration before any task tool; canonical-format adherence remains diagnostic only. Build/debug capsule traces must show no Skill/reference reload, the exact root-relative `rg --files .; rg -n -- 'TERMS' .` discovery shape with a nontrivial literal pattern and option terminator, batched reads, fixture-owned structured pre-edit reproduction for debug, a pre-PATCH clause-to-test packet with at least one mapping grounded by two nontrivial task terms, one contiguous multi-file patch batch, and supported successful validation. Debug may validate with one exact reproduction-plus-test composite or two ordered successful calls; call count remains an efficiency metric, not a correctness gate. Replay telemetry proves only that the exact reproduction command ran, not that its diagnostic meaning changed; task effect remains verifier-owned. Clause-ledger grounding rejects unrelated packets but does not prove complete semantic coverage; marker and mapping counts remain diagnostic. Codex JSONL emits one file-change item per changed file and no patch-call identifier, so contiguous file-change items are an explicit call-cardinality proxy; immediately adjacent independent patch calls with no intervening JSONL event are indistinguishable and may be coalesced. The proxy does not prove exact patch-call cardinality. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Each strict review cycle additionally requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
+    "- LeanPowers conformance requires one unambiguous semantic route declaration before any task tool; canonical-format adherence remains diagnostic only. Build/debug capsule traces must show no Skill/reference reload, the exact root-relative `rg --files .; rg -n -- 'TERMS' .` discovery shape with a nontrivial literal pattern and option terminator, batched reads, fixture-owned structured pre-edit reproduction for debug, exactly one literal pre-PATCH clause-to-test packet with distinct grounded task-boundary mappings and one task-grounded shared-context single-change counterexample shape, one contiguous multi-file patch batch, and supported successful validation. Debug may validate with one exact reproduction-plus-test composite or two ordered successful calls; call count remains an efficiency metric, not a correctness gate. Replay telemetry proves only that the exact reproduction command ran, not that its diagnostic meaning changed; task effect remains verifier-owned. Lexical ledger and counterexample checks reject missing, unrelated, or broad multi-change packets but do not prove semantic completeness. Codex JSONL emits one file-change item per changed file and no patch-call identifier, so contiguous file-change items are an explicit call-cardinality proxy; immediately adjacent independent patch calls with no intervening JSONL event are indistinguishable and may be coalesced. The proxy does not prove exact patch-call cardinality. These observable checks are scoped to the three pilot fixtures, not universal semantic proof. Each strict review cycle additionally requires a complete packet, one fresh reviewer, one matching wait, and no workspace mutation; findings require a nonempty repair plus successful matching validation before another cycle, and the final cycle must return the exact empty passing verdict after the final edit.",
     "- Codex JSONL does not expose raw spawn arguments such as `fork_context`; observable spawn/wait behavior is checked dynamically, while exact argument shape is covered by static workflow tests and remains a runtime telemetry gap.",
     "- Model tokens sum Codex input and output tokens. Fresh tokens are uncached input plus output. Reasoning output is already included in output and is never double-counted. Missing or impossible telemetry is shown as n/a, never zero.",
     "- Workflow reads are exact observed Skill/reference file reads from command traces. They are an attribution proxy, not workflow-only token telemetry.",
