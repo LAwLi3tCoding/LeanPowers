@@ -204,7 +204,7 @@ function capsuleTraceEvents({
     "Clause→test ledger:",
     "- preserve behavior → existing regression",
     "- benchmark fixture change → focused change test",
-    "Counterexample: behavior=fixture-current→fixture-changed→preserve current behavior",
+    "Counterexample: behavior=case=fixture,value=current→case=fixture,value=changed→preserve current behavior",
   ].join("\n"),
   postValidationReview = false,
   readCommand = "tail -n +1 -- src/index.mjs test/index.test.mjs package.json",
@@ -601,6 +601,12 @@ test("LeanPowers route declaration accepts compact semantic and legacy forms", (
       risk: "standard",
       required_gates: "[current_evidence]",
     },
+  );
+  assert.equal(
+    parseLeanRouteLedger(
+      "Leanpowers route selected: `debug` workflow at `standard` risk. I will inspect first.",
+    ),
+    null,
   );
   assert.deepEqual(
     parseLeanRouteLedger(
@@ -1118,6 +1124,24 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
       "Clause→test ledger:",
       "- preserve behavior → existing regression",
       "- benchmark fixture change → focused change test",
+      "Counterexample: behavior=case=fixture,value=current→case=fixture,value=current->changed→preserve current behavior",
+    ].join("\n"),
+    [
+      "Clause→test ledger:",
+      "- preserve behavior → existing regression",
+      "- benchmark fixture change → focused change test",
+      "Counterexample: behavior=case=fixture,value=current→fixture=case,value=changed→preserve current behavior",
+    ].join("\n"),
+    [
+      "Clause→test ledger:",
+      "- preserve behavior → existing regression",
+      "- benchmark fixture change → focused change test",
+      "Counterexample: behavior=case=fixture,value=name=current,locale=en→case=fixture,value=name=changed,locale=fr,error=on→preserve current behavior",
+    ].join("\n"),
+    [
+      "Clause→test ledger:",
+      "- preserve behavior → existing regression",
+      "- benchmark fixture change → focused change test",
       "Counterexample: behavior=current→changed→preserve current behavior",
       "Counterexample: fixture=old→new→focused change",
     ].join("\n"),
@@ -1138,6 +1162,52 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
   assert.equal(validCounterexample.pre_patch_counterexample_transition_observed, true);
   assert.equal(validCounterexample.counterexample_presentation_count, 1);
   assert.equal(validCounterexample.clause_test_mapping_count, 2);
+
+  const compactLedger = parseCodexResult(
+    capsuleTraceEvents({
+      prePatchLedger: [
+        "Clause→test ledger: preserve behavior→existing regression; benchmark fixture change→focused change test",
+        "Counterexample: behavior=case=fixture,value=current→case=fixture,value=changed→preserve current behavior",
+      ].join("\n"),
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(compactLedger.pre_patch_clause_test_ledger_structure_observed, false);
+  assert.equal(compactLedger.clause_test_mapping_count, 0);
+  assert.equal(compactLedger.pre_patch_counterexample_observed, false);
+  assert.equal(compactLedger.protocol_observed, false);
+
+  for (const mappings of [
+    [
+      "- NOT EVIDENCE preserve behavior → existing regression",
+      "- benchmark fixture change → focused change test",
+    ],
+    [
+      "- preserve behavior → existing regression",
+      "- Preserve behavior → Existing regression",
+    ],
+    [
+      "- preserve behavior → not evidence → existing regression",
+      "- benchmark fixture change → focused change test",
+    ],
+    [
+      "- fictional preserve behavior → existing regression",
+      "- pretend benchmark fixture change → focused change test",
+    ],
+  ]) {
+    const invalidMappings = parseCodexResult(
+      capsuleTraceEvents({
+        prePatchLedger: [
+          "Clause→test ledger:",
+          ...mappings,
+          "Counterexample: behavior=case=fixture,value=current→case=fixture,value=changed→preserve current behavior",
+        ].join("\n"),
+      }).map(JSON.stringify).join("\n"),
+      capsuleTraceOptions("debug"),
+    ).workflow_trace.capsule_stage;
+    assert.ok(invalidMappings.clause_test_mapping_count < 2);
+    assert.equal(invalidMappings.protocol_observed, false);
+  }
 
   const observedBugRestatement = parseCodexResult(
     capsuleTraceEvents({
@@ -1177,6 +1247,71 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
   assert.equal(disguisedBugRestatement.pre_patch_counterexample_transition_observed, false);
   assert.equal(disguisedBugRestatement.pre_patch_counterexample_observed, false);
   assert.equal(disguisedBugRestatement.protocol_observed, false);
+
+  const unrelatedContext = parseCodexResult(
+    capsuleTraceEvents({
+      prePatchLedger: [
+        "Clause→test ledger:",
+        "- preserve behavior → existing regression",
+        "- benchmark fixture change → focused change test",
+        "Counterexample: behavior=fruit=banana,value=apple→fruit=banana,value=kiwi→preserve current behavior",
+      ].join("\n"),
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(unrelatedContext.pre_patch_counterexample_transition_observed, true);
+  assert.equal(unrelatedContext.pre_patch_counterexample_observed, false);
+  assert.equal(unrelatedContext.protocol_observed, false);
+
+  const negatedBoundary = parseCodexResult(
+    capsuleTraceEvents({
+      prePatchLedger: [
+        "Clause→test ledger:",
+        "- preserve behavior → existing regression",
+        "- benchmark fixture change → focused change test",
+        "Counterexample: behavior=case=fixture,value=current→case=fixture,value=changed→do not preserve current behavior",
+      ].join("\n"),
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(negatedBoundary.pre_patch_counterexample_transition_observed, true);
+  assert.equal(negatedBoundary.pre_patch_counterexample_observed, false);
+  assert.equal(negatedBoundary.protocol_observed, false);
+
+  const implicitNegatedBoundary = parseCodexResult(
+    capsuleTraceEvents({
+      prePatchLedger: [
+        "Clause→test ledger:",
+        "- preserve behavior → existing regression",
+        "- benchmark fixture change → focused change test",
+        "Counterexample: behavior=case=fixture,value=current→case=fixture,value=changed→fails to preserve current behavior",
+      ].join("\n"),
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(implicitNegatedBoundary.pre_patch_counterexample_transition_observed, true);
+  assert.equal(implicitNegatedBoundary.pre_patch_counterexample_observed, false);
+  assert.equal(implicitNegatedBoundary.protocol_observed, false);
+
+  for (const boundary of [
+    "doesn't preserve current behavior",
+    "doesn’t preserve current behavior",
+  ]) {
+    const contractionBoundary = parseCodexResult(
+      capsuleTraceEvents({
+        prePatchLedger: [
+          "Clause→test ledger:",
+          "- preserve behavior → existing regression",
+          "- benchmark fixture change → focused change test",
+          `Counterexample: behavior=case=fixture,value=current→case=fixture,value=changed→${boundary}`,
+        ].join("\n"),
+      }).map(JSON.stringify).join("\n"),
+      capsuleTraceOptions("debug"),
+    ).workflow_trace.capsule_stage;
+    assert.equal(contractionBoundary.pre_patch_counterexample_transition_observed, true);
+    assert.equal(contractionBoundary.pre_patch_counterexample_observed, false);
+    assert.equal(contractionBoundary.protocol_observed, false);
+  }
 
   const repeatedPacket = parseCodexResult(
     capsuleTraceEvents({
@@ -1273,7 +1408,7 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
     }).map(JSON.stringify).join("\n"),
     capsuleTraceOptions("debug"),
   ).workflow_trace.capsule_stage;
-  assert.equal(unrelatedStage.pre_patch_clause_test_ledger_structure_observed, true);
+  assert.equal(unrelatedStage.pre_patch_clause_test_ledger_structure_observed, false);
   assert.equal(unrelatedStage.pre_patch_clause_test_ledger_observed, false);
   assert.equal(unrelatedStage.grounded_clause_test_mapping_count, 0);
   assert.equal(unrelatedStage.protocol_observed, false);
@@ -1354,7 +1489,7 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
         "Clause→test ledger:",
         "- preserve cache identity → same-locale cache test",
         "- unambiguous cache identity → separator regression test",
-        "Counterexample: cache identity=welcome-en→welcome-fr→unambiguous cache identity",
+        "Counterexample: cache identity=cache=welcome,value=en→cache=welcome,value=fr→unambiguous cache identity",
       ].join("\n"),
     }).map(JSON.stringify).join("\n"),
     {
@@ -1375,6 +1510,7 @@ test("capsule clause-to-test ledger must appear before PATCH, not only in final"
   ).workflow_trace.capsule_stage;
   assert.equal(naturalRouteStage.route_ledger_occurrences, 1);
   assert.equal(naturalRouteStage.ledger_before_tools_observed, true);
+  assert.equal(naturalRouteStage.canonical_route_declaration_observed, false);
   assert.equal(naturalRouteStage.protocol_observed, true);
 
   const strictEscalationStage = parseCodexResult(

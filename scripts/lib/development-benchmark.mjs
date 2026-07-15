@@ -988,6 +988,8 @@ function parseClauseTestLedgerPacket(value) {
     const entry = line
       .replace(/^\s*(?:[-*+]\s+|\d+[.)]\s*)/u, "")
       .trim();
+    const payload = entry.replace(/^counterexample\s*:\s*/iu, "");
+    if ((payload.match(/(?:→|->)/gu) ?? []).length !== 2) return [];
     const match = entry.match(
       /^counterexample\s*:\s*([^=→]+?)\s*=\s*([^→]+?)\s*(?:→|->)\s*([^→]+?)\s*(?:→|->)\s*(.+)$/iu,
     );
@@ -1010,6 +1012,12 @@ function parseClauseTestLedgerPacket(value) {
       .replace(/^\s*(?:[-*+]\s+|\d+[.)]\s*)/u, "")
       .trim();
     if (/^counterexample\s*:/iu.test(entry)) return [];
+    if (
+      (entry.match(/(?:→|->)/gu) ?? []).length !== 1 ||
+      hasEvidenceDisclaimer(entry)
+    ) {
+      return [];
+    }
     const mapping = entry.match(/^(.+?)\s*(?:→|->)\s*(.+)$/u);
     return mapping === null || mapping[1].trim() === "" || mapping[2].trim() === ""
       ? []
@@ -1017,7 +1025,7 @@ function parseClauseTestLedgerPacket(value) {
   });
   if (mappings.length === 0) return null;
   const distinctMappings = [...new Map(mappings.map((mapping) => [
-    `${mapping.clause}\u0000${mapping.test}`,
+    `${normalizeLedgerMappingPart(mapping.clause)}\u0000${normalizeLedgerMappingPart(mapping.test)}`,
     mapping,
   ])).values()];
   return {
@@ -1025,6 +1033,18 @@ function parseClauseTestLedgerPacket(value) {
     counterexample_presentation_count: counterexamplePresentations.length,
     mappings: distinctMappings,
   };
+}
+
+function normalizeLedgerMappingPart(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/\s+/gu, " ")
+    .toLocaleLowerCase("en-US");
+}
+
+function hasEvidenceDisclaimer(value) {
+  return /\b(?:fake|fictional|hypothetical|illustrative|placeholder|pretend|unrelated)\b|\bexample[-\s]+only\b|\b(?:no|not|unproven|unsupported|unverified)\s+(?:claim|evidence|mapping|test)\b/iu
+    .test(String(value ?? ""));
 }
 
 const TASK_BOUNDARY_CUE =
@@ -1084,32 +1104,61 @@ function groundedLedgerMappings(task, mappings) {
 
 function groundedCounterexample(task, counterexample) {
   if (counterexample === null || counterexample === undefined) return false;
+  const transition = parseCounterexampleTransition(counterexample);
+  if (transition === null) return false;
   const taskTokens = ledgerContentTokens(task);
+  const boundaryClauses = taskBoundaryClauses(task).filter((clause) =>
+    tokenOverlapCount(ledgerContentTokens(clause), counterexample.boundary) >= 2
+  );
   return tokenOverlapCount(taskTokens, counterexample.property) >= 1 &&
-    tokenOverlapCount(taskTokens, counterexample.boundary) >= 2;
+    tokenOverlapCount(taskTokens, transition.context) >= 1 &&
+    boundaryClauses.some((clause) =>
+      hasExplicitClauseNegation(clause) ===
+        hasExplicitClauseNegation(counterexample.boundary)
+    );
 }
 
 function counterexampleSingleChangeObserved(counterexample) {
-  const passingTokens = counterexampleTransitionTokens(counterexample.passing);
-  const mutationTokens = counterexampleTransitionTokens(counterexample.mutation);
-  if (passingTokens.size === 0 || mutationTokens.size === 0) return false;
-  let shared = 0;
-  for (const token of passingTokens) {
-    if (mutationTokens.has(token)) shared += 1;
-  }
-  const changedTokens =
-    passingTokens.size - shared + mutationTokens.size - shared;
-  return shared >= 1 && changedTokens >= 1 && changedTokens <= 2;
+  return parseCounterexampleTransition(counterexample) !== null;
 }
 
-function counterexampleTransitionTokens(value) {
-  const normalized = String(value ?? "")
-    .replace(/([\p{Ll}\d])([\p{Lu}])/gu, "$1 $2")
-    .toLocaleLowerCase("en-US");
-  return new Set(
-    (normalized.match(/[\p{L}\p{N}]+/gu) ?? [])
-      .filter((token) => token.length >= 2 && !LEDGER_TOKEN_STOPWORDS.has(token)),
+function parseCounterexampleTransition(counterexample) {
+  const passing = parseCounterexampleEndpoint(counterexample.passing);
+  const mutation = parseCounterexampleEndpoint(counterexample.mutation);
+  if (
+    passing === null ||
+    mutation === null ||
+    passing.context !== mutation.context ||
+    passing.value.toLocaleLowerCase("en-US") ===
+      mutation.value.toLocaleLowerCase("en-US")
+  ) {
+    return null;
+  }
+  return { context: passing.context, passing: passing.value, mutation: mutation.value };
+}
+
+function parseCounterexampleEndpoint(value) {
+  const match = String(value ?? "").trim().match(
+    /^(.+),\s*value\s*=\s*(.+)$/iu,
   );
+  if (match === null) return null;
+  const context = match[1].trim();
+  const endpointValue = match[2].trim();
+  if (
+    context === "" ||
+    endpointValue === "" ||
+    /[,=]/u.test(endpointValue) ||
+    /(?:→|->)/u.test(context) ||
+    /(?:→|->)/u.test(endpointValue)
+  ) {
+    return null;
+  }
+  return { context, value: endpointValue };
+}
+
+function hasExplicitClauseNegation(value) {
+  return /\b(?:cannot|no|not|never|without)\b|\b(?:are|ca|could|did|do|does|has|have|is|must|should|was|were|wo|would)n['’]t\b|\bfail(?:s|ed|ing)?\s+to\b|\b(?:drop|drops|dropped|dropping|lack|lacks|lacked|lacking|omit|omits|omitted|omitting|refuse|refuses|refused|refusing)\b/iu
+    .test(String(value ?? ""));
 }
 
 function tokenOverlapCount(referenceTokens, value) {
