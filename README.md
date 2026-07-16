@@ -8,20 +8,58 @@
 
 LeanPowers keeps the safeguards that matter—bounded requirements, regression evidence, root-cause debugging, independent review, current verification, and safe delivery—while selecting the smallest workflow justified by risk. It is a workflow microkernel, not a large always-on prompt or orchestration service.
 
-> **Release status:** `0.2.0` is a technical preview with opt-in project learning. Ten live checks, including six frozen 12-run confirmatory matrices and two 20-run matrices, provide mixed evidence. In the latest v7 matrix, LeanPowers produced 2/10 Task PASS with 1/10 workflow conformance; Superpowers produced 3/10 Task PASS as a same-condition reference diagnostic. Three pairs were invalid because model/tool compatibility failures prevented Token telemetry, so the formal Token and wall targets were ineligible. Across the seven valid pairs, LeanPowers used 83.3699% as many model tokens and had a 15.5% median wall-time reduction, both diagnostic only. The result remains FAIL and does not establish parity, non-inferiority, superiority, or target completion. See the [latest result](docs/benchmarks/development-effects-performance-confirmatory-v7-2026-07-16.md), its [post-run audit](docs/benchmarks/development-effects-performance-confirmatory-v7-audit-2026-07-16.md), and [preregistration](docs/benchmarks/development-effects-performance-confirmatory-v7-preregistration-2026-07-16.md).
+> **Release status:** `0.2.0` is a technical preview with dynamic risk routing and opt-in project learning. Paired live benchmark reports and audits are published transparently; see the [latest result](docs/benchmarks/development-effects-performance-confirmatory-v7-2026-07-16.md), [post-run audit](docs/benchmarks/development-effects-performance-confirmatory-v7-audit-2026-07-16.md), and [benchmark protocol](docs/benchmark.md).
 
 > **Lineage and thanks:** [Superpowers](https://github.com/obra/superpowers) is the upstream reference and principal engineering foundation for this independent project. Its evidence-first engineering discipline, TDD, systematic debugging, review, verification, and safe-delivery ideas made LeanPowers possible. LeanPowers carries those principles into a smaller, risk-adaptive control surface; the comparison is a lineage-and-tradeoff study. See [Acknowledgments](ACKNOWLEDGMENTS.md).
 
 ## Why LeanPowers
 
-- Six focused engineering workflows instead of a long mandatory chain.
-- A 499-word `route` entry Skill improves discovery and runs one lowest-safe workflow.
-- An event-driven `adapt` control Skill provides optional project learning; neither control Skill is an engineering stage.
+- Learns from explicit follow-up feedback and applies only the most relevant project lessons next time.
+- Selects one lowest-safe workflow dynamically instead of preloading a long mandatory chain.
+- Six focused engineering workflows, coordinated by the small `route` and `adapt` control Skills.
 - `lean`, `standard`, and `strict` paths selected by observable risk.
 - Single-agent execution by default; bounded subagents only for independent work.
 - Current evidence required before completion or delivery claims.
 - Static installed packages with no MCP server, daemon, telemetry, or third-party dependency installation.
 - Native packages for both Codex and Claude Code, plus portable Agent Skills.
+
+## Learn and evolve with your project
+
+LeanPowers has an opt-in, project-local feedback loop. When a later message explicitly says that a previous result worked or failed, corrects an earlier conclusion, or states a durable project preference, `adapt` turns that feedback into one narrow reusable lesson. A future relevant workflow can then retrieve up to three lessons matched by workflow, path, and tags, incorporating relevant project context without loading a growing conversation history.
+
+```text
+Enable LeanPowers learning for this project.
+
+"The earlier cache fix failed because tenant scope was checked too late."
+→ adapt records a scoped correction for the relevant code and workflow.
+
+"That retry policy worked in production. Keep it for this client."
+→ adapt records or reinforces a durable project rule.
+```
+
+Additional distinct support reinforces an existing lesson; an explicit correction can supersede an obsolete one. Lessons may expire, and you can inspect, forget, clear, disable, or permanently delete them. Silence, thanks, ordinary continuation, one-time authorization, and the Agent's own self-assessment are never treated as learning evidence.
+
+Learning is disabled by default. When enabled, the bundled Node.js helper stores a project-local `.leanpowers/` ledger and adds it only to Git's local `info/exclude`; it never edits the tracked `.gitignore`. The ledger contains normalized rules and bounded evidence summaries—not raw chats, full prompts, command logs, stack traces, secrets, credentials, or unrelated repository content.
+
+Retrieved lessons are advisory and can never lower authorization, scope, risk, root-cause, regression-evidence, independent-review, or completion-evidence gates. There is no background activity, network access, telemetry, global user profile, or cross-project sharing. Node.js 20+ is needed only after learning is explicitly enabled.
+
+## A dynamic workflow, not a fixed pipeline
+
+`route` reads the task and observable risk, then activates exactly one owning workflow. LeanPowers transitions only when new evidence requires it: an unknown cause moves work to `debug`, strict risk adds independent review, and stale or delivery-bound evidence moves through `verify` before `ship`. The full chain is never loaded by default.
+
+```mermaid
+flowchart LR
+    T["Engineering task"] --> R["route"]
+    R --> W["One lowest-safe workflow"]
+    W --> E{"Evidence changes?"}
+    E -->|"No"| C["Complete"]
+    E -->|"Unknown cause"| D["debug"]
+    E -->|"Strict risk"| V["independent review"]
+    E -->|"Stale or delivery-bound"| S["verify → ship"]
+    F["Explicit later feedback"] --> A["adapt"]
+    A --> L["Project-local lessons"]
+    L -. "up to 3 relevant rules" .-> W
+```
 
 ## Install from GitHub
 
@@ -85,28 +123,7 @@ $leanpowers:adapt Enable LeanPowers learning for this project.
 | `verify` | Completion, safety, installability, or readiness claims | Claim-to-command evidence and explicit gaps |
 | `ship` | Commit, push, PR, package, release, or handoff | Destination readback for the delivered revision |
 
-`route` is a 499-word control-plane entry Skill. It raises automatic discovery—especially in Codex—by matching the start of engineering work, then runs exactly one lowest-safe workflow. Its owner capsule locks BUILD test-first, DEBUG bounded-recovery, and STRICT completed-review effects before task tools; selected Skills add reasoning and output without taking over the order. It never preloads the full chain. Strict-only review instructions are loaded only after a green strict validation.
-
-`adapt` is the other control-plane Skill, not a seventh engineering workflow. Its name means “change future behavior from verified feedback.” It handles explicit outcome feedback and learning maintenance without inserting another mandatory stage into `shape? → build/debug → review? → verify? → ship?`.
-
-## Optional project learning
-
-Learning is disabled by default. Installation, Codex startup, Claude `SessionStart`, and ordinary workflow use do not read or create learning state. Enable it only with an explicit project-scoped request such as:
-
-```text
-Enable LeanPowers learning for this project.
-Disable LeanPowers learning for this project.
-What has LeanPowers learned in this project?
-Forget the tenant-filter lesson.
-Clear this project's learned lessons.
-Permanently delete this project's LeanPowers learning data.
-```
-
-When enabled, the bundled Node.js helper stores a project-local `.leanpowers/` ledger and adds `.leanpowers/` to Git's local `info/exclude`; it never edits the tracked `.gitignore`. It records only normalized rules and bounded evidence summaries derived from explicit correction, confirmation, outcome, or durable project preference. It does not store raw chats, full prompts, command logs, stack traces, secrets, credentials, or unrelated repository content.
-
-Retrieval is advisory, project-scoped, and capped at three relevant lessons. Lessons cannot lower authorization, scope, risk, root-cause, regression-evidence, independent-review, or completion-evidence gates. There is no background activity, network access, telemetry, global user profile, or cross-project sharing. Node.js 20+ is required only after project learning is explicitly enabled; the six engineering workflows remain dependency-free while it is disabled.
-
-Disabling learning retains the local ledger for later inspection or deletion. Forget and clear preserve auditable event history; permanent deletion physically rewrites the local learning tree and, like clear-and-disable, requires explicit destructive confirmation.
+`route` and `adapt` are control-plane Skills, not extra engineering stages. `route` chooses the current workflow; `adapt` changes future behavior from verified feedback. Together they keep the engineering path dynamic without turning learning into another mandatory ceremony.
 
 ## Routing and modes
 
@@ -166,11 +183,13 @@ Agent instructions are not a security boundary. Review commands and diffs before
 
 ## Compared with Superpowers 6.1.1
 
-LeanPowers compares against all 14 Superpowers 6.1.1 Skills. It consolidates the 13 engineering-workflow concerns into six engineering workflows and keeps `writing-skills` as an external specialist concern. The six engineering `SKILL.md` files contain exactly 3,039 words, an 83.6% reduction from all 18,516 words in the 14-file Superpowers comparison set. The `route` and `adapt` control Skills add 499 and 329 words, so all eight LeanPowers Skill files total 3,867 words—still 79.1% less. Counts use the same `wc -w` method; comparing against all 14 baseline files deliberately includes the external authoring Skill. Structural reduction is verified. Across eight frozen confirmatory matrices, only the first met its aggregate token target, and none met the complete engineering-effect target. LeanPowers remains structurally lighter, but broad outcome parity and reliable workflow-discipline preservation remain unproven.
+LeanPowers carries forward Superpowers' evidence-first engineering principles while consolidating 13 engineering-workflow concerns into six risk-activated workflows. The six engineering `SKILL.md` files total 3,039 words—83.6% fewer than the 14-file Superpowers 6.1.1 comparison set. Adding `route` (499 words) and `adapt` (329 words) brings all eight LeanPowers Skills to 3,867 words, still 79.1% smaller.
 
 This is a lineage-and-tradeoff comparison, not a winner ranking. Superpowers remains the upstream inspiration and a comprehensive workflow reference; LeanPowers tests whether the outcome-critical safeguards can be retained with a smaller, risk-adaptive control surface. The retained safeguards, different optimization choices, evidence limits, and balanced conclusion are documented in [docs/comparison-superpowers.md](docs/comparison-superpowers.md). If you are migrating, read [docs/migration.md](docs/migration.md)—do not enable both systems as automatic workflow routers in the same session.
 
-## Benchmark
+## Evidence and benchmark
+
+LeanPowers publishes paired live coding runs, preregistrations, post-run audits, and a reproducible comparator. Structural reduction is verified; live development results remain bounded evidence rather than a universal parity or speed claim. Detailed scores, limitations, and every frozen historical conclusion stay in the benchmark documents instead of the product overview.
 
 The comparator accepts paired result documents conforming to [schemas/benchmark-result.schema.json](schemas/benchmark-result.schema.json):
 
@@ -181,29 +200,7 @@ node scripts/benchmark.mjs compare \
   --out path/to/report
 ```
 
-A release-eligible result must use complete, live, blind, identically paired runs. Simulated or incomplete input produces `DIAGNOSTIC_ONLY`; any hard failure blocks release. See [docs/benchmark.md](docs/benchmark.md) for scenarios, metrics, thresholds, and the current evidence gap.
-
-For actual coding evidence, see the [2026-07-14 paired development-effects pilot](docs/benchmarks/development-effects-pilot-2026-07-14.md): 3 task classes × 2 repetitions × 2 workflows. Both workflows passed 5/6 runs; LeanPowers used 19.8% fewer median model tokens and 9.5% less median wall time. The result is diagnostic pilot evidence and does not meet the full release benchmark's coverage or efficiency gates.
-
-The separate [frozen held-out check](docs/benchmarks/development-effects-heldout-2026-07-14.md) covered one standard-risk debugging task. Both workflows passed the executable task 2/2, but LeanPowers conformance was 1/2, so the preregistered engineering-effect gate failed. LeanPowers used a median 79.6% of Superpowers model tokens, and neither pair met the `<=60%` target. This single case does not establish broad equivalence.
-
-The first [multi-task confirmatory result](docs/benchmarks/development-effects-confirmatory-2026-07-15.md) used three newly frozen standard-risk cases with two counterbalanced repetitions. Both workflows passed 5/6 executable runs, and both failed the same repetition of the build-options mutation gate. LeanPowers met the aggregate token objective at 50.03% of Superpowers' summed model tokens, but its quality-bearing conformance was 0/6. The engineering-effect decision and combined target therefore failed.
-
-The [follow-up confirmatory result](docs/benchmarks/development-effects-confirmatory-followup-2026-07-15.md) used three different frozen cases under the same matrix shape. Both workflows passed 4/6 executable runs. LeanPowers used 78.38% of Superpowers' summed model tokens and had 0/6 quality-bearing conformance, so the aggregate-token, engineering-effect, and combined decisions failed. The shared task-batching failures exposed an under-specified null-prototype boundary; the limitation is documented without post-hoc reclassification.
-
-The first [quality-first token result](docs/benchmarks/development-effects-performance-confirmatory-v2-2026-07-15.md) used another three frozen cases. Superpowers passed 2/6 and LeanPowers 3/6; neither reached the required 6/6. LeanPowers used 90.4% of Superpowers aggregate model tokens. A post-run audit found that the frozen evaluator rejected the live Codex status used for intentional RED failures; corrected diagnostic replay raised LeanPowers conformance from the frozen 0/6 to 2/6, still below the requirement and without changing the overall FAIL. The result isolates build at 54.2% token share and stateful debug at 132.3%, making the debug tail the next optimization target.
-
-The newer [v3 quality-first result](docs/benchmarks/development-effects-performance-confirmatory-v3-2026-07-15.md) used atomic migration BUILD, stable-priority BUILD, and generation-guarded DEBUG cases. Superpowers produced 1/6 and LeanPowers 2/6 Task PASS. LeanPowers implementations passed all visible and hidden behavior verifiers, but four BUILD runs lacked fault-discriminating tests; quality-bearing conformance remained 0/6. Aggregate LeanPowers model tokens were 111.9% of Superpowers: BUILD used 68.4%, while DEBUG used 150.6% and erased the savings. The [post-run audit](docs/benchmarks/development-effects-performance-confirmatory-v3-audit-2026-07-15.md) discloses a frozen result-gate summary defect; fixing it prospectively removes only `outcome-consistency`, not the overall FAIL.
-
-The [v4 quality-first result](docs/benchmarks/development-effects-performance-confirmatory-v4-2026-07-16.md) used weighted-interleave BUILD, strict structured-redaction BUILD, and bidirectional-index DEBUG cases. Superpowers produced 5/6 and LeanPowers 3/6 Task PASS; LeanPowers conformance was 0/6. LeanPowers used 1,874,386 model tokens versus Superpowers' 2,370,010, a 79.0877% aggregate share and 20.9123% reduction, but still missed the `<=60%` target. Median paired token and wall reductions were 26.0% and 2.0%. The [post-run audit](docs/benchmarks/development-effects-performance-confirmatory-v4-audit-2026-07-16.md) separates executable failures, workflow gaps, and DEBUG telemetry limitations without changing the frozen FAIL. Any prospective change requires newly frozen unseen tasks.
-
-The subsequent [v5 quality-first result](docs/benchmarks/development-effects-performance-confirmatory-v5-2026-07-16.md) used HTTP negotiation BUILD, strict safe-redirect BUILD, and keyset-cursor DEBUG cases. Both workflows produced 0/6 Task PASS, and LeanPowers conformance was 0/6. One Superpowers run ended without a complete turn or Token telemetry, so the six-pair aggregate target was ineligible; the five valid pairs give a diagnostic LeanPowers share of 102.3742%, not a substitute decision. The [post-run audit](docs/benchmarks/development-effects-performance-confirmatory-v5-audit-2026-07-16.md) records the floor effect, partial quality diagnostics, telemetry gap, and prospective calibration changes without altering v4 or the frozen v5 FAIL. V5 is useful stress evidence but cannot support a comparative quality conclusion.
-
-The previous [v6 quality-first result](docs/benchmarks/development-effects-performance-confirmatory-v6-2026-07-16.md) used five narrower unseen cases, two counterbalanced repetitions, medium reasoning effort, and a 20-run matrix. Both workflows produced 4/10 Task PASS: four pairs were `both_pass`, six were `both_fail`, and neither directional asymmetry cell was populated. The result is neither a shared floor nor a shared ceiling, but the absolute 10/10 quality requirement failed and equal counts do not prove parity. LeanPowers conformance was 1/10. With complete telemetry in all ten pairs, LeanPowers used 2,275,147 model tokens versus Superpowers' 3,027,400, an aggregate share of 75.1518%; the all-matched wall reduction median was 4.6%. The exact machine reasons were `lean-conformance`, `task-outcome`, and `token-target`. The [post-run audit](docs/benchmarks/development-effects-performance-confirmatory-v6-audit-2026-07-16.md) separates shared task difficulty, LeanPowers workflow gaps, and efficiency evidence without changing v4, v5, or the frozen v6 FAIL.
-
-The latest [v7 quality-first result](docs/benchmarks/development-effects-performance-confirmatory-v7-2026-07-16.md) tested the optimized `1e59e06` runtime on five new frozen cases in another counterbalanced 20-run matrix. LeanPowers produced 2/10 Task PASS and 1/10 conformance; Superpowers produced 3/10 Task PASS as a reference diagnostic. Three pre-agent model/tool compatibility failures left only seven valid Token pairs, making the formal Token and wall targets ineligible. In those seven pairs, both workflows passed 2/7, the outcome quadrants were `1/1/1/4`, LeanPowers' diagnostic aggregate Token share was 83.3699%, and the paired wall-time reduction median was 15.5%. The sole `both_pass` pair had a 79.4532% Lean share and a nonconformant Lean run. The [post-run audit](docs/benchmarks/development-effects-performance-confirmatory-v7-audit-2026-07-16.md) separates runtime exclusions, executable behavior, mutation-test adequacy, workflow routing, and efficiency without changing the frozen FAIL.
-
-For multi-task evaluations, the token objective is aggregate: across the complete matched matrix, summed LeanPowers model tokens should be about 60% or less of summed Superpowers tokens. Quality remains a separate hard gate. Individual pair shares stay visible diagnostics, but each pair is not required to remain below 60%. The older held-out result keeps its stricter frozen rule unchanged.
+A release-eligible result must use complete, live, blind, identically paired runs. For the full evidence record, see the [benchmark method and status](docs/benchmark.md), [latest v7 result](docs/benchmarks/development-effects-performance-confirmatory-v7-2026-07-16.md), [v7 post-run audit](docs/benchmarks/development-effects-performance-confirmatory-v7-audit-2026-07-16.md), and [complete Superpowers comparison](docs/comparison-superpowers.md).
 
 ## Development
 

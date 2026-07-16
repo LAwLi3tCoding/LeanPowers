@@ -64,6 +64,47 @@ test("adaptive learning preview identity and documentation are explicit and opt-
   assert.match(comparison, /six engineering workflows.*two.*control skill/i);
 });
 
+test("product READMEs foreground adaptive flow and keep benchmark history in docs", async () => {
+  const readme = await readFile(new URL("README.md", projectRoot), "utf8");
+  const chinese = await readFile(new URL("README.zh-CN.md", projectRoot), "utf8");
+
+  assert.ok(
+    readme.indexOf("## Learn and evolve with your project") <
+      readme.indexOf("## Install from GitHub"),
+  );
+  assert.ok(
+    chinese.indexOf("## 随项目学习和进化") <
+      chinese.indexOf("## 从 GitHub 直接安装"),
+  );
+  assert.match(readme, /up to three lessons matched by workflow, path, and tags/i);
+  assert.match(chinese, /按工作流、路径和标签取回最多三条经验/u);
+  assert.match(readme, /## A dynamic workflow, not a fixed pipeline/i);
+  assert.match(chinese, /## 动态流程，不是固定流水线/u);
+  assert.match(readme, /There is no background activity, network access, telemetry/i);
+  assert.match(chinese, /没有后台活动、网络访问、遥测/u);
+
+  const benchmark = readme.match(
+    /## Evidence and benchmark(?<body>[\s\S]*?)## Development/u,
+  )?.groups?.body;
+  const benchmarkZh = chinese.match(
+    /## 证据与基准(?<body>[\s\S]*?)## 开发/u,
+  )?.groups?.body;
+  assert.ok(benchmark);
+  assert.ok(benchmarkZh);
+  assert.ok(benchmark.split("\n").filter(Boolean).length <= 15);
+  assert.ok(benchmarkZh.split("\n").filter(Boolean).length <= 15);
+  assert.doesNotMatch(
+    benchmark,
+    /development-effects-(?:pilot|heldout|confirmatory-2026|confirmatory-followup|performance-confirmatory-v[2-6]-)/u,
+  );
+  assert.doesNotMatch(
+    benchmarkZh,
+    /development-effects-(?:pilot|heldout|confirmatory-2026|confirmatory-followup|performance-confirmatory-v[2-6]-)/u,
+  );
+  assert.doesNotMatch(readme, /(?:2\/10|1\/10|83\.3699%)/u);
+  assert.doesNotMatch(chinese, /(?:2\/10|1\/10|83\.3699%)/u);
+});
+
 test("published instruction counts match the canonical source exactly", async () => {
   const skillCounts = new Map();
   for (const name of skillNames) {

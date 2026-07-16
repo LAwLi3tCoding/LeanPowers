@@ -6,6 +6,11 @@ import test from "node:test";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const EXPECTED_NAME = "LAwLi3tCoding";
 const HISTORICAL_NOREPLY_EMAIL = "203456625+LAwLi3tCoding@users.noreply.github.com";
+const APPROVED_TOPOLOGY_ONLY_MERGES = new Set([
+  // GitHub PR #1 predates the direct-main policy. This exact merge contributes
+  // no tree content beyond its second parent; every other identity still fails.
+  "0133af28c21b00d643ca4df6df2cab8a367a3993",
+]);
 const APPROVED_PERSONAL_EMAIL_DOMAINS = new Set([
   "hotmail.co.uk",
   "hotmail.com",
@@ -121,6 +126,26 @@ function gitLines(args) {
   }).split("\n").filter(Boolean);
 }
 
+function approvedTopologyOnlyMerge(commit) {
+  if (!APPROVED_TOPOLOGY_ONLY_MERGES.has(commit)) return false;
+
+  const parentResult = spawnSync(
+    "git",
+    ["rev-list", "--parents", "-n", "1", commit],
+    { cwd: ROOT, encoding: "utf8" },
+  );
+  if (parentResult.status !== 0) return false;
+  const [recordedCommit, ...parents] = parentResult.stdout.trim().split(/\s+/u);
+  if (recordedCommit !== commit || parents.length !== 2) return false;
+
+  const treeResult = spawnSync(
+    "git",
+    ["diff", "--quiet", parents[1], commit],
+    { cwd: ROOT, encoding: "utf8" },
+  );
+  return treeResult.status === 0;
+}
+
 function matchingHistoryLines(commit) {
   const result = spawnSync(
     "git",
@@ -191,17 +216,32 @@ test("commit identity policy accepts historical noreply and personal Outlook met
   );
 });
 
-test("all reachable commits use an approved GitHub identity", () => {
+test("reachable commits use approved identities except pinned topology-only merges", () => {
   const identities = gitLines([
     "log",
     "HEAD",
-    "--format=%an|%ae|%cn|%ce",
+    "--format=%H|%an|%ae|%cn|%ce",
   ]);
-  assert.ok(identities.length > 0);
-  assert.ok(
-    identities.every(approvedCommitIdentity),
+  const rejectedCommits = identities
+    .filter((entry) => {
+      const [commit, ...identity] = entry.split("|");
+      return !approvedCommitIdentity(identity.join("|")) &&
+        !approvedTopologyOnlyMerge(commit);
+    })
+    .map((entry) => entry.slice(0, entry.indexOf("|")));
+
+  assert.deepEqual(
+    rejectedCommits,
+    [],
     "reachable commit identity is outside the approved GitHub policy",
   );
+});
+
+test("the pinned historical merge exception remains topology-only", () => {
+  assert.equal(APPROVED_TOPOLOGY_ONLY_MERGES.size, 1);
+  for (const commit of APPROVED_TOPOLOGY_ONLY_MERGES) {
+    assert.equal(approvedTopologyOnlyMerge(commit), true, commit);
+  }
 });
 
 test("all reachable commit messages, paths, and text blobs pass the privacy guard", () => {
