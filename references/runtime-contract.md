@@ -2,6 +2,8 @@
 
 Use for direct entry or missing routing ledger. Read once; reuse.
 
+Batch independent reads/checks when evidence stays attributable; with proven unchanged fingerprint/scope, never reread unchanged workflow/source. Limit output to relevant regions/failure summaries. Carry one ledger without restating task/plan. Extra calls require new evidence; never merge gates.
+
 ## Risk and gates
 
 Use the highest signal. `lean` only when `clear`, `local`, `reversible`, and `establishedValidation` are true and no standard or strict signal applies. `causeKnown=false` is `standard`; so are `preferredMode=standard`, `behaviorChange`, `boundedUncertainty`, `dataModelChange`, `defect`, `dependencyChange`, `diagnosisRequested`, `externalSystem`, `multiFile`, `publicBoundaryChange`, `scopeExpanded`, and `validationFailed`. Use `strict` for `preferredMode=strict`, `authorization`, `authentication`, `concurrency`, `credentialGated`, `credentials`, `cryptography`, `dataRisk`, `destructive`, `irreversible`, `largeRefactor`, `migration`, `payment`, `privacy`, `production`, `reviewHighRisk`, `security`, `secrets`, and `signatureVerification`. Strict is sticky until independent review and current evidence pass.

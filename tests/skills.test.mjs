@@ -363,12 +363,24 @@ test("prospective v6 workflow repairs are hard gates without extra stages", asyn
   ]) {
     assert.match(`${route}\n${build}`, discriminator);
   }
+  assert.match(debug, /fresh[\s\S]{0,100}(?:two|twice)[\s\S]{0,100}identit/i);
+  assert.match(
+    debug,
+    /exact ordinary[\s\S]{0,120}prototype[\s\S]{0,120}Reflect\.ownKeys[\s\S]{0,120}descriptors/i,
+  );
+  assert.match(
+    build,
+    /deep-fresh[\s\S]{0,140}(?:disjoint|share no)[\s\S]{0,120}(?:input|output)[\s\S]{0,120}containers?/i,
+  );
 
   assert.match(
     debug,
     /continuous[\s\S]{0,120}regression[\s\S]{0,100}product repair[\s\S]{0,160}(?:without|no test)[\s\S]{0,80}(?:BUILD )?RED/i,
   );
   assert.match(debug, /pre-edit[\s\S]{0,100}reproduc/i);
+  for (const source of [route, debug]) {
+    assert.match(source, /pre-edit[\s\S]{0,120}reproduc[\s\S]{0,100}standalone command/i);
+  }
   assert.match(debug, /validation[\s\S]{0,100}(?:replay|rerun)[\s\S]{0,80}(?:exact|original)[\s\S]{0,40}reproduc/i);
 
   for (const source of [route, build, debug, strictPolicy]) {
@@ -376,6 +388,22 @@ test("prospective v6 workflow repairs are hard gates without extra stages", asyn
   }
   assert.match(strictPolicy, /atomic ledger/i);
   assert.match(strictPolicy, /unavailable review[\s\S]{0,80}(?:blocked|cannot complete)/i);
+});
+
+test("runtime compresses repeated context without merging evidence gates", async () => {
+  const route = await readFile(path.join(skillsRoot, "route", "SKILL.md"), "utf8");
+  const runtime = await readFile(
+    path.join(root, "references", "runtime-contract.md"),
+    "utf8",
+  );
+
+  for (const source of [route, runtime]) {
+    assert.match(source, /batch independent reads\/checks when evidence stays attributable/i);
+    assert.match(source, /never reread unchanged workflow\/source/i);
+    assert.match(source, /limit output to relevant regions\/failure summaries/i);
+    assert.match(source, /carry one ledger without restating task\/plan/i);
+    assert.match(source, /extra calls require new evidence; never merge gates/i);
+  }
 });
 
 test("debug reproduction output stays attributable after validation", async () => {

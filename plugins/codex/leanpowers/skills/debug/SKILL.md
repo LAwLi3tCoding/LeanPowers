@@ -14,14 +14,14 @@ If project learning is enabled, use `adapt` to query once at entry under the [le
 ## Direct-entry root-cause loop
 
 1. State exact symptom, expected behavior, revision, environment. Read every edit target before editing; preserve unrelated changes.
-2. Before editing, reproduce with the smallest reliable command, case, trace, or fixture. Trace backward to the first incorrect transition and root cause. If unavailable, report the validation gap; do not claim repair.
+2. Use a pre-edit reproduction as a standalone command: the smallest reliable case, trace, or fixture. Trace backward to the first incorrect transition and root cause. If unavailable, report the validation gap; do not claim repair.
 3. Form one falsifiable hypothesis: cause, predicted observation, and smallest distinguishing experiment. Inspect evidence; reject or refine when prediction fails.
 4. Map the first wrong transition to regression and interacting-failure assertions. Before patching keep `Clause→test ledger:`. Give each actual high-information qualifier its own line: `qualifier → smallest distinguishing test | rejects: neighboring wrong implementation`; never group qualifiers behind one generic test. After pre-edit reproduction, open one continuous regression-test plus product repair window. Run no test or BUILD RED between those modifications.
 5. Close the repair window, then run regression and applicable affected integration/lint/typecheck/static/package/build/full-suite validation. Then replay the exact reproduction. Structured resolved output: reproduction MUST be a separate final command for attribution. Combined validation+reproduction is acceptable only when no structured output contract needs attribution.
 6. A launcher/tool-start error may correct only the command before supported validation runs and does not spend recovery. One failed supported validation permits one immediate substantive correction to already-read in-scope paths and an identical-command rerun. No intervening task tool, test weakening, empty retry, second correction, or second failure; otherwise block/rescope.
 7. First green freezes the completed acceptance set. A material omission discovered before review starts a new incomplete cycle. File edits invalidate validation and reproduction; read-only reporting does not.
 
-Use observable counterexamples: getter/counter no-access sentinels, snapshots plus nested identity for immutability, post-guard short-circuit sentinels, one-property/element exact-boundary cases.
+Use observable counterexamples: `fresh` calls twice and compares identities; `exact ordinary` checks prototype, `Reflect.ownKeys`, descriptors; getter/counter no-access sentinels; snapshots plus nested identity for immutability; post-guard short-circuit sentinels; one-property/element exact-boundary cases.
 
 ## Strict direct entry
 
