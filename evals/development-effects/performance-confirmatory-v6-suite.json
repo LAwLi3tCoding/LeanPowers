@@ -1,0 +1,307 @@
+{
+  "schema_version": 2,
+  "suite_id": "development-effects-performance-confirmatory-v6-2026-07-16",
+  "evidence_level": "paired-development-heldout",
+  "runtime": "codex-cli",
+  "model_default": "gpt-5.3-codex-spark",
+  "effort": "medium",
+  "repetitions": 2,
+  "activation_mode": "explicit-entrypoint",
+  "report_contract": "categorized-exact-render-v1",
+  "token_target": {
+    "metric": "aggregate-model-token-share",
+    "population": "all-matched-pairs",
+    "max_share_pct": 60
+  },
+  "workflow_entrypoints": {
+    "superpowers-6.1.1": "$superpowers:using-superpowers",
+    "leanpowers-0.2.0": "$leanpowers:route"
+  },
+  "workflow_order": [
+    ["superpowers-6.1.1", "leanpowers-0.2.0"],
+    ["leanpowers-0.2.0", "superpowers-6.1.1"]
+  ],
+  "freeze_contract": {
+    "status": "frozen-before-live-run",
+    "model_default": "gpt-5.3-codex-spark",
+    "effort": "medium",
+    "repetitions": 2,
+    "workflow_order": [
+      ["superpowers-6.1.1", "leanpowers-0.2.0"],
+      ["leanpowers-0.2.0", "superpowers-6.1.1"]
+    ],
+    "case_order": [
+      [
+        "cyclic-sequence-rotation",
+        "version-vector-relation",
+        "json-merge-patch",
+        "ring-buffer-wraparound",
+        "capability-scope-decision"
+      ],
+      [
+        "capability-scope-decision",
+        "ring-buffer-wraparound",
+        "json-merge-patch",
+        "version-vector-relation",
+        "cyclic-sequence-rotation"
+      ]
+    ],
+    "agent_read_isolation": "codex-minimal-workspace-plugin-toolchain-read-v1",
+    "superpowers_revision": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+    "leanpowers_revision": "1a88de222685f420ebb14a84b8bab405ec2e33a6",
+    "evaluator_revision": "b82812c91f46f708475cac285847ed84b70e441a",
+    "runner_revision": "b82812c91f46f708475cac285847ed84b70e441a",
+    "case_snapshots": {
+      "cyclic-sequence-rotation": {
+        "mutants_sha256": "b2588b25b3284c2580abaa85bacdb0d611577d464d4a6ee5a8e92c8b373d5206",
+        "verifier_sha256": "aaefcfd98c1f058374528277bd4785b7cc91407d6277b8c743859b6c9876dbc2",
+        "workspace_sha256": "2643779c8506acb7495e61d190191d36855ec06bcd1ee1605174be9b43908803"
+      },
+      "version-vector-relation": {
+        "mutants_sha256": "afd77b6a88d5836a80787c2fc7ba1231dd2bf8a1be374ffdc91d4b8d769637a2",
+        "verifier_sha256": "4ceef552651da383dd4a43b6231e5857f233d07d19297dc21d07d464e2062d3a",
+        "workspace_sha256": "5af0e494a3a55764bbf6f19e180144e13a60261f66bec6af689f35b6c5760cc7"
+      },
+      "json-merge-patch": {
+        "mutants_sha256": "f670dc36ab6c88f70474c8b3f44ed392f0d57154d392f2e180c08fbd545b475c",
+        "verifier_sha256": "d2e67af87c9f20765adde8612b4ed61ad073c8ded019cc9a52c9e9b7cbb35357",
+        "workspace_sha256": "07d4ea0ba1a01e28b4e83b11db16fe484d243bc75eda87d6a3d8d86bacb78c1d"
+      },
+      "ring-buffer-wraparound": {
+        "mutants_sha256": "94520a2a7396e02667ef7c3a35ffd340532fb33ac01052b9749a164936aa8dad",
+        "verifier_sha256": "6b2efb9fe5e3dea7ae4bb5455fa67eaeb58a4a26f7c40a55cf84c45dc3bb8018",
+        "workspace_sha256": "7de83c2c55530c029c161a37d05ddac413959f580b87509cf6a45654ca96c13d"
+      },
+      "capability-scope-decision": {
+        "mutants_sha256": "895797c39b1481cf3a44d2ec805f61a180c1a8379a3e0edaaba4b03b86657bd6",
+        "verifier_sha256": "8a6931177ee02e8c4c8df3ad855d9618d5736524a6de7383c364145c54fcda11",
+        "workspace_sha256": "12dba20809438414d2c74bfc952101d6f6d8b715cfe565ee082f260fcc15adae"
+      }
+    },
+    "token_target": {
+      "metric": "aggregate-model-token-share",
+      "population": "all-matched-pairs",
+      "max_share_pct": 60
+    }
+  },
+  "case_order": [
+    [
+      "cyclic-sequence-rotation",
+      "version-vector-relation",
+      "json-merge-patch",
+      "ring-buffer-wraparound",
+      "capability-scope-decision"
+    ],
+    [
+      "capability-scope-decision",
+      "ring-buffer-wraparound",
+      "json-merge-patch",
+      "version-vector-relation",
+      "cyclic-sequence-rotation"
+    ]
+  ],
+  "cases": [
+    {
+      "id": "cyclic-sequence-rotation",
+      "scenario_class": "small-explicit-feature",
+      "task_family": "cyclic-sequence-normalization",
+      "reporting_category": "cyclic rotation build",
+      "risk_level": "lean",
+      "expected_workflow": "build",
+      "workspace": "cases/cyclic-sequence-rotation/workspace",
+      "verifier_files": [
+        "cases/cyclic-sequence-rotation/verifier/cyclic-sequence-rotation.hidden.mjs"
+      ],
+      "task": "Implement rotateSequence(values, offset). values must be a dense array with no extra own keys and only own enumerable data elements; reject invalid structure with TypeError without invoking accessors. offset must be a safe integer. Return a fresh array representing a left rotation by the mathematical modulo of offset, including negative and larger-than-length offsets; an empty input returns a fresh empty array. Preserve element references and leave the input values and property descriptors unchanged. Preserve the exact direct and public named export surfaces, and keep rotateSequence as the only direct named export. Add focused regressions for left rotation, negative and oversized modulo, zero and empty inputs, fresh containers, element identity, exact descriptor-safe validation, immutability, and API compatibility. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {"id":"left-rotation-order","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"rotateSequence","target":"src/cyclic-sequence-rotation.mjs","source":"cases/cyclic-sequence-rotation/verifier/mutants/cyclic-sequence-rotation.right-rotation.mjs"}]},
+        {"id":"negative-offset-modulo","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"rotateSequence","target":"src/cyclic-sequence-rotation.mjs","source":"cases/cyclic-sequence-rotation/verifier/mutants/cyclic-sequence-rotation.negative-offset-absolute.mjs"}]},
+        {"id":"oversized-offset-modulo","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"rotateSequence","target":"src/cyclic-sequence-rotation.mjs","source":"cases/cyclic-sequence-rotation/verifier/mutants/cyclic-sequence-rotation.oversized-offset-unmodded.mjs"}]},
+        {"id":"fresh-input-preservation","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"rotateSequence","target":"src/cyclic-sequence-rotation.mjs","source":"cases/cyclic-sequence-rotation/verifier/mutants/cyclic-sequence-rotation.reuse-mutate-input.mjs"}]}
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "version-vector-relation",
+      "scenario_class": "unknown-cause-defect",
+      "task_family": "version-vector-causality",
+      "reporting_category": "version vector debug",
+      "risk_level": "standard",
+      "expected_workflow": "debug",
+      "workspace": "cases/version-vector-relation/workspace",
+      "verifier_files": [
+        "cases/version-vector-relation/verifier/version-vector-relation.hidden.mjs"
+      ],
+      "task": "Users report that version vectors can be misclassified when a component exists only on the right. Before editing, run the included node repro/version-vector-relation.mjs and use its structured output to identify the first incorrect transition. Fix compareVersionVectors(left, right) to return equal, before, after, or concurrent. Inputs must be exact ordinary Object.prototype records containing only own enumerable string data properties; keys must match [A-Za-z][A-Za-z0-9_-]* and values must be non-negative safe integers. Reject invalid structures with TypeError without invoking accessors. Treat missing components as zero and compare the union of components using the componentwise partial order. Preserve inputs and property descriptors, preserve the exact direct and public named export surfaces, and keep compareVersionVectors as the only direct named export. Add focused regressions for right-only and left-only components, missing zero values, equality, before, after, concurrency, exact accessor-safe validation, immutability, and API compatibility. Run the full test suite, then rerun the same included repro as a separate final command; its final nonblank JSON object must match the resolved behavior. Do not commit, install packages, use the network, or create another worktree.",
+      "reproduction_contract": {
+        "command": "node repro/version-vector-relation.mjs",
+        "expected_output": {
+          "scenario": "version-vector-relation",
+          "observations": [
+            {
+              "action": "compare-version-vectors",
+              "left": {"core":2},
+              "right": {"core":2,"ui":1},
+              "expected_relation": "before",
+              "observed_relation": "equal"
+            }
+          ],
+          "first_incorrect_transition": {
+            "stage": "component-union",
+            "component": "ui",
+            "expected": "compare right-only component against an implicit left value of zero",
+            "observed": "right-only component was omitted"
+          },
+          "resolution": null
+        },
+        "resolved_output": {
+          "scenario": "version-vector-relation",
+          "observations": [
+            {
+              "action": "compare-version-vectors",
+              "left": {"core":2},
+              "right": {"core":2,"ui":1},
+              "expected_relation": "before",
+              "observed_relation": "before"
+            }
+          ],
+          "first_incorrect_transition": null,
+          "resolution": {
+            "stage": "component-union",
+            "component": "ui",
+            "observed": "right-only component compared against implicit zero",
+            "relation": "before"
+          }
+        }
+      },
+      "artifact_regression_gates": [
+        {"id":"componentwise-not-sum","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"compareVersionVectors","target":"src/version-vector-relation.mjs","source":"cases/version-vector-relation/verifier/mutants/version-vector-relation.sum-comparison.mjs"}]},
+        {"id":"full-vector-concurrency","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"compareVersionVectors","target":"src/version-vector-relation.mjs","source":"cases/version-vector-relation/verifier/mutants/version-vector-relation.first-difference.mjs"}]},
+        {"id":"right-only-component-union","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"compareVersionVectors","target":"src/version-vector-relation.mjs","source":"cases/version-vector-relation/verifier/mutants/version-vector-relation.ignore-right-only.mjs"}]},
+        {"id":"exact-accessor-safe-validation","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"compareVersionVectors","target":"src/version-vector-relation.mjs","source":"cases/version-vector-relation/verifier/mutants/version-vector-relation.loose-accessor-validation.mjs"}]}
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "json-merge-patch",
+      "scenario_class": "medium-explicit-feature",
+      "task_family": "json-merge-patch-application",
+      "reporting_category": "JSON merge patch build",
+      "risk_level": "standard",
+      "expected_workflow": "build",
+      "workspace": "cases/json-merge-patch/workspace",
+      "verifier_files": [
+        "cases/json-merge-patch/verifier/json-merge-patch.hidden.mjs"
+      ],
+      "task": "Implement applyJsonMergePatch(target, patch) for a restricted JSON Merge Patch contract. Both inputs must be acyclic JSON-compatible values: null, booleans, finite numbers, strings, dense arrays with no extra own keys and only own enumerable data elements, or exact ordinary Object.prototype records with only own enumerable data properties. Reject undefined, bigint, symbols, functions, non-finite numbers, sparse or extra-key arrays, nonordinary records, accessors, and cycles with TypeError without invoking accessors. When patch is not a record, return its deep fresh clone. When patch is a record, treat a non-record target as an empty record; null patch members delete that key, and every other member recursively applies this contract. Arrays are atomic and replace rather than merge or concatenate. Return a fully fresh mutable container tree sharing no object or array with either input, without modifying input values or descriptors. Preserve the exact direct and public named export surfaces, and keep applyJsonMergePatch as the only direct named export. Add focused regressions for null deletion, recursive record merge, atomic arrays, primitive replacement, deep freshness, immutability and descriptors, validation and accessor safety, special own keys, and API compatibility. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {"id":"null-member-deletion","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"applyJsonMergePatch","target":"src/json-merge-patch.mjs","source":"cases/json-merge-patch/verifier/mutants/json-merge-patch.keep-null.mjs"}]},
+        {"id":"recursive-record-merge","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"applyJsonMergePatch","target":"src/json-merge-patch.mjs","source":"cases/json-merge-patch/verifier/mutants/json-merge-patch.shallow-nested.mjs"}]},
+        {"id":"atomic-array-replacement","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"applyJsonMergePatch","target":"src/json-merge-patch.mjs","source":"cases/json-merge-patch/verifier/mutants/json-merge-patch.concat-arrays.mjs"}]},
+        {"id":"fresh-input-isolation","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"applyJsonMergePatch","target":"src/json-merge-patch.mjs","source":"cases/json-merge-patch/verifier/mutants/json-merge-patch.reuse-branches.mjs"}]},
+        {"id":"new-branch-deep-isolation","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"applyJsonMergePatch","target":"src/json-merge-patch.mjs","source":"cases/json-merge-patch/verifier/mutants/json-merge-patch.selective-new-branch-reuse.mjs"}]}
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "ring-buffer-wraparound",
+      "scenario_class": "unknown-cause-defect",
+      "task_family": "ring-buffer-wraparound-ordering",
+      "reporting_category": "ring buffer debug",
+      "risk_level": "standard",
+      "expected_workflow": "debug",
+      "workspace": "cases/ring-buffer-wraparound/workspace",
+      "verifier_files": [
+        "cases/ring-buffer-wraparound/verifier/ring-buffer.hidden.mjs"
+      ],
+      "task": "Users report that a ring buffer returns retained values in physical backing-array order after its write head wraps. Before editing, run the included node repro/ring-buffer-wraparound.mjs and use its structured output to identify the first incorrect transition. Fix createRingBuffer(capacity). capacity must be a positive safe integer. Return an ordinary buffer object exposing exactly the own enumerable methods push(value), clear(), and values(). push must retain only the most recent capacity values, preserve caller-owned values by reference, return undefined, and never expose backing state. values must return retained values from oldest to newest, including after one or many wraparounds; every call must return a fresh dense ordinary array that preserves stored value references and cannot mutate buffer state. clear must return undefined, discard all retained values, and fully reset occupancy and the next insertion position so subsequent pushes behave like a new buffer. Preserve the exact direct and public named export surfaces, and keep createRingBuffer as the only direct named export. Add focused regressions for first wraparound order, repeated overwrite rounds, complete clear and reset behavior, fresh dense snapshots, reference preservation, capacity one, capacity validation, and API compatibility. Run the full test suite, then rerun the same included repro as a separate final command; its final nonblank JSON object must match the resolved behavior. Do not commit, install packages, use the network, or create another worktree.",
+      "reproduction_contract": {
+        "command": "node repro/ring-buffer-wraparound.mjs",
+        "expected_output": {
+          "scenario": "ring-buffer-wraparound",
+          "observations": [
+            {
+              "action": "values-after-wraparound",
+              "capacity": 3,
+              "pushed": ["a", "b", "c", "d"],
+              "expected_values": ["b", "c", "d"],
+              "observed_values": ["d", "b", "c"]
+            }
+          ],
+          "first_incorrect_transition": {
+            "stage": "chronological-read-after-wrap",
+            "expected": "oldest retained value appears first",
+            "observed": "physical backing order exposed"
+          },
+          "resolution": null
+        },
+        "resolved_output": {
+          "scenario": "ring-buffer-wraparound",
+          "observations": [
+            {
+              "action": "values-after-wraparound",
+              "capacity": 3,
+              "pushed": ["a", "b", "c", "d"],
+              "expected_values": ["b", "c", "d"],
+              "observed_values": ["b", "c", "d"]
+            }
+          ],
+          "first_incorrect_transition": null,
+          "resolution": {
+            "stage": "chronological-read-after-wrap",
+            "observed": "retained values returned oldest to newest"
+          }
+        }
+      },
+      "artifact_regression_gates": [
+        {"id":"chronological-wrap-order","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"createRingBuffer","target":"src/ring-buffer.mjs","source":"cases/ring-buffer-wraparound/verifier/mutants/ring-buffer.physical-order.mjs"}]},
+        {"id":"wrap-head-transition","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"createRingBuffer","target":"src/ring-buffer.mjs","source":"cases/ring-buffer-wraparound/verifier/mutants/ring-buffer.head-off-by-one.mjs"}]},
+        {"id":"clear-resets-position","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"createRingBuffer","target":"src/ring-buffer.mjs","source":"cases/ring-buffer-wraparound/verifier/mutants/ring-buffer.clear-keeps-head.mjs"}]},
+        {"id":"fresh-values-snapshot","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"createRingBuffer","target":"src/ring-buffer.mjs","source":"cases/ring-buffer-wraparound/verifier/mutants/ring-buffer.reuses-values-array.mjs"}]},
+        {"id":"ordinary-buffer-surface","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"createRingBuffer","target":"src/ring-buffer.mjs","source":"cases/ring-buffer-wraparound/verifier/mutants/ring-buffer.nonordinary-buffer.mjs"}]}
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "capability-scope-decision",
+      "scenario_class": "small-explicit-feature",
+      "task_family": "capability-scope-authorization",
+      "reporting_category": "capability scope strict build",
+      "risk_level": "strict",
+      "expected_workflow": "build",
+      "workspace": "cases/capability-scope-decision/workspace",
+      "verifier_files": [
+        "cases/capability-scope-decision/verifier/capability-scope-decision.hidden.mjs"
+      ],
+      "task": "Implement the security-sensitive isCapabilityAllowed(rules, action, resource). A token is a primitive ASCII string matching [A-Za-z0-9][A-Za-z0-9._-]*. A canonical resource scope is one or more slash-separated tokens with no leading, trailing, or repeated slash. rules must be a possibly empty dense array with no extra own keys and only own enumerable data elements. Every rule must be an exact ordinary Object.prototype record with exactly the own enumerable data properties { effect, action, resource }; effect is allow or deny, action is * or a token, and resource is * or a canonical scope. The requested action must be a non-wildcard token and resource a non-wildcard canonical scope. Reject invalid structures with TypeError without invoking accessors, and validate every rule, including rules after an earlier match, before deciding. Matching is case-sensitive. A rule matches when its action is * or exact and its resource is *, exact, or a slash-segment-boundary ancestor of the requested resource; raw prefixes such as tenant/orders matching tenant/orders-archive are forbidden. Any matching deny overrides every matching allow regardless of order. Return true only when at least one allow matches and no deny matches; return false when nothing matches. Preserve rules, records, and descriptors. Preserve the exact direct and public named export surfaces, and keep isCapabilityAllowed as the only direct named export. Add focused regressions for deny precedence in both orders, action and resource wildcards, exact and descendant scopes, slash-segment isolation, default deny, complete descriptor-safe validation, input immutability, and API compatibility. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {"id":"order-independent-deny-precedence","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"isCapabilityAllowed","target":"src/capability-scope-decision.mjs","source":"cases/capability-scope-decision/verifier/mutants/capability-decision.first-match.mjs"},{"kind":"replace-callable-export","export_name":"isCapabilityAllowed","target":"src/capability-scope-decision.mjs","source":"cases/capability-scope-decision/verifier/mutants/capability-decision.ignore-wildcard-deny.mjs"}]},
+        {"id":"case-sensitive-scope-boundaries","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"isCapabilityAllowed","target":"src/capability-scope-decision.mjs","source":"cases/capability-scope-decision/verifier/mutants/capability-decision.raw-prefix.mjs"},{"kind":"replace-callable-export","export_name":"isCapabilityAllowed","target":"src/capability-scope-decision.mjs","source":"cases/capability-scope-decision/verifier/mutants/capability-decision.case-fold-matching.mjs"}]},
+        {"id":"action-wildcard-matching","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"isCapabilityAllowed","target":"src/capability-scope-decision.mjs","source":"cases/capability-scope-decision/verifier/mutants/capability-decision.ignore-action-wildcard.mjs"}]},
+        {"id":"default-deny","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"isCapabilityAllowed","target":"src/capability-scope-decision.mjs","source":"cases/capability-scope-decision/verifier/mutants/capability-decision.default-allow.mjs"}]},
+        {"id":"request-accessor-safe-validation","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"isCapabilityAllowed","target":"src/capability-scope-decision.mjs","source":"cases/capability-scope-decision/verifier/mutants/capability-decision.coerce-request.mjs"}]}
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    }
+  ]
+}

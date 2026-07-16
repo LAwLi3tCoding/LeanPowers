@@ -20,7 +20,7 @@ Do not treat command namespaces alone as isolation; automatic skill discovery ca
 
 | Superpowers 6.1.1 | LeanPowers | Migration note |
 | --- | --- | --- |
-| `using-superpowers` | `route` or direct automatic workflow selection | Uses a 219-word entry Skill to start one lowest-safe workflow instead of enforcing a full chain |
+| `using-superpowers` | `route` or direct automatic workflow selection | Uses a 499-word entry Skill to run one lowest-safe workflow; strict review policy loads only after green strict validation |
 | `brainstorming` | `shape mode=standard|strict` | Use only for material ambiguity or risk; clear tasks may skip it |
 | `writing-plans` | `shape` delivery slices | Slices are outcomes with evidence, not 2–5 minute micro-steps |
 | `executing-plans` | `build` | Execute one independently useful slice at a time |
@@ -72,7 +72,7 @@ Disabling retains local data for inspection or later re-enablement. Forget and c
 
 1. **Capture your current baseline.** Record the Superpowers version, runtimes, normal prompts, task outcomes, tokens, elapsed time, agent calls, and known failure categories.
 2. **Install LeanPowers in an isolated profile or session.** Keep Superpowers available elsewhere for rollback, but do not activate both routers together.
-3. **Start with low-risk tasks.** Compare `build → verify` against your existing process and inspect completion evidence, not just speed.
+3. **Start with low-risk tasks.** Compare `build` with inline current-revision evidence against your existing process and inspect completion evidence, not just speed.
 4. **Exercise unknown-failure work.** Confirm `debug` reproduces the issue, tests one hypothesis at a time, and covers the real failure path.
 5. **Exercise strict tasks.** Verify security, authorization, migration, or production-shaped scenarios still receive independent review and authorization gates.
 6. **Test delivery.** Confirm `ship` preserves unrelated work and reads back the actual branch, commit, PR, or package target.

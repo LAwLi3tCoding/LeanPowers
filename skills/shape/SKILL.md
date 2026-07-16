@@ -7,7 +7,7 @@ description: Use when an engineering request has material ambiguity, unclear sco
 
 Turn an unclear request into the smallest executable brief that preserves correctness. Do not turn clear work into a planning ceremony.
 
-Read [risk policy](../../references/risk-policy.md), [quality gates](../../references/quality-gates.md), and [workflow transitions](../../references/workflow-transitions.md).
+Inherit the routing ledger. If entered directly or the ledger is missing, read the [runtime contract](../../references/runtime-contract.md) once; do not reload it after transitions.
 
 If project learning is enabled, use `adapt` to query once at entry under the [learning policy](../../references/learning-policy.md) with this workflow, relevant paths, and tags; add at most three behavior-changing advisory rules to the task brief. Send explicit downstream outcome, correction, confirmation, or durable-preference feedback to `adapt`.
 

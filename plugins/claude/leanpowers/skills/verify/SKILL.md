@@ -7,7 +7,7 @@ description: Use when an agent is about to claim work is complete, fixed, safe, 
 
 Map every material completion claim to current evidence. Confidence, previous success, and another agent's report are not evidence for the present revision.
 
-Read [quality gates](../../references/quality-gates.md), [evidence protocol](../../references/evidence-protocol.md), and [workflow transitions](../../references/workflow-transitions.md).
+Inherit the routing ledger. If entered directly or the ledger is missing, read the [runtime contract](../../references/runtime-contract.md) once; do not reload it after transitions.
 
 If project learning is enabled, use `adapt` to query once at entry under the [learning policy](../../references/learning-policy.md) with this workflow, relevant paths, and tags; add at most three behavior-changing advisory rules to the task brief. Treat prior confirmations as advisory, never current verification evidence, and send explicit downstream feedback to `adapt`.
 
@@ -27,6 +27,8 @@ A source, generator, dependency, configuration, or package-path change invalidat
 ```yaml
 verdict: pass | fail | incomplete
 revision: current fingerprint
+risk: lean | standard | strict
+independent_review: pass | missing | not_required
 claims:
   - claim: exact statement
     status: pass | fail | unavailable

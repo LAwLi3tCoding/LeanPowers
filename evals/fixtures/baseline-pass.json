@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "run_id": "superpowers-baseline-pass",
   "workflow": "superpowers-6.1.1",
   "provenance": "simulated",
@@ -47,6 +47,10 @@
     "max_retrieved_lessons": 3
   },
   "efficiency": {
+    "overall": {
+      "total_model_tokens": 1100000,
+      "token_observations": 110
+    },
     "standard": {
       "median_tokens": 10000,
       "median_wall_seconds": 100,

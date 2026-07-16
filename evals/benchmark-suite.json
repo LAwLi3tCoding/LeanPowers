@@ -48,7 +48,7 @@
     "critical_escape_delta_max": 0,
     "regression_rate_delta_max": 0.02,
     "scope_violation_rate_delta_max": 0.02,
-    "standard_tokens_reduction_min": 0.5,
+    "overall_model_token_share_max": 0.6,
     "standard_wall_reduction_min": 0.4,
     "task_success_delta_min": -0.03,
     "regressing_category_strict_rerun": {
@@ -61,6 +61,6 @@
     "aggregate_totals_equal_completed_cases": true,
     "categories_partition_scenario_classes": true,
     "category_totals_equal_completed_cases": true,
-    "schema_version": 2
+    "schema_version": 3
   }
 }

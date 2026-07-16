@@ -1,0 +1,340 @@
+{
+  "schema_version": 2,
+  "suite_id": "development-effects-confirmatory-followup-2026-07-15",
+  "evidence_level": "paired-development-heldout",
+  "freeze_contract": {
+    "status": "frozen-before-live-run",
+    "model_default": "gpt-5.3-codex-spark",
+    "effort": "low",
+    "repetitions": 2,
+    "workflow_order": [
+      ["superpowers-6.1.1", "leanpowers-0.2.0"],
+      ["leanpowers-0.2.0", "superpowers-6.1.1"]
+    ],
+    "agent_read_isolation": "codex-minimal-workspace-plugin-toolchain-read-v1",
+    "superpowers_revision": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+    "case_snapshots": {
+      "canonical-query-entries": {
+        "mutants_sha256": "533ff272a4f5916d45c302eb211a692810f0f4c587931869ea9a2263f8c176a2",
+        "verifier_sha256": "4e89ce74624384a267efc2c10ea7b814b3ac27e222d2a6ea01e87670410f3dc8",
+        "workspace_sha256": "5aacc749fb3553ccba41f4d7d780f3335ce21b8c53911807b1ad6a03916d5950"
+      },
+      "stable-task-batches": {
+        "mutants_sha256": "18c04abf52e6fba3ec44196d73a51c9d282b314e9cbf726dd48b81f3d78c2dcb",
+        "verifier_sha256": "9900ff60b179adde86232ed124f8b5f608b6a425a66c261cc0ff2e572c1785c7",
+        "workspace_sha256": "05fa508791cbcc6af3ccf252c3e38241a2a79128485a672e46aa1ef2fbc2ce15"
+      },
+      "per-key-expiry-cache": {
+        "mutants_sha256": "ff78ab8fe597351d4b1c4c80c81a2fe59579817ee4d3932a130fd8d49aa40bc9",
+        "verifier_sha256": "3f51c2452355ee1c557c28473fef373fdcda4c6129b20c6d5bc63f00b24d1f0a",
+        "workspace_sha256": "65c656f70398f4408f4a13a686cba37e0a9b8405b3d2bedc31143cf2d2491489"
+      }
+    },
+    "token_target": {
+      "metric": "aggregate-model-token-share",
+      "population": "all-matched-pairs",
+      "max_share_pct": 60
+    }
+  },
+  "runtime": "codex-cli",
+  "model_default": "gpt-5.3-codex-spark",
+  "effort": "low",
+  "repetitions": 2,
+  "activation_mode": "explicit-entrypoint",
+  "token_target": {
+    "metric": "aggregate-model-token-share",
+    "population": "all-matched-pairs",
+    "max_share_pct": 60
+  },
+  "workflow_entrypoints": {
+    "superpowers-6.1.1": "$superpowers:using-superpowers",
+    "leanpowers-0.2.0": "$leanpowers:route"
+  },
+  "workflow_order": [
+    ["superpowers-6.1.1", "leanpowers-0.2.0"],
+    ["leanpowers-0.2.0", "superpowers-6.1.1"]
+  ],
+  "cases": [
+    {
+      "id": "canonical-query-entries",
+      "scenario_class": "small-explicit-feature",
+      "risk_level": "standard",
+      "expected_workflow": "build",
+      "workspace": "cases/canonical-query-entries/workspace",
+      "verifier_files": [
+        "cases/canonical-query-entries/verifier/canonical-query.hidden.mjs"
+      ],
+      "task": "Extend encodeCanonicalQuery(entries) so it returns a deterministic canonical query string for an array of two-element [name, value] string pairs. Reject non-arrays, malformed pairs, sparse entries, or non-string fields with TypeError. Encode each name and value independently using RFC3986-style encodeURIComponent semantics: spaces must be %20 and reserved characters, including !, ', (, ), and *, must be percent encoded. Sort entries by encoded name and then encoded value, preserving every duplicate and retaining stable order for exact duplicates. Join encoded name=value entries with &, keep returning an empty string for an empty array, and never mutate caller-owned input. Preserve the exact direct and public named export surfaces and keep encodeCanonicalQuery as a direct named export. Add focused regression tests that independently prove encoded-name ordering, same-name value ordering, duplicate preservation, reserved-character and space encoding, validation, and input immutability. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {
+          "id": "canonical-entry-order",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "encodeCanonicalQuery",
+              "target": "src/canonical-query.mjs",
+              "source": "cases/canonical-query-entries/verifier/mutants/canonical-query.preserve-order.mjs"
+            }
+          ]
+        },
+        {
+          "id": "duplicate-preservation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "encodeCanonicalQuery",
+              "target": "src/canonical-query.mjs",
+              "source": "cases/canonical-query-entries/verifier/mutants/canonical-query.drop-duplicates.mjs"
+            }
+          ]
+        },
+        {
+          "id": "component-encoding",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "encodeCanonicalQuery",
+              "target": "src/canonical-query.mjs",
+              "source": "cases/canonical-query-entries/verifier/mutants/canonical-query.raw-components.mjs"
+            },
+            {
+              "kind": "replace-callable-export",
+              "export_name": "encodeCanonicalQuery",
+              "target": "src/canonical-query.mjs",
+              "source": "cases/canonical-query-entries/verifier/mutants/canonical-query.plus-spaces.mjs"
+            }
+          ]
+        },
+        {
+          "id": "encoded-value-order",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "encodeCanonicalQuery",
+              "target": "src/canonical-query.mjs",
+              "source": "cases/canonical-query-entries/verifier/mutants/canonical-query.key-only-sort.mjs"
+            }
+          ]
+        },
+        {
+          "id": "input-immutability",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "encodeCanonicalQuery",
+              "target": "src/canonical-query.mjs",
+              "source": "cases/canonical-query-entries/verifier/mutants/canonical-query.mutate-input.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "stable-task-batches",
+      "scenario_class": "small-explicit-feature",
+      "risk_level": "standard",
+      "expected_workflow": "build",
+      "workspace": "cases/stable-task-batches/workspace",
+      "verifier_files": [
+        "cases/stable-task-batches/verifier/task-batches.hidden.mjs"
+      ],
+      "task": "Extend scheduleTaskBatches(tasks) so tasks are scheduled into stable topological execution batches. Each task must be a plain record with its own non-empty string id and its own dependsOn array containing non-empty string dependency IDs. Reject a non-array input, invalid task records, duplicate IDs, missing dependencies, self-dependencies, and cyclic dependencies with TypeError. Return one array of task IDs per dependency level: every task in a batch must be ready before that batch starts, and tasks that become ready together must retain their original input order. Return [] for an empty input, do not mutate the collection, records, or dependency arrays, preserve the exact public exports, and keep scheduleTaskBatches as a direct named export. Add focused regression tests for stable ready-order, level batching, missing dependencies, duplicate IDs, cycles, record validation, and immutability. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {
+          "id": "stable-ready-order",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "scheduleTaskBatches",
+              "target": "src/task-batches.mjs",
+              "source": "cases/stable-task-batches/verifier/mutants/task-batches.sort-ready.mjs"
+            }
+          ]
+        },
+        {
+          "id": "dependency-level-batching",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "scheduleTaskBatches",
+              "target": "src/task-batches.mjs",
+              "source": "cases/stable-task-batches/verifier/mutants/task-batches.flatten-levels.mjs"
+            }
+          ]
+        },
+        {
+          "id": "missing-dependency-validation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "scheduleTaskBatches",
+              "target": "src/task-batches.mjs",
+              "source": "cases/stable-task-batches/verifier/mutants/task-batches.ignore-missing.mjs"
+            }
+          ]
+        },
+        {
+          "id": "cycle-validation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "scheduleTaskBatches",
+              "target": "src/task-batches.mjs",
+              "source": "cases/stable-task-batches/verifier/mutants/task-batches.append-cycles.mjs"
+            }
+          ]
+        },
+        {
+          "id": "duplicate-id-validation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "scheduleTaskBatches",
+              "target": "src/task-batches.mjs",
+              "source": "cases/stable-task-batches/verifier/mutants/task-batches.allow-duplicates.mjs"
+            }
+          ]
+        },
+        {
+          "id": "input-immutability",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "scheduleTaskBatches",
+              "target": "src/task-batches.mjs",
+              "source": "cases/stable-task-batches/verifier/mutants/task-batches.mutate-input.mjs"
+            }
+          ]
+        },
+        {
+          "id": "plain-record-validation",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "scheduleTaskBatches",
+              "target": "src/task-batches.mjs",
+              "source": "cases/stable-task-batches/verifier/mutants/task-batches.loose-records.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "per-key-expiry-cache",
+      "scenario_class": "unknown-cause-defect",
+      "risk_level": "standard",
+      "expected_workflow": "debug",
+      "workspace": "cases/per-key-expiry-cache/workspace",
+      "verifier_files": [
+        "cases/per-key-expiry-cache/verifier/expiry-cache.hidden.mjs"
+      ],
+      "task": "Users report that adding a later cache entry can keep an earlier entry alive past its own TTL. Before editing, run the included node repro/per-key-expiry-cache.mjs and use its structured output to identify the first incorrect transition. Fix the root cause so every key expires independently from its most recent set time. A key is expired when now() is greater than or equal to its expiry, zero TTL expires immediately, overwriting one key resets only that key, and reading an expired key must not evict live neighbors. Keep deterministic injected-clock behavior with no sleeps, preserve TypeError validation for clocks, non-empty string keys, and non-negative integer TTL values, preserve the exact direct and public named export surfaces, and keep createExpiringCache as a direct named export. Add focused regressions for per-key insertion times, the exact expiry boundary, zero TTL, overwrite expiry, and isolated eviction. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "reproduction_contract": {
+        "command": "node repro/per-key-expiry-cache.mjs",
+        "expected_output": {
+          "scenario": "per-key-expiry-cache",
+          "observations": [
+            { "at": 0, "action": "set", "key": "short", "ttl_ms": 10 },
+            { "at": 5, "action": "set", "key": "later", "ttl_ms": 10 },
+            { "at": 11, "action": "get", "key": "short", "expected": "expired", "observed": "present" },
+            { "at": 11, "action": "get", "key": "later", "expected": "present", "observed": "present" }
+          ],
+          "first_incorrect_transition": {
+            "stage": "per-key-expiry-check",
+            "key": "short",
+            "later_insert_extended_earlier_key": true
+          }
+        }
+      },
+      "artifact_regression_gates": [
+        {
+          "id": "per-key-expiry",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createExpiringCache",
+              "target": "src/expiry-cache.mjs",
+              "source": "cases/per-key-expiry-cache/verifier/mutants/expiry-cache.shared-expiry.mjs"
+            }
+          ]
+        },
+        {
+          "id": "exact-expiry-boundary",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createExpiringCache",
+              "target": "src/expiry-cache.mjs",
+              "source": "cases/per-key-expiry-cache/verifier/mutants/expiry-cache.late-boundary.mjs"
+            }
+          ]
+        },
+        {
+          "id": "zero-ttl",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createExpiringCache",
+              "target": "src/expiry-cache.mjs",
+              "source": "cases/per-key-expiry-cache/verifier/mutants/expiry-cache.zero-immortal.mjs"
+            }
+          ]
+        },
+        {
+          "id": "overwrite-expiry",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createExpiringCache",
+              "target": "src/expiry-cache.mjs",
+              "source": "cases/per-key-expiry-cache/verifier/mutants/expiry-cache.stale-overwrite.mjs"
+            }
+          ]
+        },
+        {
+          "id": "isolated-eviction",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createExpiringCache",
+              "target": "src/expiry-cache.mjs",
+              "source": "cases/per-key-expiry-cache/verifier/mutants/expiry-cache.clear-all.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    }
+  ]
+}

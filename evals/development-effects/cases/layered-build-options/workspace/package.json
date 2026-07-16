@@ -1,0 +1,8 @@
+{
+  "name": "layered-build-options-benchmark",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "run_id": "leanpowers-quality-regression",
   "workflow": "leanpowers-0.2.0",
   "provenance": "simulated",
@@ -47,6 +47,10 @@
     "max_retrieved_lessons": 3
   },
   "efficiency": {
+    "overall": {
+      "total_model_tokens": 420000,
+      "token_observations": 110
+    },
     "standard": {
       "median_tokens": 4200,
       "median_wall_seconds": 50,

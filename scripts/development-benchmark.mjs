@@ -63,8 +63,11 @@ async function main() {
       if (event.type === "start") {
         console.log(`START ${event.runId}`);
       } else {
+        const wall = Number.isFinite(event.wall_seconds)
+          ? `${event.wall_seconds.toFixed(1)}s`
+          : "n/a";
         console.log(
-          `END ${event.run_id} ${event.outcome.status} tokens=${event.telemetry.tokens?.total ?? "n/a"} wall=${event.wall_seconds.toFixed(1)}s`,
+          `END ${event.run_id} ${event.outcome.status} tokens=${event.telemetry.tokens?.total ?? "n/a"} wall=${wall}`,
         );
       }
     },

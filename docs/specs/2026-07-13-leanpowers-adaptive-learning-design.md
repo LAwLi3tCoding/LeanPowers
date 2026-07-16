@@ -37,7 +37,7 @@ The capability is event-driven and disabled until the user explicitly enables it
 LeanPowers retains six engineering workflows:
 
 ```text
-shape -> build/debug -> review? -> verify -> ship?
+shape? -> build/debug -> review? -> verify? -> ship?
 ```
 
 It adds one event-driven control-plane skill:

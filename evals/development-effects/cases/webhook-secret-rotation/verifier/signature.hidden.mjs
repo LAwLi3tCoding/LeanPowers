@@ -26,7 +26,11 @@ test("rejects invalid secret collections before verification", () => {
 test("enforces the exact signature grammar", () => {
   const valid = sign("payload", "secret");
   const upperHex = `sha256=${valid.slice(7).toUpperCase()}`;
+  const mixedHex = `sha256=${[...valid.slice(7)]
+    .map((character, index) => index % 2 === 0 ? character.toUpperCase() : character)
+    .join("")}`;
   assert.equal(verifySignature("payload", upperHex, "secret"), true);
+  assert.equal(verifySignature("payload", mixedHex, "secret"), true);
   for (const header of [
     ` sha256=${valid.slice(7)}`,
     `sha256=${valid.slice(7)} `,

@@ -1,0 +1,127 @@
+{
+  "schema_version": 2,
+  "suite_id": "development-effects-heldout-2026-07-14",
+  "evidence_level": "paired-development-heldout",
+  "freeze_contract": {
+    "status": "frozen-before-live-run",
+    "model_default": "gpt-5.3-codex-spark",
+    "effort": "low",
+    "repetitions": 2,
+    "workflow_order": [
+      ["superpowers-6.1.1", "leanpowers-0.2.0"],
+      ["leanpowers-0.2.0", "superpowers-6.1.1"]
+    ],
+    "agent_read_isolation": "codex-minimal-workspace-plugin-toolchain-read-v1",
+    "superpowers_revision": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+    "case_snapshots": {
+      "transient-profile-load": {
+        "mutants_sha256": "d1af3fa78bd8d9182fece0749bdd0903d7cae650975d9205684be04e65422fb4",
+        "verifier_sha256": "3037cabd474d64fe7472ca7c0f1be1ddfaaccbee463e086f5c3e2ea1cca24cf2",
+        "workspace_sha256": "22f835d2a6b569ad8091c1690d9a5fe9ed388995d270852c58273ff933b24c8e"
+      }
+    }
+  },
+  "runtime": "codex-cli",
+  "model_default": "gpt-5.3-codex-spark",
+  "effort": "low",
+  "repetitions": 2,
+  "activation_mode": "explicit-entrypoint",
+  "workflow_entrypoints": {
+    "superpowers-6.1.1": "$superpowers:using-superpowers",
+    "leanpowers-0.2.0": "$leanpowers:route"
+  },
+  "workflow_order": [
+    ["superpowers-6.1.1", "leanpowers-0.2.0"],
+    ["leanpowers-0.2.0", "superpowers-6.1.1"]
+  ],
+  "cases": [
+    {
+      "id": "transient-profile-load",
+      "scenario_class": "unknown-cause-defect",
+      "risk_level": "standard",
+      "expected_workflow": "debug",
+      "workspace": "cases/transient-profile-load/workspace",
+      "verifier_files": [
+        "cases/transient-profile-load/verifier/profile-loader.hidden.mjs"
+      ],
+      "task": "Users report that after a profile load fails once, later requests for the same profile can keep returning that first error even after the upstream service has recovered. Before editing, run the included `node repro/transient-profile-load.mjs`; use its structured output to trace the first incorrect transition. Fix the root cause while preserving the `createProfileLoader` API, loader error propagation, fulfilled-result reuse, overlapping same-profile single-flight behavior, and independence between profile IDs; keep `createProfileLoader` as a direct named export. Add focused regressions for four independent sequences: complete a rejected request and then start a same-ID retry that makes a fresh loader call and succeeds; start two same-ID requests before allowing the loader to settle and prove only one loader call occurs; complete a successful request and then prove a later same-ID request reuses it; cache a success for one ID, fail another ID, and prove the first remains cached. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "reproduction_contract": {
+        "command": "node repro/transient-profile-load.mjs",
+        "expected_output": {
+          "scenario": "transient-profile-load",
+          "observations": [
+            {
+              "request": "initial",
+              "status": "rejected",
+              "reason": "temporary outage"
+            },
+            {
+              "request": "retry",
+              "status": "rejected",
+              "reason": "temporary outage"
+            }
+          ],
+          "loader_calls": [
+            {
+              "id": "profile-7",
+              "attempt": 1
+            }
+          ],
+          "first_incorrect_transition": {
+            "stage": "retry-dispatch",
+            "retry_started_new_loader_call": false
+          }
+        }
+      },
+      "artifact_regression_gates": [
+        {
+          "id": "rejection-lifecycle",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createProfileLoader",
+              "target": "src/profile-loader.mjs",
+              "source": "cases/transient-profile-load/verifier/mutants/profile-loader.retain-rejection.mjs"
+            },
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createProfileLoader",
+              "target": "src/profile-loader.mjs",
+              "source": "cases/transient-profile-load/verifier/mutants/profile-loader.clear-all-on-rejection.mjs"
+            }
+          ]
+        },
+        {
+          "id": "same-id-single-flight",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createProfileLoader",
+              "target": "src/profile-loader.mjs",
+              "source": "cases/transient-profile-load/verifier/mutants/profile-loader.no-single-flight.mjs"
+            }
+          ]
+        },
+        {
+          "id": "fulfilled-reuse",
+          "policy": "all-kill",
+          "mutations": [
+            {
+              "kind": "replace-callable-export",
+              "export_name": "createProfileLoader",
+              "target": "src/profile-loader.mjs",
+              "source": "cases/transient-profile-load/verifier/mutants/profile-loader.inflight-only.mjs"
+            }
+          ]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    }
+  ]
+}

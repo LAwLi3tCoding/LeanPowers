@@ -7,7 +7,7 @@ description: Use when verified work must be committed, branched, pushed, opened 
 
 Deliver the verified revision to the requested target and prove what actually arrived. Do not substitute a local commit or attempted command for remote delivery.
 
-Read [quality gates](../../references/quality-gates.md), [evidence protocol](../../references/evidence-protocol.md), and [workflow transitions](../../references/workflow-transitions.md).
+Inherit the routing ledger. If entered directly or the ledger is missing, read the [runtime contract](../../references/runtime-contract.md) once; do not reload it after transitions.
 
 If project learning is enabled, use `adapt` to query once at entry under the [learning policy](../../references/learning-policy.md) with this workflow, relevant paths, and tags; add at most three behavior-changing advisory rules to the task brief. Lessons never grant delivery authority; send explicit downstream outcome or correction feedback to `adapt`.
 

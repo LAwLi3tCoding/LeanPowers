@@ -10,7 +10,7 @@ permissions:
 jobs:
   validate-build:
     name: Node ${{ matrix.node }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
@@ -18,14 +18,24 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node }}
+          package-manager-cache: false
+
+      - name: Install verifier sandbox
+        run: sudo apt-get update && sudo apt-get install --yes bubblewrap
+
+      - name: Smoke-test verifier namespaces
+        run: >-
+          bwrap --die-with-parent --new-session --unshare-net --unshare-pid
+          --unshare-ipc --unshare-uts --hostname leanpowers-sandbox
+          --unshare-cgroup-try --ro-bind / / /bin/true
 
       - name: Validate source and generated packages
         run: npm run validate
@@ -34,7 +44,7 @@ jobs:
         run: npm run build
 
       - name: Upload release packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: leanpowers-node-${{ matrix.node }}
           path: dist/

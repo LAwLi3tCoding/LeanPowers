@@ -1,23 +1,22 @@
 ---
 name: route
-description: Use when starting software engineering work and no specific LeanPowers workflow has already been selected, including requests to plan, implement, fix, review, verify, or deliver changes; select exactly one lowest-safe workflow before acting.
+description: Use when engineering work lacks workflow selection: plan/implement/fix/review/verify/deliver.
 ---
 
-# Route
+Before any task tool, choose lowercase owner/risk and emit its declaration. First emitted bytes MUST be that declaration alone on line 1: `leanpowers:route | workflow=debug | risk=standard`. Metavariables/brackets invalid; never prefix or repeat it.
 
-Select exactly one lowest-safe workflow that owns the task. Do not perform the engineering work in this Skill, preload every workflow, or create a mandatory chain.
+Selected-owner capsule. Route invocation owns order through completion.
 
-## Selection
+Batch independent reads/checks when evidence stays attributable; with proven unchanged fingerprint/scope, never reread unchanged workflow/source. Limit output to relevant regions/failure summaries. Carry one ledger without restating task/plan. Extra calls require new evidence; never merge gates.
 
-1. Honor an explicit LeanPowers choice only when its entry contract holds; otherwise select what establishes it.
-2. Use `adapt` for explicit downstream feedback or project-learning maintenance.
-3. Use `verify` for delivery without current evidence, or for completion, safety, readiness, or passing claims.
-4. Use `ship` for delivery-only work with current verification evidence.
-5. Use `review` for an independent assessment.
-6. Use `debug` when a failure is unexpected and its cause is unknown or disputed.
-7. Use `shape` when scope, acceptance, architecture, or authority is materially unclear.
-8. Otherwise use `build` for an executable software change.
+1. DISCOVER; READ every later-edited existing target and affected test/manifest/caller; preserve unrelated changes. Before PATCH keep `Clause→test ledger:`. Each `must|only|exact|preserve|reject` boundary/qualifier gets positive/negative tests naming a neighboring wrong implementation. Representation/side-effect risk: `Counterexample: property=passing→nearby mutation→expected boundary`.
+2. BUILD preserves DISCOVER→READ→TEST-PATCH→RED→CODE-PATCH→VALIDATE. Tests first: first behavioral edit is test-only; product files stay locked until meaningful RED from missing behavior, not syntax/setup/unrelated failure. RED freezes it. Test changes after RED invalidate it; rerun RED. Never patch implementation with tests before valid RED. Invalid test design restarts TEST-PATCH→RED on pre-behavior baseline; never weaken assertions. Use getter/counter no-access, identity/snapshot immutability, guard-sentinel short-circuit, one-property exact-boundary checks. Configuration/generated output uses baseline/precheck; failing evidence only for behavior/defect.
+3. DEBUG preserves DISCOVER→READ+REPRODUCE/TRACE→PATCH→VALIDATE. Use a pre-edit reproduction as a standalone command; trace first wrong transition/root cause before editing. Keep regression and product repair in a no-BUILD-RED window. Validate, then replay the exact reproduction; structured output needs a separate final command. A launcher/tool-start error may correct only its command before validation; no recovery spent. One failed supported validation permits one substantive correction to read in-scope paths then the identical command; otherwise block/rescope. No intervening task tool, test weakening, empty retry, second correction, or second failure.
+4. After final edit run targeted regression and applicable integration/lint/typecheck/build/package/full-suite validation. First green freezes completed acceptance set; material omission starts a new cycle. Edits invalidate evidence; read-only reporting does not.
+5. STRICT after final green: green is not completion. Start a fresh independent read-only reviewer with task, atomic ledger, changed paths, current validation; wait for Review YAML PASS. Findings reopen repair→green→fresh review. No mutation follows PASS.
 
-If no workflow applies, stop routing and answer normally. If two appear applicable, choose the earliest workflow that resolves the blocking uncertainty. Classify risk by the highest applicable signal in the selected workflow's risk policy.
+Choose the lowest-safe owner. Unknown-cause defects or reproduce/trace/diagnose/root-cause/why/first-wrong-transition requests use `owner=debug` (overrides fix/change/build), `risk≥standard`, and supplied repro/cause. Bounded deterministic single-component defects use capsule without another Skill/reference; other defects load `debug`; non-defects load the selected Skill. Route explicit-feedback→`adapt`, evidence→`verify`, delivery→`ship`, assessment→`review`, ambiguity→`shape`, implementation/known-repair→`build`.
 
-Activate the selected Skill before acting. Later, activate only a documented next workflow when observable evidence satisfies its transition condition.
+`lean` only when `clear`, `local`, `reversible`, `establishedValidation`, and no standard or strict signal applies. `causeKnown=false` is `standard`; so are `preferredMode=standard`, `behaviorChange`, `boundedUncertainty`, `dataModelChange`, `defect`, `dependencyChange`, `diagnosisRequested`, `externalSystem`, `multiFile`, `publicBoundaryChange`, `scopeExpanded`, and `validationFailed`. Use `strict` for `preferredMode=strict`, `authorization`, `authentication`, `concurrency`, `credentialGated`, `credentials`, `cryptography`, `dataRisk`, `destructive`, `irreversible`, `largeRefactor`, `migration`, `payment`, `privacy`, `production`, `reviewHighRisk`, `security`, `secrets`, and `signatureVerification`. Synchronous reentrancy alone is not concurrency. If evidence raises risk, emit `leanpowers:risk | risk=strict`; never downgrade. Gates are strict `[independent_review, current_evidence]`, otherwise `[current_evidence]`. Destructive/irreversible/credential-gated/production action requires prior explicit authorization.
+
+Routed strict loads only the [subagent policy](../../references/subagent-policy.md) after green; Lean/standard never read it. Mutate with Codex native `apply_patch` or Claude `Edit`/`Write`, never shell wrappers.

@@ -1,0 +1,320 @@
+{
+  "schema_version": 2,
+  "suite_id": "development-effects-performance-confirmatory-v7-2026-07-16",
+  "evidence_level": "paired-development-heldout",
+  "runtime": "codex-cli",
+  "model_default": "gpt-5.3-codex-spark",
+  "effort": "medium",
+  "repetitions": 2,
+  "activation_mode": "explicit-entrypoint",
+  "report_contract": "categorized-exact-render-v1",
+  "quality_policy": "lean-all-pass-reference-diagnostic-v1",
+  "token_target": {
+    "metric": "aggregate-model-token-share",
+    "population": "all-matched-pairs",
+    "max_share_pct": 60
+  },
+  "workflow_entrypoints": {
+    "superpowers-6.1.1": "$superpowers:using-superpowers",
+    "leanpowers-0.2.0": "$leanpowers:route"
+  },
+  "workflow_order": [
+    ["superpowers-6.1.1", "leanpowers-0.2.0"],
+    ["leanpowers-0.2.0", "superpowers-6.1.1"]
+  ],
+  "freeze_contract": {
+    "status": "frozen-before-live-run",
+    "model_default": "gpt-5.3-codex-spark",
+    "effort": "medium",
+    "repetitions": 2,
+    "workflow_order": [
+      ["superpowers-6.1.1", "leanpowers-0.2.0"],
+      ["leanpowers-0.2.0", "superpowers-6.1.1"]
+    ],
+    "case_order": [
+      [
+        "stable-unique-tokens",
+        "queued-task-permit-release",
+        "record-data-delta",
+        "branching-undo-history",
+        "forward-header-sanitization"
+      ],
+      [
+        "forward-header-sanitization",
+        "branching-undo-history",
+        "record-data-delta",
+        "queued-task-permit-release",
+        "stable-unique-tokens"
+      ]
+    ],
+    "agent_read_isolation": "codex-minimal-workspace-plugin-toolchain-read-v1",
+    "quality_policy": "lean-all-pass-reference-diagnostic-v1",
+    "superpowers_revision": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+    "leanpowers_revision": "1e59e068e48070f30ebd6b74efbb31e479445a34",
+    "evaluator_revision": "7295033839683084f63869460b4d026272c7e566",
+    "runner_revision": "7295033839683084f63869460b4d026272c7e566",
+    "case_snapshots": {
+      "stable-unique-tokens": {
+        "mutants_sha256": "ef9e9d7951f896157a79e0168e2b525d1d60b25b28eb56a09819bae01d6efbf5",
+        "verifier_sha256": "6c145936ed7d9168d9d3a9be447bd44fe8736a3321b6e50921e3aa99a64040d4",
+        "workspace_sha256": "9e7044d0cc37294f74610ff83de09d667cdfbb8ea1434eff359e96b46cc1a64c"
+      },
+      "queued-task-permit-release": {
+        "mutants_sha256": "d6a5d9103563cdd238d35bcf4d4d0e0ffb9f0f74cf6315fa3fc8e0155f15d538",
+        "verifier_sha256": "138f813a97f4b269bd5c47f6d98c2295d33e033b727ada18393b253527b8bc4a",
+        "workspace_sha256": "e92a2e48f77f7731e6e741f1171319892d980f457f276c5c924820d02fc5e3e2"
+      },
+      "record-data-delta": {
+        "mutants_sha256": "52714ba914e1c9e7447740df58a18dfcd1cbcd1053b070a7c51736326b380ec1",
+        "verifier_sha256": "606c9826895a8a37b9d6345fb337bdbad731999e3effcd47deb1cb16ceef715a",
+        "workspace_sha256": "5e189a0f637b5115ce119d064136ffa35e48b5204f7276b333e6847bb59fa927"
+      },
+      "branching-undo-history": {
+        "mutants_sha256": "536a49ffc42f8addca290f726a0c83efb8734c46bc798b11534058163504796d",
+        "verifier_sha256": "7768b7ef95ae3806eded63708d0ebe1ddd768db4100e5a6d65ec13656d464dca",
+        "workspace_sha256": "69fbced2fa2e55bfc81f037399d5bc53560e7d276499f5b1161ca49927881e5c"
+      },
+      "forward-header-sanitization": {
+        "mutants_sha256": "7c5a5bc196f6f4d2401543ef53935eb4da2cd7bcfad23d713c925969e3a809b5",
+        "verifier_sha256": "c1818f94cf3eea4f8a6c406eac46ffa7c7b7551998ed17d668e0e2c9ca33f19f",
+        "workspace_sha256": "ad9d2bfde404b9f31e4ca6b25ff4892762a39b4023727d0240a99c1278fe2a9e"
+      }
+    },
+    "token_target": {
+      "metric": "aggregate-model-token-share",
+      "population": "all-matched-pairs",
+      "max_share_pct": 60
+    }
+  },
+  "case_order": [
+    [
+      "stable-unique-tokens",
+      "queued-task-permit-release",
+      "record-data-delta",
+      "branching-undo-history",
+      "forward-header-sanitization"
+    ],
+    [
+      "forward-header-sanitization",
+      "branching-undo-history",
+      "record-data-delta",
+      "queued-task-permit-release",
+      "stable-unique-tokens"
+    ]
+  ],
+  "cases": [
+    {
+      "id": "stable-unique-tokens",
+      "scenario_class": "small-explicit-feature",
+      "task_family": "stable-first-occurrence-token-deduplication",
+      "reporting_category": "stable token dedup build",
+      "risk_level": "lean",
+      "expected_workflow": "build",
+      "workspace": "cases/stable-unique-tokens/workspace",
+      "verifier_files": [
+        "cases/stable-unique-tokens/verifier/stable-unique-tokens.hidden.mjs"
+      ],
+      "task": "Implement stableUniqueTokens(values). values must be a possibly empty dense ordinary array whose prototype is exactly Array.prototype, with no extra own keys and only own enumerable data elements. Every element must be a primitive ASCII string matching [A-Za-z0-9][A-Za-z0-9._-]*. Reject invalid structure or tokens with TypeError without invoking accessors or coercion hooks. Return a fresh dense ordinary array containing the first occurrence of each exact token in original encounter order. Matching is case-sensitive; do not normalize or coerce tokens. Preserve all input values and property descriptors. Preserve the exact direct and public named export surfaces, and keep stableUniqueTokens as the only direct named export. Add focused regressions for first-occurrence ordering, case-sensitive identity, no coercion, exact accessor-safe collection validation, fresh output, input immutability, and API compatibility. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {"id":"first-occurrence-selection","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"stableUniqueTokens","target":"src/stable-unique-tokens.mjs","source":"cases/stable-unique-tokens/verifier/mutants/stable-unique-tokens.keep-last-occurrence.mjs"}]},
+        {"id":"stable-encounter-order","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"stableUniqueTokens","target":"src/stable-unique-tokens.mjs","source":"cases/stable-unique-tokens/verifier/mutants/stable-unique-tokens.lexicographic-output.mjs"}]},
+        {"id":"case-sensitive-identity","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"stableUniqueTokens","target":"src/stable-unique-tokens.mjs","source":"cases/stable-unique-tokens/verifier/mutants/stable-unique-tokens.case-fold-identity.mjs"}]},
+        {"id":"primitive-no-coercion","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"stableUniqueTokens","target":"src/stable-unique-tokens.mjs","source":"cases/stable-unique-tokens/verifier/mutants/stable-unique-tokens.coerce-elements.mjs"}]},
+        {"id":"fresh-input-preservation","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"stableUniqueTokens","target":"src/stable-unique-tokens.mjs","source":"cases/stable-unique-tokens/verifier/mutants/stable-unique-tokens.mutate-reuse-input.mjs"}]}
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "queued-task-permit-release",
+      "scenario_class": "unknown-cause-defect",
+      "task_family": "bounded-concurrency-permit-accounting",
+      "reporting_category": "task limiter debug",
+      "risk_level": "standard",
+      "expected_workflow": "debug",
+      "workspace": "cases/queued-task-permit-release/workspace",
+      "verifier_files": [
+        "cases/queued-task-permit-release/verifier/queued-task-permit-release.hidden.mjs"
+      ],
+      "task": "Users report that after a task throws before returning, work queued behind it never starts. Before editing, run the included node repro/queued-task-permit-release.mjs as a standalone command and use its structured output to identify the first incorrect transition. Fix createTaskLimiter(limit). limit must be a positive safe integer. Return an ordinary Object.prototype object exposing exactly the own enumerable data methods run(task) and stats(). run must validate task as a function synchronously without changing state, return a Promise, and invoke admitted tasks in call order with undefined this and no arguments, never exceeding limit active tasks. A synchronous return or fulfilled thenable must resolve with the same value reference; a synchronous throw or rejected thenable must reject with the same reason. Every settlement must release exactly one permit and admit the oldest queued work until capacity is full. stats() must return a fresh exact ordinary { active, pending } record, where active tasks have been invoked but not settled and pending tasks have not yet been invoked; caller mutation must not affect limiter state. Preserve the exact direct and public named export surfaces, with createTaskLimiter as the only direct named export. Add focused regressions for synchronous throws, asynchronous rejections, FIFO admission, capacity preservation, result and error identity, fresh stats, validation, and API compatibility. Run the full test suite, then rerun the same repro as a separate final command. Do not commit, install packages, use the network, or create another worktree.",
+      "reproduction_contract": {
+        "command": "node repro/queued-task-permit-release.mjs",
+        "expected_output": {
+          "scenario": "queued-task-permit-release",
+          "observations": [{
+            "action": "sync-throw-followed-by-queued-task",
+            "limit": 1,
+            "starts": ["first"],
+            "first_error": "boom",
+            "first_error_same": true,
+            "second_started": false,
+            "second_value": null,
+            "stats": {"active":1,"pending":1}
+          }],
+          "first_incorrect_transition": {
+            "stage": "synchronous-throw-settlement",
+            "expected": "release the active permit and start the oldest queued task",
+            "observed": "the permit remained active and the queued task stayed pending"
+          },
+          "resolution": null
+        },
+        "resolved_output": {
+          "scenario": "queued-task-permit-release",
+          "observations": [{
+            "action": "sync-throw-followed-by-queued-task",
+            "limit": 1,
+            "starts": ["first", "second"],
+            "first_error": "boom",
+            "first_error_same": true,
+            "second_started": true,
+            "second_value": "ok",
+            "stats": {"active":0,"pending":0}
+          }],
+          "first_incorrect_transition": null,
+          "resolution": {
+            "stage": "synchronous-throw-settlement",
+            "observed": "the permit was released exactly once and the oldest queued task completed"
+          }
+        }
+      },
+      "artifact_regression_gates": [
+        {"id":"synchronous-throw-release","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"createTaskLimiter","target":"src/queued-task-permit-release.mjs","source":"cases/queued-task-permit-release/verifier/mutants/queued-task-permit-release.sync-throw-leaks-permit.mjs"}]},
+        {"id":"asynchronous-rejection-release","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"createTaskLimiter","target":"src/queued-task-permit-release.mjs","source":"cases/queued-task-permit-release/verifier/mutants/queued-task-permit-release.async-rejection-leaks-permit.mjs"}]},
+        {"id":"fifo-queued-admission","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"createTaskLimiter","target":"src/queued-task-permit-release.mjs","source":"cases/queued-task-permit-release/verifier/mutants/queued-task-permit-release.lifo-queued-admission.mjs"}]},
+        {"id":"bounded-settlement-drain","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"createTaskLimiter","target":"src/queued-task-permit-release.mjs","source":"cases/queued-task-permit-release/verifier/mutants/queued-task-permit-release.overdrain-after-settlement.mjs"}]},
+        {"id":"fresh-stats-snapshot","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"createTaskLimiter","target":"src/queued-task-permit-release.mjs","source":"cases/queued-task-permit-release/verifier/mutants/queued-task-permit-release.reuse-stats-record.mjs"}]}
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "record-data-delta",
+      "scenario_class": "medium-explicit-feature",
+      "task_family": "exact-record-delta-classification",
+      "reporting_category": "record delta build",
+      "risk_level": "standard",
+      "expected_workflow": "build",
+      "workspace": "cases/record-data-delta/workspace",
+      "verifier_files": [
+        "cases/record-data-delta/verifier/record-data-delta.hidden.mjs"
+      ],
+      "task": "Implement diffRecordData(before, after). Both inputs must be exact ordinary Object.prototype records containing only own enumerable string data properties; reject arrays, null-prototype or custom-prototype objects, symbols, non-enumerable properties, and accessors with TypeError without invoking accessors. Property values may be arbitrary and must not be traversed or coerced. Compare values with Object.is. Return a fresh exact ordinary { added, removed, changed } record whose three properties are own enumerable writable configurable data properties: added contains keys present only in after in after own-key order; removed contains keys present only in before in before own-key order; changed contains shared keys whose values are not Object.is-equal in after own-key order. Own properties whose value is undefined still exist. Every result array must be fresh, dense, pairwise distinct, and contain primitive key strings. Preserve both inputs and all descriptors. Preserve the exact direct and public named export surfaces, and keep diffRecordData as the only direct named export. Add focused regressions for addition/removal/change classification, Object.is boundaries including distinct object identities, own-undefined presence, source-specific ordering, exact accessor-safe validation, exact output data descriptors, fresh non-aliased results, immutability, and API compatibility. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {"id":"object-is-value-boundary","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"diffRecordData","target":"src/record-data-delta.mjs","source":"cases/record-data-delta/verifier/mutants/record-data-delta.strict-equality.mjs"}]},
+        {"id":"object-identity-no-traversal","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"diffRecordData","target":"src/record-data-delta.mjs","source":"cases/record-data-delta/verifier/mutants/record-data-delta.deep-object-comparison.mjs"}]},
+        {"id":"opaque-value-metadata","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"diffRecordData","target":"src/record-data-delta.mjs","source":"cases/record-data-delta/verifier/mutants/record-data-delta.value-metadata-traversal.mjs"}]},
+        {"id":"stable-value-opacity","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"diffRecordData","target":"src/record-data-delta.mjs","source":"cases/record-data-delta/verifier/mutants/record-data-delta.stable-value-metadata-traversal.mjs"}]},
+        {"id":"source-specific-key-order","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"diffRecordData","target":"src/record-data-delta.mjs","source":"cases/record-data-delta/verifier/mutants/record-data-delta.lexicographic-category-order.mjs"}]},
+        {"id":"own-undefined-presence","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"diffRecordData","target":"src/record-data-delta.mjs","source":"cases/record-data-delta/verifier/mutants/record-data-delta.undefined-means-absent.mjs"}]},
+        {"id":"exact-accessor-safe-validation","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"diffRecordData","target":"src/record-data-delta.mjs","source":"cases/record-data-delta/verifier/mutants/record-data-delta.loose-enumerable-surface.mjs"}]},
+        {"id":"exact-output-data-descriptors","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"diffRecordData","target":"src/record-data-delta.mjs","source":"cases/record-data-delta/verifier/mutants/record-data-delta.accessor-result-record.mjs"}]},
+        {"id":"fresh-result-isolation","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"diffRecordData","target":"src/record-data-delta.mjs","source":"cases/record-data-delta/verifier/mutants/record-data-delta.reused-result-containers.mjs"}]}
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "branching-undo-history",
+      "scenario_class": "unknown-cause-defect",
+      "task_family": "undo-redo-branch-invalidation",
+      "reporting_category": "undo history debug",
+      "risk_level": "standard",
+      "expected_workflow": "debug",
+      "workspace": "cases/branching-undo-history/workspace",
+      "verifier_files": [
+        "cases/branching-undo-history/verifier/branching-undo-history.hidden.mjs"
+      ],
+      "task": "Users report that committing a new value after multiple undo operations can leave an abandoned future value reachable through redo. Before editing, run the included node repro/branching-undo-history.mjs as a standalone command and use its structured output to identify the first incorrect transition. Fix createUndoHistory(initialValue). It must accept any initial value and return an ordinary Object.prototype object exposing exactly the own enumerable data methods commit(value), undo(), redo(), and snapshot(). commit must discard every redo descendant, append the supplied value as a new independent history entry even when it is identical to the current value, move to it, and return undefined. undo and redo must move exactly one entry and return true, or return false without changing state at the applicable boundary. snapshot() must return a fresh exact ordinary { value, canUndo, canRedo } record preserving the current value reference; caller mutation must not affect history. A branch commit must preserve every entry at and before the branch point while making all abandoned descendants unreachable. Preserve the exact direct and public named export surfaces, with createUndoHistory as the only direct named export. Add focused regressions for deep branch truncation, preservation of prior history, duplicate-value commits, undo/redo boundaries, fresh snapshots, arbitrary value identity, and API compatibility. Run the full test suite, then rerun the same repro as a separate final command. Do not commit, install packages, use the network, or create another worktree.",
+      "reproduction_contract": {
+        "command": "node repro/branching-undo-history.mjs",
+        "expected_output": {
+          "scenario": "branching-undo-history",
+          "observations": [{
+            "action": "commit-after-multiple-undo",
+            "expected_snapshot": {"value":"branch","canUndo":true,"canRedo":false},
+            "observed_snapshot": {"value":"branch","canUndo":true,"canRedo":true},
+            "expected_redo": false,
+            "observed_redo": true,
+            "expected_final_value": "branch",
+            "observed_final_value": "v3"
+          }],
+          "first_incorrect_transition": {
+            "stage": "branch-commit",
+            "expected": "truncate every redo descendant before appending the branch value",
+            "observed": "one position was overwritten while a deeper redo descendant remained"
+          },
+          "resolution": null
+        },
+        "resolved_output": {
+          "scenario": "branching-undo-history",
+          "observations": [{
+            "action": "commit-after-multiple-undo",
+            "expected_snapshot": {"value":"branch","canUndo":true,"canRedo":false},
+            "observed_snapshot": {"value":"branch","canUndo":true,"canRedo":false},
+            "expected_redo": false,
+            "observed_redo": false,
+            "expected_final_value": "branch",
+            "observed_final_value": "branch"
+          }],
+          "first_incorrect_transition": null,
+          "resolution": {
+            "stage": "branch-commit",
+            "observed": "all redo descendants were truncated while prior history was retained"
+          }
+        }
+      },
+      "artifact_regression_gates": [
+        {"id":"deep-redo-branch-truncation","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"createUndoHistory","target":"src/branching-undo-history.mjs","source":"cases/branching-undo-history/verifier/mutants/branching-undo-history.retain-deep-redo-tail.mjs"}]},
+        {"id":"preserve-prebranch-history","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"createUndoHistory","target":"src/branching-undo-history.mjs","source":"cases/branching-undo-history/verifier/mutants/branching-undo-history.reset-past-on-branch.mjs"}]},
+        {"id":"independent-duplicate-commit","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"createUndoHistory","target":"src/branching-undo-history.mjs","source":"cases/branching-undo-history/verifier/mutants/branching-undo-history.deduplicate-identical-commit.mjs"}]},
+        {"id":"exact-redo-tip-boundary","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"createUndoHistory","target":"src/branching-undo-history.mjs","source":"cases/branching-undo-history/verifier/mutants/branching-undo-history.redo-past-tip.mjs"}]},
+        {"id":"fresh-snapshot-isolation","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"createUndoHistory","target":"src/branching-undo-history.mjs","source":"cases/branching-undo-history/verifier/mutants/branching-undo-history.reuse-snapshot-record.mjs"}]}
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "forward-header-sanitization",
+      "scenario_class": "security-sensitive-feature",
+      "task_family": "http-hop-by-hop-header-sanitization",
+      "reporting_category": "hop-by-hop header strict build",
+      "risk_level": "strict",
+      "expected_workflow": "build",
+      "workspace": "cases/forward-header-sanitization/workspace",
+      "verifier_files": [
+        "cases/forward-header-sanitization/verifier/forward-header-sanitization.hidden.mjs"
+      ],
+      "task": "Implement the security-sensitive sanitizeForwardHeaders(headers) for a closed HTTP header subset. headers must be a possibly empty dense ordinary array whose prototype is exactly Array.prototype, with no extra own keys and only own enumerable data elements. Every element must be an exact ordinary Object.prototype record with exactly the own enumerable data properties { name, value }. name must be a primitive nonempty ASCII HTTP tchar token. value must be a primitive ASCII string containing only HTAB or code units U+0020 through U+007E. Reject invalid structures, names, or values with TypeError without invoking accessors or coercion hooks. Validate every entry before filtering, including entries later removed. Header-name matching is case-insensitive. Remove Connection, Keep-Alive, Proxy-Authenticate, Proxy-Authorization, TE, Trailer, Transfer-Encoding, and Upgrade. In addition, parse every Connection value as one or more comma-separated tchar tokens with optional SP/HTAB around each token; reject empty or malformed members, and remove every header whose name is nominated by any Connection token. Preserve every surviving duplicate in original encounter order and preserve its original name spelling and value. Return a fresh dense ordinary array of pairwise distinct fresh exact ordinary { name, value } records, sharing no record or array with the input. Preserve all inputs and descriptors. Preserve the exact direct and public named export surfaces, and keep sanitizeForwardHeaders as the only direct named export. Add focused regressions for the fixed hop-by-hop set, Connection-nominated fields, case-insensitive matching, exhaustive ASCII and non-ASCII validation boundaries, exact token boundaries, complete accessor-safe validation, no coercion, stable duplicate preservation, pairwise deep output freshness, immutability, and API compatibility. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {"id":"connection-nominated-removal","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"sanitizeForwardHeaders","target":"src/forward-header-sanitization.mjs","source":"cases/forward-header-sanitization/verifier/mutants/forward-header-sanitization.fixed-only.mjs"}]},
+        {"id":"case-insensitive-name-matching","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"sanitizeForwardHeaders","target":"src/forward-header-sanitization.mjs","source":"cases/forward-header-sanitization/verifier/mutants/forward-header-sanitization.case-sensitive-names.mjs"}]},
+        {"id":"exact-token-boundary","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"sanitizeForwardHeaders","target":"src/forward-header-sanitization.mjs","source":"cases/forward-header-sanitization/verifier/mutants/forward-header-sanitization.connection-substring-match.mjs"}]},
+        {"id":"complete-connection-token-boundary","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"sanitizeForwardHeaders","target":"src/forward-header-sanitization.mjs","source":"cases/forward-header-sanitization/verifier/mutants/forward-header-sanitization.loose-connection-token-boundary.mjs"}]},
+        {"id":"complete-name-byte-boundary","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"sanitizeForwardHeaders","target":"src/forward-header-sanitization.mjs","source":"cases/forward-header-sanitization/verifier/mutants/forward-header-sanitization.accept-colon-name.mjs"}]},
+        {"id":"complete-value-byte-boundary","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"sanitizeForwardHeaders","target":"src/forward-header-sanitization.mjs","source":"cases/forward-header-sanitization/verifier/mutants/forward-header-sanitization.accept-del-value.mjs"}]},
+        {"id":"exact-array-surface","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"sanitizeForwardHeaders","target":"src/forward-header-sanitization.mjs","source":"cases/forward-header-sanitization/verifier/mutants/forward-header-sanitization.loose-array-surface.mjs"}]},
+        {"id":"exact-record-surface","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"sanitizeForwardHeaders","target":"src/forward-header-sanitization.mjs","source":"cases/forward-header-sanitization/verifier/mutants/forward-header-sanitization.loose-record-surface.mjs"}]},
+        {"id":"accessor-safe-field-validation","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"sanitizeForwardHeaders","target":"src/forward-header-sanitization.mjs","source":"cases/forward-header-sanitization/verifier/mutants/forward-header-sanitization.accessor-fields.mjs"}]},
+        {"id":"primitive-field-no-coercion","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"sanitizeForwardHeaders","target":"src/forward-header-sanitization.mjs","source":"cases/forward-header-sanitization/verifier/mutants/forward-header-sanitization.coerce-fields.mjs"}]},
+        {"id":"deep-output-freshness","policy":"all-kill","mutations":[{"kind":"replace-callable-export","export_name":"sanitizeForwardHeaders","target":"src/forward-header-sanitization.mjs","source":"cases/forward-header-sanitization/verifier/mutants/forward-header-sanitization.reuse-surviving-records.mjs"}]}
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    }
+  ]
+}

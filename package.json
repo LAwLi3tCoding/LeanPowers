@@ -27,6 +27,7 @@
   },
   "scripts": {
     "benchmark:development": "node scripts/development-benchmark.mjs",
+    "benchmark:development:gate": "node scripts/development-result-gate.mjs",
     "build": "node scripts/build-release.mjs",
     "generate": "node scripts/generate.mjs",
     "generate:check": "node scripts/generate.mjs --check",

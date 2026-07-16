@@ -5,54 +5,49 @@ description: Use when a software change has an executable scope and needs implem
 
 # Build
 
-Implement one delivery slice at a time and keep the feedback loop proportional to its risk. Correctness comes from early evidence, not end-loaded testing.
+Implement one slice at a time. Correctness comes from early, risk-proportional evidence.
 
-Read [risk policy](../../references/risk-policy.md), [quality gates](../../references/quality-gates.md), [subagent policy](../../references/subagent-policy.md), and [workflow transitions](../../references/workflow-transitions.md).
+Inherit the ledger. Routed entry owns workflow order; this Skill adds acceptance reasoning/output. Without one, read the [runtime contract](../../references/runtime-contract.md) once and use the direct-entry loop.
 
 If project learning is enabled, use `adapt` to query once at entry under the [learning policy](../../references/learning-policy.md) with this workflow, relevant paths, and tags; add at most three behavior-changing advisory rules to the task brief. Send explicit downstream outcome, correction, confirmation, or durable-preference feedback to `adapt`.
 
 ## Entry contract
 
-Start only when goal, declared scope, acceptance evidence, and constraints are executable. If they are materially unclear, use `shape`. If the cause of a failure is unknown, use `debug`.
+Start with executable goal, scope, acceptance evidence, constraints. Material ambiguity uses `shape`; unknown cause uses `debug`.
 
-## Slice loop
+## Direct-entry slice loop
 
-1. Inspect the affected implementation and existing tests. Preserve unrelated user changes.
-2. Choose the smallest slice that produces an independently useful outcome.
-3. Establish the pre-change signal:
-   - Behavior or defect: write a focused test and observe the expected failure when practical.
-   - Configuration or generated output: define and run the relevant validation or snapshot check.
-   - Documentation: define link, example, structure, or rendering checks.
-4. Implement the minimum change that satisfies the slice.
-5. Run targeted validation immediately and inspect its output.
-6. Remove only duplication or debris introduced by the slice while evidence remains green.
-7. Record changed files, supported claims, and residual risk before the next slice.
+1. Inspect implementation/tests; read every edit target; preserve unrelated changes. Before patching keep `Clause→test ledger:`. Give each actual high-information qualifier its own line: `qualifier → smallest distinguishing test | rejects: neighboring wrong implementation`. Never group qualifiers behind one generic test. Add a nearby-mutation counterexample for representation/side-effect risk.
+2. Choose the smallest slice. For behavior the first behavioral edit is test-only. Product files stay locked until the focused new assertion shows meaningful RED from missing behavior, not syntax/setup/unrelated failure. RED freezes that regression assertion. Test changes after RED invalidate it and require another RED. Never patch implementation with tests before valid RED. Invalid test design restarts TEST-PATCH→RED against the pre-behavior baseline; never weaken assertions.
+3. Patch product only after RED. Expand only qualifiers present: `fresh` calls twice and compares identities; `deep-fresh` proves disjoint identity sets for required input/output containers, sharing no containers; `exact ordinary` checks prototype, `Reflect.ownKeys`, descriptors; order-independent checks both orders; `case-sensitive` flips one character's case; `no-coercion`/`no-access` keeps a trap counter zero. These reject reuse, aliasing, exotic surfaces, first-wins, lowercasing, and eager access. Use snapshots/nested identities for immutability and post-guard sentinels for short-circuiting.
+4. After final edit run regression and applicable affected integration/lint/typecheck/static/package/build/full-suite checks. Inspect results; failure or validation gap blocks `complete`.
+5. Unknown cause transitions to `debug`; otherwise repair in scope. First green freezes completed acceptance set. Material omission before review starts a new incomplete cycle. Edits invalidate evidence; read-only reporting does not.
+6. Record paths, supported claims, evidence, residual risk. Avoid out-of-scope abstraction, dependency, compatibility, or cleanup work.
 
-Do not write all implementation first and add tests at the end. Do not create a child agent for each file. Delegate only independent delivery boundaries under the [subagent policy](../../references/subagent-policy.md).
+Configuration/generated output uses baseline/precheck. Failing evidence is only for behavior/defect. Documentation needs a relevant precheck; all need current post-edit validation.
+
+## Strict direct entry
+
+STRICT EXIT: green is not completion. After green, strict direct entry loads the [subagent policy](../../references/subagent-policy.md), starts one fresh independent read-only reviewer with exact task, atomic ledger, changed paths, current validation, waits in the same turn for completed Review YAML, and requires `pass`. Unavailable review is `blocked`; `changes_required` reopens repair→revalidation→fresh review. Routed strict continues under route; neither path returns a user transition.
 
 ## Output
 
 ```yaml
-status: complete | blocked | needs_debug | needs_review
+status: complete | blocked | needs_debug
+risk: lean | standard | strict
 slices:
   - outcome: delivered behavior
     files: changed paths
     evidence: command and result
 residual_risks: remaining uncertainty
-next: verify | review | debug | null
+next: verify | debug | null
 ```
 
-## Escalation
-
-- New unknown failure: transition to `debug`.
-- Material scope expansion: transition to `shape`.
-- High-risk or broad completed change: transition to `review`.
-- Implemented requested scope: transition to `verify`.
+Lean or standard completion with current applicable evidence sets `next: null`. Use `verify` only for explicit, stale, delivery, or cross-artifact evidence. New unknown failure uses `debug`; material scope expansion uses `shape`.
 
 ## Common mistakes
 
-- Splitting work by file, setup step, or arbitrary time box.
-- Accepting a passing test that was never observed to fail for the missing behavior.
-- Running a full suite after every small edit while skipping targeted feedback.
-- Trusting child-agent completion without inspecting the shared diff and evidence.
-- Adding abstractions, compatibility layers, or dependencies outside the declared scope.
+- Accepting a test that never showed meaningful RED.
+- Using happy-path fixtures that cannot distinguish mutation, eager access, shallow handling, or exact-boundary errors.
+- Treating targeted evidence as proof of unrelated integration or packaging claims.
+- Editing after final validation without rerunning affected checks.

@@ -19,7 +19,7 @@
     "hard_failures"
   ],
   "properties": {
-    "schema_version": { "const": 2 },
+    "schema_version": { "const": 3 },
     "run_id": { "type": "string", "minLength": 1 },
     "workflow": {
       "type": "string",
@@ -90,8 +90,9 @@
     "efficiency": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["standard"],
+      "required": ["overall", "standard"],
       "properties": {
+        "overall": { "$ref": "#/$defs/overallEfficiency" },
         "standard": { "$ref": "#/$defs/efficiencyBlock" }
       }
     },
@@ -150,6 +151,15 @@
           "type": "integer",
           "minimum": 0
         }
+      }
+    },
+    "overallEfficiency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total_model_tokens", "token_observations"],
+      "properties": {
+        "total_model_tokens": { "type": "number", "exclusiveMinimum": 0 },
+        "token_observations": { "type": "integer", "minimum": 1 }
       }
     },
     "efficiencyBlock": {

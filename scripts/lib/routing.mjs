@@ -1,7 +1,10 @@
 const STRICT_SIGNALS = [
   "authorization",
+  "authentication",
   "concurrency",
   "credentialGated",
+  "credentials",
+  "cryptography",
   "dataRisk",
   "destructive",
   "irreversible",
@@ -12,6 +15,8 @@ const STRICT_SIGNALS = [
   "production",
   "reviewHighRisk",
   "security",
+  "secrets",
+  "signatureVerification",
 ];
 
 const STANDARD_SIGNALS = [
@@ -20,12 +25,15 @@ const STANDARD_SIGNALS = [
   "dataModelChange",
   "defect",
   "dependencyChange",
+  "diagnosisRequested",
   "externalSystem",
   "multiFile",
   "publicBoundaryChange",
   "scopeExpanded",
   "validationFailed",
 ];
+
+const INTERNAL_REVIEW_PHASE = "review"; // Internal same-turn phase; never a user handoff.
 
 export function classifyRisk(signals = {}) {
   if (!signals || typeof signals !== "object" || Array.isArray(signals)) {
@@ -60,10 +68,13 @@ export function selectInitialWorkflow({
   explicitWorkflow = null,
   learningRequest = false,
   causeKnown = true,
+  diagnosisRequested = false,
   deliveryOnly = false,
   deliveryRequested = false,
   needsShaping = false,
   reviewRequested = false,
+  risk = "standard",
+  independentReview = false,
   verificationCurrent = false,
   verificationRequested = false,
 } = {}) {
@@ -71,8 +82,9 @@ export function selectInitialWorkflow({
     return null;
   }
   if (explicitWorkflow !== null) {
-    if (explicitWorkflow === "ship" && !verificationCurrent) {
-      return "verify";
+    if (explicitWorkflow === "ship") {
+      if (!verificationCurrent) return "verify";
+      if (risk === "strict" && !independentReview) return INTERNAL_REVIEW_PHASE;
     }
     if (["adapt", "build", "debug", "review", "shape", "ship", "verify"].includes(explicitWorkflow)) {
       return explicitWorkflow;
@@ -82,10 +94,8 @@ export function selectInitialWorkflow({
     return "adapt";
   }
   if (deliveryOnly) {
-    return verificationCurrent ? "ship" : "verify";
-  }
-  if (causeKnown === false) {
-    return "debug";
+    if (!verificationCurrent) return "verify";
+    return risk === "strict" && !independentReview ? INTERNAL_REVIEW_PHASE : "ship";
   }
   if (reviewRequested) {
     return "review";
@@ -96,5 +106,58 @@ export function selectInitialWorkflow({
   if (verificationRequested) {
     return "verify";
   }
+  if (diagnosisRequested || causeKnown === false) {
+    return "debug";
+  }
   return "build";
+}
+
+export function requiredGates(risk) {
+  return risk === "strict"
+    ? ["independent_review", "current_evidence"]
+    : ["current_evidence"];
+}
+
+export function selectNextWorkflow({
+  current,
+  risk = "standard",
+  evidenceCurrent = false,
+  independentReview = false,
+  reviewVerdict = null,
+  repairOwner = "build",
+  verificationRequested = false,
+  deliveryRequested = false,
+  crossArtifactClaim = false,
+} = {}) {
+  if (current === "review") {
+    if (risk === "strict" && !independentReview) return "incomplete";
+    if (reviewVerdict === "changes_required") {
+      return repairOwner === "debug" ? "debug" : "build";
+    }
+    if (reviewVerdict !== "pass") return "incomplete";
+    if (
+      evidenceCurrent &&
+      !verificationRequested &&
+      !deliveryRequested &&
+      !crossArtifactClaim
+    ) {
+      return null;
+    }
+    return "verify";
+  }
+  if (current !== "build" && current !== "debug") {
+    return null;
+  }
+  if (risk === "strict") {
+    return INTERNAL_REVIEW_PHASE;
+  }
+  if (
+    !evidenceCurrent ||
+    verificationRequested ||
+    deliveryRequested ||
+    crossArtifactClaim
+  ) {
+    return "verify";
+  }
+  return null;
 }

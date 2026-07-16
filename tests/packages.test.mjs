@@ -180,6 +180,21 @@ test("optional Codex agent templates are valid source artifacts only", async () 
   }
 });
 
+test("reviewer templates are unconditionally read-only with one verdict contract", async () => {
+  const templates = [
+    await readFile(path.join(root, "agent-specs/reviewer.md"), "utf8"),
+    await readFile(path.join(root, "adapters/codex/agents/reviewer.toml"), "utf8"),
+  ];
+  for (const content of templates) {
+    assert.match(content, /read-only/i);
+    assert.match(content, /never edit or delegate/i);
+    assert.match(content, /Review YAML/i);
+    assert.match(content, /pass\s*\|?\s*changes_required\s*\|?\s*blocked/i);
+    assert.match(content, /unverified_areas/i);
+    assert.doesNotMatch(content, /unless .*assigns? (?:a )?repair/i);
+  }
+});
+
 async function exists(target) {
   try {
     await access(target);
