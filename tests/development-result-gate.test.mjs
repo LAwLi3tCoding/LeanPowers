@@ -646,6 +646,10 @@ test("telemetry gaps invalidate the affected pair in the canonical report", () =
 
   assert.equal(final.status, "FAIL");
   assert.ok(final.reasons.includes("token-telemetry"), JSON.stringify(final));
+  assert.equal(
+    final.evidence.median_wall_reduction_pct,
+    adjudication.paired.all_pairs.median_wall_reduction_pct,
+  );
   assert.match(report, /Invalid or excluded pairs: \*\*1\*\*/u);
   assert.match(report, /token-telemetry/u);
   assert.match(report, /collection-transform build \| 2000 \| 1190 \|/u);
@@ -667,6 +671,10 @@ test("wall-attempt metadata gaps invalidate the affected pair everywhere", () =>
 
   assert.equal(final.status, "FAIL");
   assert.ok(final.reasons.includes("wall-telemetry"), JSON.stringify(final));
+  assert.equal(
+    final.evidence.median_wall_reduction_pct,
+    adjudication.paired.all_pairs.median_wall_reduction_pct,
+  );
   assert.ok(!final.reasons.includes("report-artifact"), JSON.stringify(final));
   assert.match(report, /Invalid or excluded pairs: \*\*1\*\*/u);
   assert.match(report, /wall-telemetry/u);

@@ -88,6 +88,9 @@ export function adjudicateDevelopmentResultGate(result, { suite } = {}) {
   const runs = Array.isArray(object.runs) ? object.runs : [];
   const adjudicatedRuns = adjudication.runs;
   const pairs = object.paired?.all_pairs;
+  const validPairWallReduction = finiteNumber(
+    adjudication.paired?.all_pairs?.median_wall_reduction_pct,
+  );
   const tokenResult = object.token_target_result;
   const requiredPairCount = contract.cases.length * contract.repetitions;
 
@@ -296,7 +299,7 @@ export function adjudicateDevelopmentResultGate(result, { suite } = {}) {
       pair_count: Number.isSafeInteger(pairs?.count) ? pairs.count : null,
       aggregate_model_token_share_pct: expectedTokenShare,
       token_target_assessment: tokenTargetAssessment,
-      median_wall_reduction_pct: recomputedWallReduction,
+      median_wall_reduction_pct: validPairWallReduction,
     },
   };
   return verdict;
