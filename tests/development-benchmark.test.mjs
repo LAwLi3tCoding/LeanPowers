@@ -552,6 +552,7 @@ function capsuleTraceEvents({
   ledgerAfterDiscover = false,
   nonReviewTail = false,
   omitBuildRed = false,
+  omitPreChangeReproduction = false,
   patchBatches = 1,
   patchPaths = ["src/index.mjs", "test/index.test.mjs"],
   preserveBuildPatchOrder = false,
@@ -708,7 +709,7 @@ function capsuleTraceEvents({
         status: "completed",
       }));
     }
-    if (!reproduceBeforeRead) {
+    if (!reproduceBeforeRead && !omitPreChangeReproduction) {
       events.push(completed({
         type: "command_execution",
         command: reproduceCommand,
@@ -4505,6 +4506,16 @@ test("capsule READ accepts one boundary-preserving tail batch and requires groun
   assert.equal(omittedManifest.validation_metadata_read_observed, false);
   assert.equal(omittedManifest.protocol_observed, false);
 
+  const provenTailChain = parseCodexResult(
+    capsuleTraceEvents({
+      readCommand:
+        "tail -n +1 -- src/index.mjs && tail -n +1 -- test/index.test.mjs package.json",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(provenTailChain.read_observed, true);
+  assert.equal(provenTailChain.protocol_observed, true);
+
   for (const readCommand of [
     "tail -n +1 -- =cat src/index.mjs package.json",
     "tail -n +1 -- ~/secret src/index.mjs package.json",
@@ -4512,7 +4523,6 @@ test("capsule READ accepts one boundary-preserving tail batch and requires groun
     "/bin/zsh -lc \"tail -n +1 -- src\\index.mjs test\\index.test.mjs package.json\"",
     "tail -n +1 -- src/index.mjs; cat test/index.test.mjs; tail -n +1 -- package.json",
     "cd .; tail -n +1 -- src/index.mjs test/index.test.mjs package.json",
-    "tail -n +1 -- src/index.mjs && tail -n +1 -- test/index.test.mjs package.json",
     "tail -n +1 -- src/index.mjs | tail -n +1 -- test/index.test.mjs package.json",
     "tail -n +1 -- src/index.mjs > read.txt; tail -n +1 -- test/index.test.mjs package.json",
     "tail -n +1 -- src/*.mjs test/index.test.mjs package.json",
@@ -4529,7 +4539,7 @@ test("capsule READ accepts one boundary-preserving tail batch and requires groun
   }
 });
 
-test("source-grounding evidence accepts only pure read commands joined by &&", () => {
+test("source-grounding evidence accepts only all-proven read commands joined by &&", () => {
   const groundedRead = parseCodexResult(
     capsuleTraceEvents({
       readCommand: [
@@ -4541,10 +4551,11 @@ test("source-grounding evidence accepts only pure read commands joined by &&", (
     capsuleTraceOptions("debug"),
   ).workflow_trace.capsule_stage;
 
-  assert.equal(groundedRead.read_observed, false);
+  assert.equal(groundedRead.read_observed, true);
   assert.equal(groundedRead.quality_read_observed, true);
   assert.equal(groundedRead.quality_patch_targets_read_observed, true);
   assert.equal(groundedRead.quality_pre_change_evidence_observed, true);
+  assert.equal(groundedRead.protocol_observed, true);
 
   for (const readCommand of [
     "cat src/index.mjs && touch marker && cat test/index.test.mjs package.json",
@@ -4563,6 +4574,221 @@ test("source-grounding evidence accepts only pure read commands joined by &&", (
     assert.equal(unsafe.quality_read_observed, false, readCommand);
     assert.equal(unsafe.quality_patch_targets_read_observed, false, readCommand);
     assert.equal(unsafe.quality_pre_change_evidence_observed, false, readCommand);
+  }
+});
+
+test("source observer equates safe same-workspace cd and fixed printf read separators", () => {
+  const options = {
+    ...capsuleTraceOptions("debug"),
+    workspace: "/tmp/run/workspace",
+  };
+  const sameWorkspaceBatch = parseCodexResult(
+    capsuleTraceEvents({
+      readCommand: [
+        "cd '/tmp/run/workspace/.'",
+        "tail -n +1 -- src/index.mjs test/index.test.mjs package.json",
+      ].join(" && "),
+    }).map(JSON.stringify).join("\n"),
+    options,
+  ).workflow_trace.capsule_stage;
+
+  assert.equal(sameWorkspaceBatch.read_observed, true);
+  assert.equal(sameWorkspaceBatch.quality_read_observed, true);
+  assert.equal(sameWorkspaceBatch.quality_patch_targets_read_observed, true);
+  assert.equal(sameWorkspaceBatch.protocol_observed, true);
+
+  const decoratedRead = parseCodexResult(
+    capsuleTraceEvents({
+      readCommand: [
+        "cd .",
+        "printf '%s\\n' '--- source ---'",
+        "cat -- src/index.mjs",
+        "printf '%s\\n' '--- test ---'",
+        "sed -n '1,200p' -- test/index.test.mjs",
+        "printf '%s\\n' '--- metadata ---'",
+        "head -n 40 -- package.json",
+      ].join(" && "),
+    }).map(JSON.stringify).join("\n"),
+    options,
+  ).workflow_trace.capsule_stage;
+
+  assert.equal(decoratedRead.read_observed, true);
+  assert.equal(decoratedRead.quality_read_observed, true);
+  assert.equal(decoratedRead.quality_patch_targets_read_observed, true);
+  assert.equal(decoratedRead.quality_grounded_candidates_read_observed, true);
+  assert.equal(decoratedRead.quality_pre_change_evidence_observed, true);
+  assert.equal(decoratedRead.protocol_observed, true);
+
+  for (const readCommand of [
+    "cd /tmp/run && cat src/index.mjs && cat test/index.test.mjs package.json",
+    "cd /tmp/run/workspace/subdir && cat src/index.mjs && cat test/index.test.mjs package.json",
+    "cd subdir/.. && cat src/index.mjs && cat test/index.test.mjs package.json",
+    "cd ./subdir/.. && cat src/index.mjs && cat test/index.test.mjs package.json",
+    "cd $(printf /tmp/run/workspace) && cat src/index.mjs && cat test/index.test.mjs package.json",
+    "cd /tmp/run/workspace && printf * && cat src/index.mjs test/index.test.mjs package.json",
+    "cd /tmp/run/workspace && printf ~ && cat src/index.mjs test/index.test.mjs package.json",
+    "cd /tmp/run/workspace && printf -v separator '%s' changed && cat src/index.mjs test/index.test.mjs package.json",
+    "cd /tmp/run/workspace && printf '%s\\n' marker > marker.txt && cat src/index.mjs test/index.test.mjs package.json",
+    "cd /tmp/run/workspace && printf '%s\\n' marker | cat src/index.mjs test/index.test.mjs package.json",
+    "cd /tmp/run/workspace && printf '%s\\n' marker && touch marker && cat src/index.mjs test/index.test.mjs package.json",
+  ]) {
+    const unsafe = parseCodexResult(
+      capsuleTraceEvents({ readCommand }).map(JSON.stringify).join("\n"),
+      options,
+    ).workflow_trace.capsule_stage;
+    assert.equal(unsafe.quality_read_observed, false, readCommand);
+    assert.equal(unsafe.quality_patch_targets_read_observed, false, readCommand);
+    assert.equal(unsafe.quality_pre_change_evidence_observed, false, readCommand);
+  }
+
+  const missingWorkspaceContext = parseCodexResult(
+    capsuleTraceEvents({
+      readCommand:
+        "cd /tmp/run/workspace && cat src/index.mjs && cat test/index.test.mjs package.json",
+    }).map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("debug"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(missingWorkspaceContext.quality_read_observed, false);
+});
+
+test("one safe read chain ending in the exact reproducer contributes READ and REPRODUCE", () => {
+  const combinedReadAndReproduction = [
+    "cd /tmp/run/workspace",
+    "printf '%s\\n' '--- source ---'",
+    "cat -- src/index.mjs",
+    "printf '%s\\n' '--- test ---'",
+    "sed -n '1,200p' -- test/index.test.mjs",
+    "printf '%s\\n' '--- metadata ---'",
+    "head -n 40 -- package.json",
+    "printf '%s\\n' '__LEANPOWERS_REPRODUCTION_OUTPUT_BOUNDARY__'",
+    capsuleReproductionContract.command,
+  ].join(" && ");
+  const stage = parseCodexResult(
+    capsuleTraceEvents({
+      omitPreChangeReproduction: true,
+      readCommand: combinedReadAndReproduction,
+      readOutput: [
+        "source, test, and metadata",
+        "__LEANPOWERS_REPRODUCTION_OUTPUT_BOUNDARY__",
+        JSON.stringify(capsuleReproductionContract.expected_output),
+      ].join("\n"),
+    }).map(JSON.stringify).join("\n"),
+    {
+      ...capsuleTraceOptions("debug"),
+      workspace: "/tmp/run/workspace",
+    },
+  ).workflow_trace.capsule_stage;
+
+  assert.deepEqual(stage.stage_attempts, { discover: 1, read: 1, reproduce: 1 });
+  assert.equal(stage.read_observed, true);
+  assert.equal(stage.reproduce_observed, true);
+  assert.equal(stage.ordered_reproduce_observed, true);
+  assert.equal(stage.quality_read_observed, true);
+  assert.equal(stage.quality_patch_targets_read_observed, true);
+  assert.equal(stage.quality_pre_change_evidence_observed, true);
+  assert.equal(stage.pre_change_stage_protocol_observed, true);
+  assert.equal(stage.protocol_observed, true);
+
+  for (const readCommand of [
+    combinedReadAndReproduction.replace(
+      "printf '%s\\n' '__LEANPOWERS_REPRODUCTION_OUTPUT_BOUNDARY__' && ",
+      "",
+    ),
+    combinedReadAndReproduction.replace(
+      capsuleReproductionContract.command,
+      "node repro/other.mjs",
+    ),
+    `${combinedReadAndReproduction} && cat README.md`,
+    combinedReadAndReproduction.replace(
+      "cat -- src/index.mjs",
+      "touch marker",
+    ),
+  ]) {
+    const rejected = parseCodexResult(
+      capsuleTraceEvents({
+        omitPreChangeReproduction: true,
+        readCommand,
+        readOutput: [
+          "__LEANPOWERS_REPRODUCTION_OUTPUT_BOUNDARY__",
+          JSON.stringify(capsuleReproductionContract.expected_output),
+        ].join("\n"),
+      }).map(JSON.stringify).join("\n"),
+      {
+        ...capsuleTraceOptions("debug"),
+        workspace: "/tmp/run/workspace",
+      },
+    ).workflow_trace.capsule_stage;
+    assert.equal(rejected.quality_pre_change_evidence_observed, false, readCommand);
+    assert.equal(rejected.reproduce_observed, false, readCommand);
+  }
+
+  const forgedPreBoundaryOutput = parseCodexResult(
+    capsuleTraceEvents({
+      omitPreChangeReproduction: true,
+      readCommand: combinedReadAndReproduction,
+      readOutput: [
+        JSON.stringify(capsuleReproductionContract.expected_output),
+        "__LEANPOWERS_REPRODUCTION_OUTPUT_BOUNDARY__",
+      ].join("\n"),
+    }).map(JSON.stringify).join("\n"),
+    {
+      ...capsuleTraceOptions("debug"),
+      workspace: "/tmp/run/workspace",
+    },
+  ).workflow_trace.capsule_stage;
+  assert.equal(forgedPreBoundaryOutput.quality_pre_change_evidence_observed, false);
+  assert.equal(forgedPreBoundaryOutput.reproduce_observed, false);
+});
+
+test("same-workspace cd preserves post-change validation and reproduction replay", () => {
+  const workspace = "/tmp/run/workspace";
+  const options = { ...capsuleTraceOptions("debug"), workspace };
+  const separate = parseCodexResult(
+    capsuleTraceEvents({
+      reproduceCommand: `cd ${workspace} && ${capsuleReproductionContract.command}`,
+      separatePostReproduction: true,
+      validationCommand: `cd ${workspace} && npm test`,
+    }).map(JSON.stringify).join("\n"),
+    options,
+  ).workflow_trace.capsule_stage;
+  assert.equal(separate.reproduce_observed, true);
+  assert.equal(separate.validation_observed, true);
+  assert.equal(separate.quality_validation_observed, true);
+  assert.equal(separate.post_change_reproduction_replayed, true);
+  assert.equal(separate.protocol_observed, true);
+
+  const legacyCombinedContract = {
+    command: capsuleReproductionContract.command,
+    expected_output: capsuleReproductionContract.expected_output,
+  };
+  const combined = parseCodexResult(
+    capsuleTraceEvents({
+      validationCommand: [
+        `cd ${workspace}`,
+        "npm test",
+        capsuleReproductionContract.command,
+      ].join(" && "),
+      validationOutput: "pass",
+    }).map(JSON.stringify).join("\n"),
+    { ...options, reproductionContract: legacyCombinedContract },
+  ).workflow_trace.capsule_stage;
+  assert.equal(combined.validation_observed, true);
+  assert.equal(combined.quality_validation_observed, true);
+  assert.equal(combined.post_change_validation_mode, "combined");
+  assert.equal(combined.post_change_reproduction_replayed, true);
+
+  for (const validationCommand of [
+    `cd /tmp/run && npm test && ${capsuleReproductionContract.command}`,
+    `cd $(printf ${workspace}) && npm test && ${capsuleReproductionContract.command}`,
+    `cd ${workspace} && npm test | ${capsuleReproductionContract.command}`,
+    `cd ${workspace} && npm test && touch marker && ${capsuleReproductionContract.command}`,
+  ]) {
+    const rejected = parseCodexResult(
+      capsuleTraceEvents({ validationCommand }).map(JSON.stringify).join("\n"),
+      options,
+    ).workflow_trace.capsule_stage;
+    assert.equal(rejected.validation_observed, false, validationCommand);
+    assert.equal(rejected.quality_validation_observed, false, validationCommand);
   }
 });
 
@@ -5173,6 +5399,28 @@ test("build capsule accepts evidence-driven RED retries without a fixed call bud
   assert.equal(mixedTestBatch.build_red_observed, true);
   assert.equal(mixedTestBatch.patch_protocol_observed, false);
   assert.equal(mixedTestBatch.protocol_observed, false);
+
+  const mixedFileChangeEvents = capsuleTraceEvents({ expectedWorkflow: "build" });
+  const mixedChanges = mixedFileChangeEvents
+    .filter(({ type, item }) =>
+      type === "item.completed" &&
+      item?.type === "file_change" &&
+      ["patch-0", "patch-1"].includes(item.id)
+    )
+    .flatMap(({ item }) => item.changes);
+  for (const event of mixedFileChangeEvents) {
+    if (event?.item?.id === "patch-0") event.item.changes = mixedChanges;
+  }
+  const collapsedMixedFileChangeEvents = mixedFileChangeEvents.filter(
+    ({ item }) => item?.id !== "patch-1",
+  );
+  const mixedFileChangeBeforeRed = parseCodexResult(
+    collapsedMixedFileChangeEvents.map(JSON.stringify).join("\n"),
+    capsuleTraceOptions("build"),
+  ).workflow_trace.capsule_stage;
+  assert.equal(mixedFileChangeBeforeRed.build_red_observed, false);
+  assert.equal(mixedFileChangeBeforeRed.patch_protocol_observed, false);
+  assert.equal(mixedFileChangeBeforeRed.protocol_observed, false);
 
   const productBeforeTest = parseCodexResult(
     capsuleTraceEvents({

@@ -1085,6 +1085,7 @@ export function parseCodexResult(
     expectedWorkflow = null,
     reproductionContract = null,
     reviewerWorkspaceMutations = new Map(),
+    workspace = null,
   } = {},
 ) {
   const events = parseCodexEvents(raw);
@@ -1093,6 +1094,7 @@ export function parseCodexResult(
       command,
       expectedWorkflow,
       reproductionContract,
+      workspace,
     )?.command ?? null;
   const usageEvent = [...events].reverse().find((event) => event?.type === "turn.completed");
   const usage = usageEvent?.usage;
@@ -1259,6 +1261,7 @@ export function parseCodexResult(
           event: candidate,
           index: candidateIndex,
         })),
+        workspace,
       );
       const currentSpawnId = item.id;
       const validationFreshAtSpawn = reviewValidation !== null &&
@@ -1275,6 +1278,7 @@ export function parseCodexResult(
               : []
           ),
           reviewValidation?.final_index ?? -1,
+          workspace,
         );
       for (const agentId of item.receiver_thread_ids ?? []) {
         reviewAgentSpawns.set(agentId, {
@@ -1378,6 +1382,7 @@ export function parseCodexResult(
               postBoundaryActivityIsReadOnly(
                 reviewWindowEvents,
                 review.spawn_index,
+                workspace,
               ),
           ),
           quality_pass: completedReviews.every(
@@ -1461,6 +1466,7 @@ export function parseCodexResult(
     postBoundaryActivityIsReadOnly(
       events.map((event, index) => ({ event, index })),
       finalStrictReviewWaitIndex,
+      workspace,
     );
   const finalMessage = [...events].reverse().find(
     (event) => event?.type === "item.completed" && event?.item?.type === "agent_message",
@@ -1474,6 +1480,7 @@ export function parseCodexResult(
     changePolicy,
     reproductionContract,
     expectedReviewContract,
+    workspace,
   );
   return {
     completed:
@@ -1566,6 +1573,7 @@ function traceCapsuleStage(
   changePolicy,
   reproductionContract,
   expectedReviewContract,
+  workspace,
 ) {
   if (!["build", "debug"].includes(expectedWorkflow)) return null;
 
@@ -1575,6 +1583,7 @@ function traceCapsuleStage(
       command,
       expectedWorkflow,
       reproductionContract,
+      workspace,
     )?.command ?? null;
   const firstToolIndex = indexed.find(({ event }) =>
     ["item.started", "item.completed"].includes(event?.type) &&
@@ -1669,7 +1678,11 @@ function traceCapsuleStage(
     }
   }
   const qualityReadEvidence = taskCommands.flatMap(({ event, index }) =>
-    successfulReadEvidencePaths(event.item).map((readPath) => ({ index, readPath }))
+    successfulReadEvidencePaths(
+      event.item,
+      workspace,
+      reproductionContract,
+    ).map((readPath) => ({ index, readPath }))
   );
   const qualityReadObserved = qualityReadEvidence.length > 0;
   const qualityPatchTargetsReadObserved = readRequiredPatchPaths.every(
@@ -1683,6 +1696,7 @@ function traceCapsuleStage(
     reproductionContract,
     readRequiredPatchPaths,
     changePolicy,
+    workspace,
   );
   const lastPreChangeCommandIndex = preChangeCommands.at(-1)?.index ?? -1;
   const prePatchClauseTestLedgerPresentations =
@@ -1819,16 +1833,17 @@ function traceCapsuleStage(
       )
     : [];
   const finalBuildTestAttempt = buildRedCommands.findLast(({ event }) =>
-    isBuildRedRetryAttempt(event.item)
+    isBuildRedRetryAttempt(event.item, workspace)
   ) ?? null;
   const finalBuildRedWindowSafe = buildTestPatchEndIndex >= 0 &&
     postBuildEvidenceActivityIsSafe(
       indexed.filter(({ index }) => index < firstProductPatchStartIndex),
       buildTestPatchEndIndex,
+      workspace,
     );
   const buildRedObserved = expectedWorkflow === "build"
     ? finalBuildTestAttempt !== null &&
-      isExpectedBuildRed(finalBuildTestAttempt.event.item) &&
+      isExpectedBuildRed(finalBuildTestAttempt.event.item, workspace) &&
       finalBuildRedWindowSafe
     : null;
   const buildRedCycleRestarts = expectedWorkflow === "build"
@@ -1844,7 +1859,7 @@ function traceCapsuleStage(
           commandIndex > afterIndex && commandIndex < beforeIndex
         );
         const relevantAttempts = commands.filter(({ event }) =>
-          isBuildRedRetryAttempt(event.item)
+          isBuildRedRetryAttempt(event.item, workspace)
         );
         return {
           commands,
@@ -1852,6 +1867,7 @@ function traceCapsuleStage(
             postBuildEvidenceActivityIsSafe(
               indexed.filter(({ index: eventIndex }) => eventIndex < beforeIndex),
               afterIndex,
+              workspace,
             ),
           relevant_attempts: relevantAttempts,
         };
@@ -1872,6 +1888,7 @@ function traceCapsuleStage(
     postChangeCommands,
     expectedWorkflow,
     reproductionContract,
+    workspace,
   );
   const validationObserved = validation !== null;
   const qualityValidation = parseSupportedPostChangeValidation(
@@ -1879,6 +1896,7 @@ function traceCapsuleStage(
     expectedWorkflow,
     reproductionContract,
     indexed,
+    workspace,
   );
   const qualityValidationObserved = qualityValidation !== null;
   const qualityPreChangeEvidenceObserved =
@@ -1932,7 +1950,7 @@ function traceCapsuleStage(
       )
     : [];
   const debugLauncherErrors = debugRecoveryCommands.filter(({ event }) =>
-    isDebugValidationLauncherError(event.item, reproductionContract)
+    isDebugValidationLauncherError(event.item, reproductionContract, workspace)
   );
   const debugLauncherErrorIndexes = new Set(
     debugLauncherErrors.map(({ index }) => index),
@@ -1942,6 +1960,7 @@ function traceCapsuleStage(
     const validation = parseFailedDebugValidation(
       command.event.item,
       reproductionContract,
+      workspace,
     );
     return validation === null ? [] : [{ command, validation }];
   });
@@ -1997,6 +2016,7 @@ function traceCapsuleStage(
         expectedWorkflow,
         reproductionContract,
         indexed,
+        workspace,
       );
   const postValidationToolCalls = validationObserved
     ? countToolCallsAfter(indexed, validation.final_index)
@@ -2005,7 +2025,11 @@ function traceCapsuleStage(
     ? countToolCallsAfter(indexed, freshnessValidation?.final_index ?? -1)
     : 0;
   const readOnlyAfterFreshnessValidation = freshnessValidation !== null &&
-    postBoundaryActivityIsReadOnly(indexed, freshnessValidation.final_index);
+    postBoundaryActivityIsReadOnly(
+      indexed,
+      freshnessValidation.final_index,
+      workspace,
+    );
   const ordinaryStopObserved = declaredRisk === "strict"
     ? null
     : validationObserved &&
@@ -2381,7 +2405,7 @@ function countToolCallsAfter(indexed, afterIndex) {
   return countToolCallsBetween(indexed, { afterIndex });
 }
 
-function isSafeGitReportingCommand(item) {
+function isSafeGitReportingCommand(item, workspace = null) {
   if (
     item?.status === "failed" ||
     item?.timed_out === true ||
@@ -2389,7 +2413,7 @@ function isSafeGitReportingCommand(item) {
   ) {
     return false;
   }
-  const command = unwrapShellInvocation(item?.command);
+  const command = observedCommandText(item?.command, workspace);
   if (command === null || /[\\\r\n;&|`<>$#]/u.test(command)) return false;
   const words = parseSimpleShellWords(command);
   if (words === null || words[0] !== "git") return false;
@@ -2413,9 +2437,9 @@ function isSafeGitReportingCommand(item) {
     words.slice(2).every((word) => safeDiffFlags.has(word));
 }
 
-function isProvenPostBoundaryRead(item) {
-  return successfulReadEvidencePaths(item).length > 0 ||
-    isSafeGitReportingCommand(item);
+function isProvenPostBoundaryRead(item, workspace = null) {
+  return successfulReadEvidencePaths(item, workspace).length > 0 ||
+    isSafeGitReportingCommand(item, workspace);
 }
 
 function postBoundaryActivityIsSafe(indexed, afterIndex, isSafeCommand) {
@@ -2440,21 +2464,21 @@ function postBoundaryActivityIsSafe(indexed, afterIndex, isSafeCommand) {
   });
 }
 
-function postBoundaryActivityIsReadOnly(indexed, afterIndex) {
+function postBoundaryActivityIsReadOnly(indexed, afterIndex, workspace = null) {
   return postBoundaryActivityIsSafe(
     indexed,
     afterIndex,
-    isProvenPostBoundaryRead,
+    (item) => isProvenPostBoundaryRead(item, workspace),
   );
 }
 
-function postBuildEvidenceActivityIsSafe(indexed, afterIndex) {
+function postBuildEvidenceActivityIsSafe(indexed, afterIndex, workspace = null) {
   return postBoundaryActivityIsSafe(
     indexed,
     afterIndex,
     (item) =>
-      isProvenPostBoundaryRead(item) ||
-      isBuildRedRetryAttempt(item),
+      isProvenPostBoundaryRead(item, workspace) ||
+      isBuildRedRetryAttempt(item, workspace),
   );
 }
 
@@ -2486,6 +2510,7 @@ function tracePreChangeStages(
   reproductionContract,
   patchPaths,
   changePolicy,
+  workspace,
 ) {
   const stages = [
     {
@@ -2496,14 +2521,26 @@ function tracePreChangeStages(
     {
       name: "read",
       matches: looksLikeReadAttempt,
-      passes: isBatchRead,
+      passes: (item) => isBatchRead(
+        item,
+        workspace,
+        reproductionContract,
+      ),
     },
   ];
   if (expectedWorkflow === "debug") {
     stages.push({
       name: "reproduce",
-      matches: (item) => looksLikeReproductionAttempt(item, reproductionContract),
-      passes: (item) => isExecutableReproduction(item, reproductionContract),
+      matches: (item) => looksLikeReproductionAttempt(
+        item,
+        reproductionContract,
+        workspace,
+      ),
+      passes: (item) => isExecutableReproduction(
+        item,
+        reproductionContract,
+        workspace,
+      ),
     });
   }
 
@@ -2517,38 +2554,48 @@ function tracePreChangeStages(
   for (const { event } of commands) {
     const item = event?.item;
     const matchingStages = stages.filter(({ matches }) => matches(item));
-    if (matchingStages.length !== 1) {
+    const combinedReadReproduction =
+      matchingStages.length === 2 &&
+      matchingStages[0]?.name === "read" &&
+      matchingStages[1]?.name === "reproduce" &&
+      matchingStages.every(({ passes }) => passes(item));
+    if (matchingStages.length !== 1 && !combinedReadReproduction) {
       unexpectedCalls += 1;
       continue;
     }
-    const stage = matchingStages[0];
-    const discoverReady = successfulItems.has("discover");
-    for (const readPath of successfulReadEvidencePaths(item)) {
+    for (const readPath of successfulReadEvidencePaths(
+      item,
+      workspace,
+      reproductionContract,
+    )) {
       qualityReadPaths.add(readPath);
     }
-    if (
-      (stage.name !== "discover" && !discoverReady) ||
-      successfulItems.has(stage.name)
-    ) {
-      unexpectedCalls += 1;
-      if (stage.name === "read" && successfulItems.has("read")) {
-        extraReadCalls += 1;
-      } else {
-        outOfOrderStageCalls += 1;
-      }
-      continue;
-    }
-    attempts[stage.name] += 1;
-    if (attempts[stage.name] > 2) {
-      unexpectedCalls += 1;
-      continue;
-    }
-    if (stage.passes(item)) {
-      successfulItems.set(stage.name, item);
-    } else {
-      if (stage.name === "read") malformedReadCalls += 1;
-      if (!isStageRetryAuthorized(item)) {
+    for (const stage of matchingStages) {
+      const discoverReady = successfulItems.has("discover");
+      if (
+        (stage.name !== "discover" && !discoverReady) ||
+        successfulItems.has(stage.name)
+      ) {
         unexpectedCalls += 1;
+        if (stage.name === "read" && successfulItems.has("read")) {
+          extraReadCalls += 1;
+        } else {
+          outOfOrderStageCalls += 1;
+        }
+        continue;
+      }
+      attempts[stage.name] += 1;
+      if (attempts[stage.name] > 2) {
+        unexpectedCalls += 1;
+        continue;
+      }
+      if (stage.passes(item)) {
+        successfulItems.set(stage.name, item);
+      } else {
+        if (stage.name === "read") malformedReadCalls += 1;
+        if (!isStageRetryAuthorized(item)) {
+          unexpectedCalls += 1;
+        }
       }
     }
   }
@@ -2559,17 +2606,23 @@ function tracePreChangeStages(
     ? successfulItems.has("reproduce")
     : null;
   const reproduceObserved = expectedWorkflow === "debug"
-    ? commands.some(({ event }) =>
-        isExecutableReproduction(event?.item, reproductionContract)
+      ? commands.some(({ event }) =>
+        isExecutableReproduction(event?.item, reproductionContract, workspace)
       )
     : null;
   const validationMetadataReadObserved = discoverObserved && readObserved
-    ? readsDiscoveredValidationMetadata(
+      ? readsDiscoveredValidationMetadata(
         successfulItems.get("discover"),
         successfulItems.get("read"),
+        workspace,
+        reproductionContract,
       )
     : false;
-  const readPaths = new Set(batchReadPaths(successfulItems.get("read")));
+  const readPaths = new Set(batchReadPaths(
+    successfulItems.get("read"),
+    workspace,
+    reproductionContract,
+  ));
   const discoveredPaths = new Set(discoveredRepositoryPaths(
     successfulItems.get("discover")?.aggregated_output,
   ));
@@ -2648,7 +2701,7 @@ function isStageRetryAuthorized(item) {
   });
 }
 
-function isExpectedBuildRed(item) {
+function isExpectedBuildRed(item, workspace = null) {
   return (
     item?.type === "command_execution" &&
     ["completed", "failed"].includes(item?.status) &&
@@ -2658,16 +2711,16 @@ function isExpectedBuildRed(item) {
     item.exit_code <= 255 &&
     String(item?.aggregated_output ?? "").trim().length > 0 &&
     !hasFatalShellDiagnostic(item?.aggregated_output) &&
-    canonicalTestValidationCommand(item?.command) !== null
+    canonicalTestValidationCommand(item?.command, workspace) !== null
   );
 }
 
-function isBuildRedRetryAttempt(item) {
+function isBuildRedRetryAttempt(item, workspace = null) {
   return (
     item?.type === "command_execution" &&
     ["completed", "failed"].includes(item?.status) &&
     item?.timed_out !== true &&
-    canonicalTestValidationCommand(item?.command) !== null &&
+    canonicalTestValidationCommand(item?.command, workspace) !== null &&
     Number.isInteger(item?.exit_code) &&
     item.exit_code >= 0 &&
     item.exit_code <= 255 &&
@@ -2732,7 +2785,7 @@ function isContentAwareDiscover(item) {
   return canonicalCommand && hasContentOutput;
 }
 
-function isBatchRead(item) {
+function isBatchRead(item, workspace = null, reproductionContract = null) {
   if (
     item?.status === "failed" ||
     item?.timed_out === true ||
@@ -2742,7 +2795,7 @@ function isBatchRead(item) {
   ) {
     return false;
   }
-  return batchReadPaths(item).length >= 2;
+  return batchReadPaths(item, workspace, reproductionContract).length >= 2;
 }
 
 function looksLikeDiscoverAttempt(item) {
@@ -2755,12 +2808,20 @@ function looksLikeReadAttempt(item) {
   return /(?:^|[;&|\s])(?:cat|sed|awk|head|tail)(?:\s|$)/u.test(command);
 }
 
-function looksLikeReproductionAttempt(item, contract) {
-  return canonicalReproductionCommand(item?.command) === contract?.command;
+function looksLikeReproductionAttempt(item, contract, workspace = null) {
+  return canonicalReproductionCommand(item?.command, workspace) === contract?.command ||
+    analyzeReadEvidenceCommand(item, workspace, contract)
+      ?.reproduction_observed === true;
 }
 
-function batchReadPaths(item) {
-  const command = unwrapShellInvocation(item?.command);
+function batchReadPaths(item, workspace = null, reproductionContract = null) {
+  const analysis = analyzeReadEvidenceCommand(
+    item,
+    workspace,
+    reproductionContract,
+  );
+  if (analysis !== null) return analysis.paths;
+  const command = observedCommandText(item?.command, workspace);
   if (command === null || /[\\\r\n;&|`<>$#]/u.test(command)) return [];
   const words = parseSimpleShellWords(command);
   if (
@@ -2776,7 +2837,15 @@ function batchReadPaths(item) {
   return paths.length >= 2 && paths.every(Boolean) ? [...new Set(paths)] : [];
 }
 
-function successfulReadEvidencePaths(item) {
+function successfulReadEvidencePaths(
+  item,
+  workspace = null,
+  reproductionContract = null,
+) {
+  return analyzeReadEvidenceCommand(item, workspace, reproductionContract)?.paths ?? [];
+}
+
+function analyzeReadEvidenceCommand(item, workspace, reproductionContract) {
   if (
     item?.status === "failed" ||
     item?.timed_out === true ||
@@ -2784,20 +2853,89 @@ function successfulReadEvidencePaths(item) {
     String(item?.aggregated_output ?? "").length === 0 ||
     hasFatalShellDiagnostic(item?.aggregated_output)
   ) {
-    return [];
+    return null;
   }
-  const command = unwrapShellInvocation(item?.command);
-  const segments = splitPureReadCommandChain(command);
-  if (segments === null) return [];
-  const segmentPaths = segments.map(simpleReadEvidencePaths);
-  if (segmentPaths.some((paths) => paths.length === 0)) return [];
-  return [...new Set(segmentPaths.flat())];
+  const segments = observedCommandSegments(item?.command, workspace);
+  if (segments === null) return null;
+  let reproductionObserved = false;
+  if (
+    reproductionContract !== null &&
+    reproductionContract !== undefined &&
+    canonicalReproductionCommand(segments.at(-1)) === reproductionContract.command
+  ) {
+    if (
+      !isReproductionOutputBoundaryCommand(segments.at(-2)) ||
+      !resolvedReproductionOutputAfterBoundaryObserved(
+        item?.aggregated_output,
+        reproductionContract.expected_output,
+      )
+    ) {
+      return null;
+    }
+    segments.pop();
+    segments.pop();
+    reproductionObserved = true;
+  }
+  const paths = [];
+  for (const segment of segments) {
+    if (isFixedLiteralPrintfSeparator(segment)) continue;
+    const segmentPaths = simpleReadEvidencePaths(segment);
+    if (segmentPaths.length === 0) return null;
+    paths.push(...segmentPaths);
+  }
+  if (paths.length === 0) return null;
+  return {
+    paths: [...new Set(paths)],
+    reproduction_observed: reproductionObserved,
+  };
 }
 
-function splitPureReadCommandChain(command) {
+function observedCommandText(command, workspace = null) {
+  const text = unwrapShellInvocation(command);
+  const segments = splitSafeAndCommandChain(text);
+  if (segments === null) return null;
+  const firstWords = parseSimpleShellWords(segments[0]);
+  if (firstWords?.[0] !== "cd") return text;
+  if (!sameWorkspaceCdSegment(firstWords, workspace)) return null;
+  const firstStart = text.indexOf(segments[0]);
+  if (firstStart < 0) return null;
+  const firstEnd = firstStart + segments[0].length;
+  const separator = text.slice(firstEnd).match(/^[ \t]*&&[ \t]*/u)?.[0] ?? null;
+  if (separator === null) return null;
+  const remainder = text.slice(firstEnd + separator.length);
+  return remainder.length > 0 ? remainder : null;
+}
+
+function observedCommandSegments(command, workspace = null) {
+  const text = unwrapShellInvocation(command);
+  const segments = splitSafeAndCommandChain(text);
+  if (segments === null) return null;
+  const firstWords = parseSimpleShellWords(segments[0]);
+  if (firstWords?.[0] !== "cd") return segments;
+  if (!sameWorkspaceCdSegment(firstWords, workspace)) return null;
+  segments.shift();
+  if (segments.length === 0) return null;
+  return segments.some((segment) => parseSimpleShellWords(segment)?.[0] === "cd")
+    ? null
+    : segments;
+}
+
+function sameWorkspaceCdSegment(words, workspace) {
+  if (typeof workspace !== "string" || !path.isAbsolute(workspace)) return false;
+  const target = words.length === 2
+    ? words[1]
+    : words.length === 3 && words[1] === "--"
+      ? words[2]
+      : null;
+  if (target === null || target.length === 0) return false;
+  if (target.split("/").includes("..")) return false;
+  return path.resolve(workspace, target) === path.resolve(workspace);
+}
+
+function splitSafeAndCommandChain(command) {
   if (command === null) return null;
   const text = String(command);
-  if (/[\\\r\n;|`<>$#]/u.test(text)) return null;
+  if (text.length === 0 || /[\r\n]/u.test(text)) return null;
 
   const segments = [];
   let quote = null;
@@ -2812,7 +2950,10 @@ function splitPureReadCommandChain(command) {
       quote = quote === "double" ? null : "double";
       continue;
     }
-    if (quote !== null || character !== "&") continue;
+    if (quote === "double" && /[\\`$!]/u.test(character)) return null;
+    if (quote !== null) continue;
+    if (/[\\;|`<>$#!()]/u.test(character)) return null;
+    if (character !== "&") continue;
     if (text[index + 1] !== "&") return null;
     const segment = text.slice(segmentStart, index).trim();
     if (segment.length === 0) return null;
@@ -2825,6 +2966,42 @@ function splitPureReadCommandChain(command) {
   if (finalSegment.length === 0) return null;
   segments.push(finalSegment);
   return segments;
+}
+
+function isFixedLiteralPrintfSeparator(command) {
+  const words = parseSimpleShellWords(command);
+  if (words === null || words[0] !== "printf") return false;
+  let offset = 1;
+  if (words[offset] === "--") offset += 1;
+  const format = words[offset];
+  if (
+    typeof format !== "string" ||
+    format.length === 0 ||
+    format.startsWith("-") ||
+    /[*?\[\]{}~]/u.test(format) ||
+    /%(?![%s])/u.test(format)
+  ) {
+    return false;
+  }
+  const values = words.slice(offset + 1);
+  if (
+    values.some((value) => /[*?\[\]{}~]/u.test(value)) ||
+    (format.includes("%s") ? values.length === 0 : values.length !== 0)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+const REPRODUCTION_OUTPUT_BOUNDARY =
+  "__LEANPOWERS_REPRODUCTION_OUTPUT_BOUNDARY__";
+
+function isReproductionOutputBoundaryCommand(command) {
+  const words = parseSimpleShellWords(command);
+  return words?.length === 3 &&
+    words[0] === "printf" &&
+    words[1] === "%s\\n" &&
+    words[2] === REPRODUCTION_OUTPUT_BOUNDARY;
 }
 
 function simpleReadEvidencePaths(command) {
@@ -2934,7 +3111,12 @@ function normalizeReadPath(value) {
   return normalized;
 }
 
-function readsDiscoveredValidationMetadata(discoverItem, readItem) {
+function readsDiscoveredValidationMetadata(
+  discoverItem,
+  readItem,
+  workspace = null,
+  reproductionContract = null,
+) {
   const manifests = new Set(
     String(discoverItem?.aggregated_output ?? "")
       .split(/\r?\n/u)
@@ -2943,7 +3125,11 @@ function readsDiscoveredValidationMetadata(discoverItem, readItem) {
       .filter((candidate) => candidate !== null && isValidationManifestPath(candidate)),
   );
   if (manifests.size === 0) return false;
-  const readPaths = new Set(batchReadPaths(readItem));
+  const readPaths = new Set(batchReadPaths(
+    readItem,
+    workspace,
+    reproductionContract,
+  ));
   return [...manifests].some((manifest) => readPaths.has(manifest));
 }
 
@@ -2987,12 +3173,20 @@ function hasFatalShellDiagnostic(output, { allowInlineShellPrefix = false } = {}
   });
 }
 
-function isExecutableReproduction(item, contract) {
+function isExecutableReproduction(item, contract, workspace = null) {
   if (
     item?.type !== "command_execution" ||
-    item?.exit_code !== 0 ||
-    canonicalReproductionCommand(item.command) !== contract?.command
+    item?.exit_code !== 0
   ) {
+    return false;
+  }
+  if (
+    analyzeReadEvidenceCommand(item, workspace, contract)
+      ?.reproduction_observed === true
+  ) {
+    return true;
+  }
+  if (canonicalReproductionCommand(item.command, workspace) !== contract?.command) {
     return false;
   }
   try {
@@ -3003,8 +3197,8 @@ function isExecutableReproduction(item, contract) {
   }
 }
 
-function canonicalReproductionCommand(command) {
-  const text = unwrapShellInvocation(command);
+function canonicalReproductionCommand(command, workspace = null) {
+  const text = observedCommandText(command, workspace);
   if (text === null) return null;
   if (
     text.length === 0 ||
@@ -3235,10 +3429,11 @@ function parsePostChangeValidationCommand(
   command,
   expectedWorkflow,
   reproductionContract,
+  workspace = null,
 ) {
   const direct = expectedWorkflow === "build"
-    ? canonicalBuildValidationCommand(command)
-    : canonicalTestValidationCommand(command);
+    ? canonicalBuildValidationCommand(command, workspace)
+    : canonicalTestValidationCommand(command, workspace);
   if (direct !== null) {
     return {
       command: direct,
@@ -3254,7 +3449,7 @@ function parsePostChangeValidationCommand(
   ) {
     return null;
   }
-  const text = unwrapShellInvocation(command);
+  const text = observedCommandText(command, workspace);
   if (text === null) return null;
   const parts = text.split(" && ");
   if (parts.length !== 2 || parts[1] !== reproductionCommand) return null;
@@ -3268,11 +3463,17 @@ function parsePostChangeValidationCommand(
   };
 }
 
-function parsePostChangeValidation(item, expectedWorkflow, reproductionContract) {
+function parsePostChangeValidation(
+  item,
+  expectedWorkflow,
+  reproductionContract,
+  workspace = null,
+) {
   const validation = parsePostChangeValidationCommand(
     item?.command,
     expectedWorkflow,
     reproductionContract,
+    workspace,
   );
   if (
     validation === null ||
@@ -3298,6 +3499,18 @@ function resolvedReproductionOutputObserved(output, expected) {
   }
 }
 
+function resolvedReproductionOutputAfterBoundaryObserved(output, expected) {
+  const lines = String(output ?? "").split(/\r?\n/u);
+  const boundaryIndex = lines.findLastIndex(
+    (line) => line.trim() === REPRODUCTION_OUTPUT_BOUNDARY,
+  );
+  if (boundaryIndex < 0) return false;
+  return resolvedReproductionOutputObserved(
+    lines.slice(boundaryIndex + 1).join("\n"),
+    expected,
+  );
+}
+
 function reproductionOutputObserved(item, reproductionContract) {
   return reproductionContract?.resolved_output === undefined ||
     resolvedReproductionOutputObserved(
@@ -3306,11 +3519,15 @@ function reproductionOutputObserved(item, reproductionContract) {
     );
 }
 
-function parseStandalonePostChangeReproduction(item, reproductionContract) {
+function parseStandalonePostChangeReproduction(
+  item,
+  reproductionContract,
+  workspace = null,
+) {
   const reproductionCommand = reproductionContract?.command;
   if (
     typeof reproductionCommand !== "string" ||
-    canonicalReproductionCommand(item?.command) !== reproductionCommand
+    canonicalReproductionCommand(item?.command, workspace) !== reproductionCommand
   ) {
     return null;
   }
@@ -3323,20 +3540,22 @@ function parseStandalonePostChangeReproduction(item, reproductionContract) {
 function isSuccessfulStandalonePostChangeReproduction(
   item,
   reproductionContract,
+  workspace = null,
 ) {
   return item?.type === "command_execution" &&
     item?.status === "completed" &&
     item?.timed_out !== true &&
     item?.exit_code === 0 &&
-    parseStandalonePostChangeReproduction(item, reproductionContract)
+    parseStandalonePostChangeReproduction(item, reproductionContract, workspace)
       ?.output_observed === true;
 }
 
-function parseFailedDebugValidation(item, reproductionContract) {
+function parseFailedDebugValidation(item, reproductionContract, workspace = null) {
   const validation = parsePostChangeValidationCommand(
     item?.command,
     "debug",
     reproductionContract,
+    workspace,
   );
   if (
     validation === null ||
@@ -3357,11 +3576,16 @@ function parseFailedDebugValidation(item, reproductionContract) {
   return validation;
 }
 
-function isDebugValidationLauncherError(item, reproductionContract) {
+function isDebugValidationLauncherError(
+  item,
+  reproductionContract,
+  workspace = null,
+) {
   const validation = parsePostChangeValidationCommand(
     item?.command,
     "debug",
     reproductionContract,
+    workspace,
   );
   if (
     validation === null ||
@@ -3399,12 +3623,14 @@ function parsePostChangeValidationSequence(
   commands,
   expectedWorkflow,
   reproductionContract,
+  workspace = null,
 ) {
   if (commands.length === 1 && commands[0].event.item.exit_code === 0) {
     const validation = parsePostChangeValidation(
       commands[0].event.item,
       expectedWorkflow,
       reproductionContract,
+      workspace,
     );
     if (
       validation === null ||
@@ -3425,10 +3651,14 @@ function parsePostChangeValidationSequence(
   ) {
     return null;
   }
-  const testCommand = canonicalTestValidationCommand(commands[0].event.item.command);
+  const testCommand = canonicalTestValidationCommand(
+    commands[0].event.item.command,
+    workspace,
+  );
   const reproduction = parseStandalonePostChangeReproduction(
     commands[1].event.item,
     reproductionContract,
+    workspace,
   );
   if (testCommand === null || reproduction?.output_observed !== true) return null;
   return {
@@ -3445,6 +3675,7 @@ function parseSupportedPostChangeValidation(
   expectedWorkflow,
   reproductionContract,
   activities = commands,
+  workspace = null,
 ) {
   const reproductionCommand = reproductionContract?.command;
   const reproductionAttempts = [];
@@ -3454,6 +3685,7 @@ function parseSupportedPostChangeValidation(
       event.item.command,
       expectedWorkflow,
       reproductionContract,
+      workspace,
     );
     if (
       parsed?.reproduction_replayed &&
@@ -3472,11 +3704,12 @@ function parseSupportedPostChangeValidation(
       });
     } else if (
       expectedWorkflow === "debug" &&
-      canonicalReproductionCommand(event.item.command) === reproductionCommand
+      canonicalReproductionCommand(event.item.command, workspace) === reproductionCommand
     ) {
       const reproduction = parseStandalonePostChangeReproduction(
         event.item,
         reproductionContract,
+        workspace,
       );
       reproductionAttempts.push({
         exit_code: event.item.exit_code,
@@ -3521,10 +3754,11 @@ function parseSupportedPostChangeValidation(
       activities.filter(({ index }) => index <= latestReproduction.index),
       latestValidation.final_index,
       (item) =>
-        isProvenPostBoundaryRead(item) ||
+        isProvenPostBoundaryRead(item, workspace) ||
         isSuccessfulStandalonePostChangeReproduction(
           item,
           reproductionContract,
+          workspace,
         ),
     )
   ) {
@@ -3547,6 +3781,7 @@ function parseFirstSupportedPostChangeValidation(
   expectedWorkflow,
   reproductionContract,
   activities = commands,
+  workspace = null,
 ) {
   for (let length = 1; length <= commands.length; length += 1) {
     const validation = parseSupportedPostChangeValidation(
@@ -3554,6 +3789,7 @@ function parseFirstSupportedPostChangeValidation(
       expectedWorkflow,
       reproductionContract,
       activities,
+      workspace,
     );
     if (validation?.final_index === commands[length - 1].index) {
       return validation;
@@ -3562,8 +3798,8 @@ function parseFirstSupportedPostChangeValidation(
   return null;
 }
 
-function canonicalValidationCommand(command) {
-  const text = unwrapShellInvocation(command);
+function canonicalValidationCommand(command, workspace = null) {
+  const text = observedCommandText(command, workspace);
   if (text === null) return null;
   if (
     text.length === 0 ||
@@ -3576,14 +3812,14 @@ function canonicalValidationCommand(command) {
   return text;
 }
 
-function canonicalTestValidationCommand(command) {
-  const text = canonicalValidationCommand(command);
+function canonicalTestValidationCommand(command, workspace = null) {
+  const text = canonicalValidationCommand(command, workspace);
   if (text === null) return null;
   return isTestValidationInvocation(text) ? text : null;
 }
 
-function canonicalBuildValidationCommand(command) {
-  const text = unwrapShellInvocation(command);
+function canonicalBuildValidationCommand(command, workspace = null) {
+  const text = observedCommandText(command, workspace);
   if (text === null || text.length === 0 || text !== text.trim()) return null;
   const commands = text.split(" && ");
   if (
@@ -6692,6 +6928,7 @@ async function runSingleCase({
       expectedWorkflow: benchmarkCase.expected_workflow,
       reproductionContract: benchmarkCase.reproduction_contract,
       reviewerWorkspaceMutations: reviewerMutationTracker?.mutations(),
+      workspace,
     });
     const capacityRetryEligible = isRetryableCodexCapacityFailure({
       raw: agent.stdout,
