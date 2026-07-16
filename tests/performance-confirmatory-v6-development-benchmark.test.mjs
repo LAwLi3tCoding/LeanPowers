@@ -24,6 +24,30 @@ const preregistrationPath = new URL(
   "../docs/benchmarks/development-effects-performance-confirmatory-v6-preregistration-2026-07-16.md",
   import.meta.url,
 );
+const resultPath = new URL(
+  "../docs/benchmarks/development-effects-performance-confirmatory-v6-2026-07-16.md",
+  import.meta.url,
+);
+const auditPath = new URL(
+  "../docs/benchmarks/development-effects-performance-confirmatory-v6-audit-2026-07-16.md",
+  import.meta.url,
+);
+const historicalResultPaths = [
+  {
+    sha256: "b297b1428533826dd63802970e657349f6c42bab908b6e2c3a2d9360657dda08",
+    url: new URL(
+      "../docs/benchmarks/development-effects-performance-confirmatory-v4-2026-07-16.md",
+      import.meta.url,
+    ),
+  },
+  {
+    sha256: "d03c2dee03b97b7f5fc8ab601d6692b43da1dadba0c4da1a12c57bc9b1d38eda",
+    url: new URL(
+      "../docs/benchmarks/development-effects-performance-confirmatory-v5-2026-07-16.md",
+      import.meta.url,
+    ),
+  },
+];
 const priorSuitePaths = [
   "../evals/development-effects/pilot-suite.json",
   "../evals/development-effects/heldout-suite.json",
@@ -439,4 +463,53 @@ test("performance v6 inputs and preregistration contain only public relative dat
       assert.equal(declaredPath.includes(".."), false, declaredPath);
     }
   }
+});
+
+test("performance v6 publication is sanitized, exact, and preserves frozen history", async () => {
+  const [result, audit, ...historicalResults] = await Promise.all([
+    readFile(resultPath, "utf8"),
+    readFile(auditPath, "utf8"),
+    ...historicalResultPaths.map(({ url }) => readFile(url, "utf8")),
+  ]);
+  for (const publication of [result, audit]) {
+    assert.doesNotMatch(
+      publication,
+      /(?:file:\/\/|\/Users\/|\/home\/[^/\s]+\/|\/private\/(?:tmp|var)\/|[A-Za-z]:\\Users\\)/u,
+    );
+  }
+  assert.equal(
+    createHash("sha256").update(result).digest("hex"),
+    "959c9f9f3889efc90cd3fc129b070caed266e373e082f57c13ce6104ba8c2a94",
+  );
+  assert.equal(
+    createHash("sha256").update(audit).digest("hex"),
+    "25b336b30397bd6d214de9e3e0c027de041f1941136b25944cad0c1a3e03eff7",
+  );
+  historicalResults.forEach((source, index) => {
+    assert.equal(
+      createHash("sha256").update(source).digest("hex"),
+      historicalResultPaths[index].sha256,
+    );
+  });
+
+  assert.match(result, /Status: \*\*FAIL\*\*/u);
+  assert.match(result, /Reasons: lean-conformance, task-outcome, token-target\./u);
+  assert.match(result, /superpowers-6\.1\.1 \| 4\/10/u);
+  assert.match(result, /leanpowers-0\.2\.0 \| 4\/10/u);
+  assert.match(result, /both_pass \| 4/u);
+  assert.match(result, /superpowers_pass_lean_fail \| 0/u);
+  assert.match(result, /lean_pass_superpowers_fail \| 0/u);
+  assert.match(result, /both_fail \| 6/u);
+  assert.match(result, /75\.15184646891723%/u);
+  assert.match(result, /All matched runs \| 10\/10[\s\S]{0,220}\| 4\.6%/u);
+  assert.match(result, /upstream baseline and inspiration for LeanPowers/iu);
+
+  assert.match(audit, /LeanPowers conformance failures: `9\/10`/u);
+  assert.match(audit, /The preregistered primary population is therefore `0\/10`/u);
+  assert.match(audit, /`92\.9869680816793%`/u);
+  assert.match(audit, /supplied `91\.3%` of the total Token saving/u);
+  assert.match(audit, /zero model calls/u);
+  assert.match(audit, /V6 is now frozen calibration evidence/u);
+  assert.match(audit, /will not be rerun, rescored, or tuned/u);
+  assert.match(audit, /upstream reference and principal engineering foundation/iu);
 });
