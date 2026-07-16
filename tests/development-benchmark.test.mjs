@@ -1436,6 +1436,12 @@ test("artifact regression gate schema fails closed", async () => {
       ],
       [
         (candidate) => {
+          candidate.quality_policy = "unregistered-quality-policy";
+        },
+        /quality_policy must equal lean-all-pass-reference-diagnostic-v1/u,
+      ],
+      [
+        (candidate) => {
           candidate.token_target = {
             metric: "aggregate-model-token-share",
             population: "all-matched-pairs",

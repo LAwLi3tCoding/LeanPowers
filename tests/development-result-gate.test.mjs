@@ -281,6 +281,80 @@ test("development performance gate passes only the complete quality-first target
   });
 });
 
+test("candidate quality policy keeps Lean correctness hard and reference outcomes diagnostic", () => {
+  const suite = structuredClone(frozenSuite);
+  suite.quality_policy = "lean-all-pass-reference-diagnostic-v1";
+  suite.freeze_contract.quality_policy = suite.quality_policy;
+
+  const result = passingResult();
+  result.quality_policy = suite.quality_policy;
+  const superpowers = result.runs.find(
+    ({ workflow }) => workflow === "superpowers-6.1.1",
+  );
+  superpowers.verifier.hidden.exit_code = 1;
+  superpowers.outcome = evaluateRunOutcome(superpowers);
+
+  const accepted = evaluateDevelopmentResultGate(result, { suite });
+  assert.equal(accepted.status, "PASS", JSON.stringify(accepted));
+  assert.deepEqual(accepted.reasons, []);
+  const acceptedReport = renderDevelopmentReport(result, {
+    adjudication: adjudicateDevelopmentResult(result),
+    gateVerdict: accepted,
+  });
+  assert.match(
+    acceptedReport,
+    /Lean Task PASS \+ Lean quality-bearing conformance \+ Superpowers activation \(quality-policy population\) \| 6\/6/u,
+  );
+
+  const referenceOutcomeOnly = structuredClone(result);
+  const incompleteReference = referenceOutcomeOnly.runs.find(
+    ({ workflow }) => workflow === "superpowers-6.1.1",
+  );
+  incompleteReference.agent_completed = false;
+  incompleteReference.head_unchanged = false;
+  incompleteReference.changes.violations = ["reference scope violation"];
+  incompleteReference.outcome = evaluateRunOutcome(incompleteReference);
+  const referenceOutcomeVerdict = evaluateDevelopmentResultGate(
+    referenceOutcomeOnly,
+    { suite },
+  );
+  assert.equal(
+    referenceOutcomeVerdict.status,
+    "PASS",
+    JSON.stringify(referenceOutcomeVerdict),
+  );
+
+  const leanFailure = structuredClone(result);
+  const lean = leanFailure.runs.find(
+    ({ workflow }) => workflow === "leanpowers-0.2.0",
+  );
+  lean.verifier.hidden.exit_code = 1;
+  lean.outcome = evaluateRunOutcome(lean);
+  const rejected = evaluateDevelopmentResultGate(leanFailure, { suite });
+  assert.equal(rejected.status, "FAIL");
+  assert.ok(rejected.reasons.includes("lean-task-outcome"), JSON.stringify(rejected));
+
+  const leanScopeFailure = structuredClone(result);
+  const scopedLean = leanScopeFailure.runs.find(
+    ({ workflow }) => workflow === "leanpowers-0.2.0",
+  );
+  scopedLean.changes.violations = ["candidate scope violation"];
+  scopedLean.outcome = evaluateRunOutcome(scopedLean);
+  const scopeVerdict = evaluateDevelopmentResultGate(leanScopeFailure, { suite });
+  assert.equal(scopeVerdict.status, "FAIL");
+  assert.ok(scopeVerdict.reasons.includes("scope"), JSON.stringify(scopeVerdict));
+
+  const legacy = passingResult();
+  const legacySuperpowers = legacy.runs.find(
+    ({ workflow }) => workflow === "superpowers-6.1.1",
+  );
+  legacySuperpowers.verifier.hidden.exit_code = 1;
+  legacySuperpowers.outcome = evaluateRunOutcome(legacySuperpowers);
+  const legacyVerdict = evaluateDevelopmentResultGate(legacy);
+  assert.equal(legacyVerdict.status, "FAIL");
+  assert.ok(legacyVerdict.reasons.includes("task-outcome"));
+});
+
 test("gate requires complete positive per-run token telemetry and consistent arithmetic", () => {
   for (const mutate of [
     (value) => { delete value.runs[0].telemetry.tokens; },

@@ -4,6 +4,7 @@ import {
   adjudicateDevelopmentResult,
   caseSnapshotContract,
   hasDevelopmentInfrastructureFailure,
+  LEAN_CANDIDATE_QUALITY_POLICY,
   renderDevelopmentReport,
   validDevelopmentTokenTelemetry,
   validDevelopmentWallTelemetry,
@@ -95,6 +96,7 @@ export function adjudicateDevelopmentResultGate(result, { suite } = {}) {
   if (object.suite_sha256 !== contract.suite_sha256) reasons.add("suite-sha");
   if (object.evidence_level !== contract.evidence_level) reasons.add("evidence-level");
   if (object.activation_mode !== contract.activation_mode) reasons.add("activation-mode");
+  if (object.quality_policy !== contract.quality_policy) reasons.add("quality-policy");
   if (object.completion !== "complete") reasons.add("completion");
   if (object.frozen_run_contract_verified !== true) reasons.add("frozen-contract");
   if (object.confirmatory_eligible !== true) reasons.add("confirmatory-eligibility");
@@ -126,10 +128,14 @@ export function adjudicateDevelopmentResultGate(result, { suite } = {}) {
   })) {
     reasons.add("run-case-snapshot");
   }
+  const candidateOnlyQuality =
+    contract.quality_policy === LEAN_CANDIDATE_QUALITY_POLICY;
   if (runs.some((run) =>
-    run?.agent_completed !== true ||
-    run?.head_unchanged !== true ||
-    run?.verifier_workspace_unchanged !== true
+    run?.verifier_workspace_unchanged !== true ||
+    (
+      (run?.agent_completed !== true || run?.head_unchanged !== true) &&
+      (!candidateOnlyQuality || run?.workflow === LEAN_WORKFLOW)
+    )
   )) {
     reasons.add("run-integrity");
   }
@@ -154,8 +160,18 @@ export function adjudicateDevelopmentResultGate(result, { suite } = {}) {
     if (!isDeepStrictEqual(run?.outcome, recomputedOutcome)) {
       reasons.add("outcome-consistency");
     }
-    if (run?.outcome?.status !== "PASS" || recomputedOutcome.status !== "PASS") {
-      reasons.add("task-outcome");
+    const taskPassRequired =
+      contract.quality_policy !== LEAN_CANDIDATE_QUALITY_POLICY ||
+      run?.workflow === LEAN_WORKFLOW;
+    if (
+      taskPassRequired &&
+      (run?.outcome?.status !== "PASS" || recomputedOutcome.status !== "PASS")
+    ) {
+      reasons.add(
+        contract.quality_policy === LEAN_CANDIDATE_QUALITY_POLICY
+          ? "lean-task-outcome"
+          : "task-outcome",
+      );
     }
     if (run?.workflow === LEAN_WORKFLOW) {
       const recomputedConformance = adjudicatedRun?.workflow_conformance;
@@ -191,7 +207,11 @@ export function adjudicateDevelopmentResultGate(result, { suite } = {}) {
     reasons.add("superpowers-activation");
   }
   if (runs.some((run) =>
-    !Array.isArray(run?.changes?.violations) || run.changes.violations.length > 0
+    !Array.isArray(run?.changes?.violations) ||
+    (
+      run.changes.violations.length > 0 &&
+      (!candidateOnlyQuality || run?.workflow === LEAN_WORKFLOW)
+    )
   )) {
     reasons.add("scope");
   }
@@ -331,6 +351,7 @@ function normalizeSuiteContract(source, reasons) {
     repetitions: source?.repetitions,
     workflow_order: source?.workflow_order,
     case_order: source?.case_order,
+    quality_policy: source?.quality_policy,
     token_target: source?.token_target,
     freeze_contract: source?.freeze_contract ?? {},
     cases,
@@ -389,6 +410,10 @@ function normalizeSuiteContract(source, reasons) {
       population: "all-matched-pairs",
       max_share_pct: TARGET_TOKEN_SHARE_PCT,
     }) ||
+    ![undefined, LEAN_CANDIDATE_QUALITY_POLICY].includes(
+      contract.quality_policy,
+    ) ||
+    contract.freeze_contract?.quality_policy !== contract.quality_policy ||
     !SHA1.test(String(contract.freeze_contract?.superpowers_revision ?? "")) ||
     typeof contract.freeze_contract?.agent_read_isolation !== "string" ||
     !pinnedRevisionContractValid

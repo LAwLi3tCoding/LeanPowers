@@ -46,6 +46,8 @@ const DEVELOPMENT_EVIDENCE_LEVELS = new Set([
   "paired-development-heldout",
   "paired-development-pilot",
 ]);
+export const LEAN_CANDIDATE_QUALITY_POLICY =
+  "lean-all-pass-reference-diagnostic-v1";
 const CODEX_CAPACITY_ERROR_MESSAGE =
   "Selected model is at capacity. Please try a different model.";
 const LOWER_KEBAB_CASE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
@@ -134,6 +136,14 @@ export async function loadDevelopmentSuite(input) {
   if (!DEVELOPMENT_EVIDENCE_LEVELS.has(suite.evidence_level)) {
     errors.push(
       "evidence_level must equal paired-development-pilot or paired-development-heldout",
+    );
+  }
+  if (
+    suite.quality_policy !== undefined &&
+    suite.quality_policy !== LEAN_CANDIDATE_QUALITY_POLICY
+  ) {
+    errors.push(
+      `quality_policy must equal ${LEAN_CANDIDATE_QUALITY_POLICY} when provided`,
     );
   }
   if (!Number.isInteger(suite.repetitions) || suite.repetitions < 1) {
@@ -502,6 +512,9 @@ export async function loadDevelopmentSuite(input) {
         ...(suite.token_target === undefined
           ? {}
           : { token_target: suite.token_target }),
+        ...(suite.quality_policy === undefined
+          ? {}
+          : { quality_policy: suite.quality_policy }),
       };
       const pinnedRevisions = [
         suite.freeze_contract?.leanpowers_revision,
@@ -6218,8 +6231,13 @@ function pairTokenDiagnostics(runs) {
 function observedDevelopmentDecision(result, adjudication) {
   const reasons = [];
   const advisories = [];
-  if (adjudication.runs.some((run) => run?.outcome?.status !== "PASS")) {
-    reasons.push("task-outcome");
+  const leanCandidatePolicy =
+    result?.quality_policy === LEAN_CANDIDATE_QUALITY_POLICY;
+  if (adjudication.runs.some((run) =>
+    run?.outcome?.status !== "PASS" &&
+    (!leanCandidatePolicy || run?.workflow === "leanpowers-0.2.0")
+  )) {
+    reasons.push(leanCandidatePolicy ? "lean-task-outcome" : "task-outcome");
   }
   if (adjudication.runs.some((run) =>
     run?.workflow === "leanpowers-0.2.0" &&
@@ -6287,6 +6305,8 @@ export function renderDevelopmentReport(
   gateVerdict ??= observedDevelopmentDecision(result, adjudication);
   const tokenTarget = result.token_target ?? defaultDevelopmentTokenTarget();
   const tokenTargetResult = adjudication.token_target_result;
+  const leanCandidatePolicy =
+    result.quality_policy === LEAN_CANDIDATE_QUALITY_POLICY;
   const pairValidity = adjudication.pair_validity;
   const pairTokenSources = adjudication.pair_token_diagnostics;
   const performanceGoalAssessment =
@@ -6582,6 +6602,12 @@ export function renderDevelopmentReport(
     ...manifestRows,
     "",
     `Activation: ${result.activation_mode}. Each run explicitly invokes its installed top-level workflow entrypoint and must name it in the first agent progress message before the identical engineering task.`,
+    ...(leanCandidatePolicy
+      ? [
+          "",
+          "Quality policy: every LeanPowers task outcome and LeanPowers quality-bearing conformance check must pass; every Superpowers run must activate and is evaluated with the identical acceptance contract, while its task outcome remains a reported reference diagnostic rather than a LeanPowers goal gate.",
+        ]
+      : []),
     "",
     "Superpowers 6.1.1 is the upstream baseline and inspiration for LeanPowers. This report measures a bounded tradeoff under the listed conditions; it is not a winner ranking.",
     "",
@@ -6670,12 +6696,35 @@ export function renderDevelopmentReport(
     "Population | Eligible/required pairs | Aggregate Lean token share | Median model-token reduction | Median Lean token share | Max Lean token share | Lean ≤60% pairs | Median fresh-token reduction | Median wall reduction | Median tool-call reduction | Median workflow-read reduction",
     "--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---:",
     pairedRow(
-      "Both Task PASS + Lean quality-bearing conformance + Superpowers activation (primary)",
-      paired.conformant_pass_pairs,
+      leanCandidatePolicy
+        ? "Lean Task PASS + Lean quality-bearing conformance + Superpowers activation (quality-policy population)"
+        : "Both Task PASS + Lean quality-bearing conformance + Superpowers activation (primary)",
+      leanCandidatePolicy
+        ? paired.candidate_quality_pairs
+        : paired.conformant_pass_pairs,
     ),
-    pairedRow("Primary: lean", paired.by_risk.lean.conformant_pass_pairs),
-    pairedRow("Primary: standard", paired.by_risk.standard.conformant_pass_pairs),
-    pairedRow("Primary: strict", paired.by_risk.strict.conformant_pass_pairs),
+    pairedRow(
+      leanCandidatePolicy ? "Quality-policy population: lean risk" : "Primary: lean",
+      leanCandidatePolicy
+        ? paired.by_risk.lean.candidate_quality_pairs
+        : paired.by_risk.lean.conformant_pass_pairs,
+    ),
+    pairedRow(
+      leanCandidatePolicy
+        ? "Quality-policy population: standard risk"
+        : "Primary: standard",
+      leanCandidatePolicy
+        ? paired.by_risk.standard.candidate_quality_pairs
+        : paired.by_risk.standard.conformant_pass_pairs,
+    ),
+    pairedRow(
+      leanCandidatePolicy
+        ? "Quality-policy population: strict risk"
+        : "Primary: strict",
+      leanCandidatePolicy
+        ? paired.by_risk.strict.candidate_quality_pairs
+        : paired.by_risk.strict.conformant_pass_pairs,
+    ),
     pairedRow("Both workflows PASS", paired.both_pass_pairs),
     pairedRow("All matched runs", paired.all_pairs),
     "",
@@ -7218,6 +7267,9 @@ export function makePilotResult(suite, runtime, runs, repetitions, selectedCases
     runs,
     aggregate: aggregateRuns(runs),
     paired,
+    ...(suite.quality_policy === undefined
+      ? {}
+      : { quality_policy: suite.quality_policy }),
     token_target: tokenTarget,
     token_target_result: assessDevelopmentTokenTarget(
       tokenTarget,
@@ -7334,6 +7386,11 @@ function aggregatePairedRuns(
       (workflow) => group[workflow].workflow_conformance?.status === "PASS",
     )
   );
+  const candidateQuality = pairs.filter((group) =>
+    group["leanpowers-0.2.0"].outcome.status === "PASS" &&
+    group["leanpowers-0.2.0"].workflow_conformance?.status === "PASS" &&
+    group["superpowers-6.1.1"].activation_reported === true
+  );
   const byRisk = Object.fromEntries(["lean", "standard", "strict"].map((risk) => {
     const required = matchedPairs.filter(
       (pair) => pair["leanpowers-0.2.0"].risk_level === risk,
@@ -7353,6 +7410,11 @@ function aggregatePairedRuns(
           pair[workflow].workflow_conformance?.status === "PASS"
         )
       ), { matrixComplete, requiredPairCount: required }),
+      candidate_quality_pairs: summarizePairs(selected.filter((pair) =>
+        pair["leanpowers-0.2.0"].outcome.status === "PASS" &&
+        pair["leanpowers-0.2.0"].workflow_conformance?.status === "PASS" &&
+        pair["superpowers-6.1.1"].activation_reported === true
+      ), { matrixComplete, requiredPairCount: required }),
     }];
   }));
   const requiredPairCount = matchedPairs.length;
@@ -7366,6 +7428,10 @@ function aggregatePairedRuns(
       requiredPairCount,
     }),
     conformant_pass_pairs: summarizePairs(conformantPass, {
+      matrixComplete,
+      requiredPairCount,
+    }),
+    candidate_quality_pairs: summarizePairs(candidateQuality, {
       matrixComplete,
       requiredPairCount,
     }),
