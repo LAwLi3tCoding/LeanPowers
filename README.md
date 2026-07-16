@@ -169,7 +169,7 @@ Evidence is keyed to the relevant revision and scope. Unchanged evidence may be 
 | Optional reviewer/verifier agents | Runtime-native task prompts | Packaged agents | Single-agent execution; strict review must come from an external perspective |
 | Core quality gates | Yes | Yes | Yes |
 
-Codex retains zero startup injection and discovers the 499-word `route` Skill through native metadata. Claude Code receives one 111-word, read-only routing hint that is restored after startup, clear, or compaction; it does not inspect `.leanpowers/`, scan or write the repository, access the network, or dispatch agents. The six engineering workflows require no Node.js runtime. The optional learning helper requires Node.js 20+ only when learning is explicitly enabled.
+Codex retains zero startup injection and discovers the 500-word `route` Skill through native metadata. Claude Code receives one 111-word, read-only routing hint that is restored after startup, clear, or compaction; it does not inspect `.leanpowers/`, scan or write the repository, access the network, or dispatch agents. The six engineering workflows require no Node.js runtime. The optional learning helper requires Node.js 20+ only when learning is explicitly enabled.
 
 ## Privacy and security
 
@@ -183,7 +183,7 @@ Agent instructions are not a security boundary. Review commands and diffs before
 
 ## Compared with Superpowers 6.1.1
 
-LeanPowers carries forward Superpowers' evidence-first engineering principles while consolidating 13 engineering-workflow concerns into six risk-activated workflows. The six engineering `SKILL.md` files total 3,039 words—83.6% fewer than the 14-file Superpowers 6.1.1 comparison set. Adding `route` (499 words) and `adapt` (329 words) brings all eight LeanPowers Skills to 3,867 words, still 79.1% smaller.
+LeanPowers carries forward Superpowers' evidence-first engineering principles while consolidating 13 engineering-workflow concerns into six risk-activated workflows. The six engineering `SKILL.md` files total 3,228 words—82.6% fewer than the 14-file Superpowers 6.1.1 comparison set. Adding `route` (500 words) and `adapt` (329 words) brings all eight LeanPowers Skills to 4,057 words, still 78.1% smaller.
 
 This is a lineage-and-tradeoff comparison, not a winner ranking. Superpowers remains the upstream inspiration and a comprehensive workflow reference; LeanPowers tests whether the outcome-critical safeguards can be retained with a smaller, risk-adaptive control surface. The retained safeguards, different optimization choices, evidence limits, and balanced conclusion are documented in [docs/comparison-superpowers.md](docs/comparison-superpowers.md). If you are migrating, read [docs/migration.md](docs/migration.md)—do not enable both systems as automatic workflow routers in the same session.
 

@@ -512,10 +512,12 @@ test("skill frontmatter is portable and descriptions are discovery-focused", asy
 
 test("skill bodies stay within the LeanPowers context budget", async () => {
   let engineeringWords = 0;
+  let totalWords = 0;
 
   for (const name of expectedSkills) {
     const content = await readFile(path.join(skillsRoot, name, "SKILL.md"), "utf8");
     const words = wordCount(content);
+    totalWords += words;
     if (name === "adapt") {
       assert.ok(words < 400, `adapt has ${words} words`);
     } else if (name === "route") {
@@ -528,6 +530,51 @@ test("skill bodies stay within the LeanPowers context budget", async () => {
   }
 
   assert.ok(engineeringWords <= 5000, `engineering skills contain ${engineeringWords} words`);
+  assert.ok(totalWords <= 4067, `all skills contain ${totalWords} words`);
+});
+
+test("core workflows absorb selected engineering lenses without adding stages", async () => {
+  const build = await readFile(path.join(skillsRoot, "build", "SKILL.md"), "utf8");
+  const debug = await readFile(path.join(skillsRoot, "debug", "SKILL.md"), "utf8");
+  const shape = await readFile(path.join(skillsRoot, "shape", "SKILL.md"), "utf8");
+  const review = await readFile(path.join(skillsRoot, "review", "SKILL.md"), "utf8");
+
+  assert.match(build, /stable observable seam/i);
+  assert.match(build, /expected values?[\s\S]{0,120}independent source of truth/i);
+  assert.match(build, /vertical slice/i);
+  assert.doesNotMatch(build, /confirm (?:the )?seam with the user|ask the user .*seam/i);
+
+  assert.match(debug, /tight, red-capable feedback loop/i);
+  assert.match(debug, /minimi[sz]e/i);
+  assert.match(debug, /non-deterministic[\s\S]{0,120}reproduction rate/i);
+  assert.match(debug, /tagged instrumentation[\s\S]{0,120}removed/i);
+
+  assert.match(shape, /full shaping for architecture[\s\S]{0,100}three seam checks/i);
+  assert.match(shape, /deletion test/i);
+  assert.match(shape, /interface is the test surface/i);
+  assert.match(shape, /one adapter is hypothetical; two adapters are real/i);
+  assert.doesNotMatch(shape, /light shaping[\s\S]{0,120}deletion test/i);
+
+  assert.match(review, /contract fitness/i);
+  assert.match(review, /engineering fitness/i);
+  assert.match(review, /without splitting reviewers/i);
+  assert.match(review, /pass requires both/i);
+});
+
+test("shape supports explicit grilling without making it the default ceremony", async () => {
+  const shape = await readFile(path.join(skillsRoot, "shape", "SKILL.md"), "utf8");
+
+  assert.match(shape, /explicit grill\/stress-test request/i);
+  assert.match(shape, /only material decision dependencies/i);
+  assert.match(shape, /one question per turn/i);
+  assert.match(shape, /recommended answer and main tradeoff/i);
+  assert.match(shape, /incorporate the reply before continuing/i);
+  assert.match(shape, /instead of asking repository-answerable questions/i);
+  for (const boundary of ["scope", "acceptance", "architecture", "risk", "authority"]) {
+    assert.match(shape, new RegExp(`remaining branches[^.]+${boundary}`, "i"));
+  }
+  assert.match(shape, /default shaping[\s\S]{0,100}one consolidated question/i);
+  assert.doesNotMatch(shape, /(?:always|default(?: shaping)?)[^\n.]{0,80}(?:grill|stress-test)/i);
 });
 
 test("adapt triggers on explicit downstream feedback but not educational learning", async () => {

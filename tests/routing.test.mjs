@@ -103,6 +103,11 @@ test("initial workflow selection covers every workflow owner", () => {
     selectInitialWorkflow({ causeKnown: true, deliveryOnly: false, needsShaping: false }),
     "build",
   );
+  assert.equal(selectInitialWorkflow({ grillingRequested: true }), "shape");
+  assert.equal(
+    selectInitialWorkflow({ grillingRequested: false, needsShaping: false }),
+    "build",
+  );
   assert.equal(
     selectInitialWorkflow({ causeKnown: true, diagnosisRequested: true }),
     "debug",

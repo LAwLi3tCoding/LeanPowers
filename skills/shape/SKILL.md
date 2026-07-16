@@ -16,7 +16,9 @@ If project learning is enabled, use `adapt` to query once at entry under the [le
 1. Inspect repository instructions, current implementation, tests, and recent history before asking repository-answerable questions.
 2. State the desired outcome, declared scope, constraints, acceptance evidence, and highest applicable risk level.
 3. Use `light` shaping for bounded standard work. Use `full` shaping only when architecture, public contracts, irreversible choices, or strict risk require it.
-4. Make low-risk reversible assumptions explicit and continue. Ask one consolidated question only when missing information materially changes the result or authority.
+   Full shaping for architecture applies only three seam checks: deletion test; interface is the test surface; one adapter is hypothetical; two adapters are real. Do not apply this gate to light shaping.
+4. Make low-risk reversible assumptions explicit and continue. In default shaping, ask one consolidated question only when missing information materially changes the result or authority.
+   On an explicit grill/stress-test request, walk only material decision dependencies. Ask one question per turn with a recommended answer and main tradeoff; incorporate the reply before continuing. Inspect the repository instead of asking repository-answerable questions. Stop when remaining branches cannot change scope, acceptance, architecture, risk, or authority.
 5. Split work into one to five independently verifiable delivery slices. Split by outcome and interface, never by file or arbitrary time box.
 
 ## Output

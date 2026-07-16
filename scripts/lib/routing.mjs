@@ -71,6 +71,7 @@ export function selectInitialWorkflow({
   diagnosisRequested = false,
   deliveryOnly = false,
   deliveryRequested = false,
+  grillingRequested = false,
   needsShaping = false,
   reviewRequested = false,
   risk = "standard",
@@ -100,7 +101,7 @@ export function selectInitialWorkflow({
   if (reviewRequested) {
     return "review";
   }
-  if (needsShaping) {
+  if (needsShaping || grillingRequested) {
     return "shape";
   }
   if (verificationRequested) {
