@@ -64,30 +64,44 @@ test("adaptive learning preview identity and documentation are explicit and opt-
   assert.match(comparison, /six engineering workflows.*two.*control skill/i);
 });
 
-test("product READMEs foreground adaptive flow and keep benchmark history in docs", async () => {
+test("product READMEs lead with value and installation while keeping evidence honest", async () => {
   const readme = await readFile(new URL("README.md", projectRoot), "utf8");
   const chinese = await readFile(new URL("README.zh-CN.md", projectRoot), "utf8");
 
   assert.ok(
-    readme.indexOf("## Learn and evolve with your project") <
-      readme.indexOf("## Install from GitHub"),
+    readme.indexOf("## Install in 60 seconds") <
+      readme.indexOf("## Learn and evolve with your project"),
   );
   assert.ok(
-    chinese.indexOf("## 随项目学习和进化") <
-      chinese.indexOf("## 从 GitHub 直接安装"),
+    chinese.indexOf("## 60 秒安装") <
+      chinese.indexOf("## 随项目学习和进化"),
   );
+  assert.match(readme, /actions\/workflows\/ci\.yml\/badge\.svg/u);
+  assert.match(chinese, /actions\/workflows\/ci\.yml\/badge\.svg/u);
+  assert.match(readme, /workflow microkernel/i);
+  assert.match(chinese, /工作流微内核/u);
+  assert.match(readme, /## How LeanPowers works/u);
+  assert.match(chinese, /## LeanPowers 如何工作/u);
+  assert.match(readme, /## Who LeanPowers is for/u);
+  assert.match(chinese, /## LeanPowers 适合谁/u);
+  assert.match(readme, /## Project map/u);
+  assert.match(chinese, /## 项目地图/u);
+  assert.match(readme, /\[Star LeanPowers\]\(https:\/\/github\.com\/LAwLi3tCoding\/LeanPowers\)/u);
+  assert.match(chinese, /\[为 LeanPowers 点 Star\]\(https:\/\/github\.com\/LAwLi3tCoding\/LeanPowers\)/u);
+  for (const document of [readme, chinese]) {
+    assert.match(document, /codex plugin marketplace add LAwLi3tCoding\/LeanPowers/u);
+    assert.match(document, /claude plugin marketplace add LAwLi3tCoding\/LeanPowers/u);
+  }
   assert.match(readme, /up to three lessons matched by workflow, path, and tags/i);
   assert.match(chinese, /按工作流、路径和标签取回最多三条经验/u);
-  assert.match(readme, /## A dynamic workflow, not a fixed pipeline/i);
-  assert.match(chinese, /## 动态流程，不是固定流水线/u);
   assert.match(readme, /There is no background activity, network access, telemetry/i);
   assert.match(chinese, /没有后台活动、网络访问、遥测/u);
 
   const benchmark = readme.match(
-    /## Evidence and benchmark(?<body>[\s\S]*?)## Development/u,
+    /## Evidence and benchmark(?<body>[\s\S]*?)## Project map/u,
   )?.groups?.body;
   const benchmarkZh = chinese.match(
-    /## 证据与基准(?<body>[\s\S]*?)## 开发/u,
+    /## 证据与基准(?<body>[\s\S]*?)## 项目地图/u,
   )?.groups?.body;
   assert.ok(benchmark);
   assert.ok(benchmarkZh);
@@ -128,10 +142,10 @@ test("published instruction counts match the canonical source exactly", async ()
   assert.deepEqual(
     { engineeringWords, routeWords, adaptWords, totalWords, charterWords },
     {
-      engineeringWords: 3228,
+      engineeringWords: 3238,
       routeWords: 500,
       adaptWords: 329,
-      totalWords: 4057,
+      totalWords: 4067,
       charterWords: 111,
     },
   );
@@ -142,7 +156,7 @@ test("published instruction counts match the canonical source exactly", async ()
     "docs/comparison-superpowers.zh-CN.md",
   ]) {
     const document = await readFile(new URL(relativePath, projectRoot), "utf8");
-    for (const expected of ["3,228", "500", "329", "4,057", "82.6%", "78.1%"]) {
+    for (const expected of ["3,238", "500", "329", "4,067", "82.5%", "78.0%"]) {
       assert.ok(document.includes(expected), `${relativePath} missing ${expected}`);
     }
   }

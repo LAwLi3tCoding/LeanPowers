@@ -15,7 +15,7 @@ If project learning is enabled, use `adapt` to query once at entry under the [le
 
 ## Review procedure
 
-Keep two lenses explicit without splitting reviewers: contract fitness checks requested behavior and scope; engineering fitness checks repository standards, safety, and maintainability. A pass requires both.
+Without splitting reviewers, contract fitness checks requested scope, speculative features, single-use abstractions, and unrequested flexibility; engineering fitness checks standards, safety, maintainability. A pass requires both.
 
 1. Establish base, scope, risk, and full original contract. Extract every literal `must`, `only`, `exact`, `preserve`, and `reject` clause.
 2. Read current changed paths and surrounding code. Map each clause to positive and negative boundary evidence; keep qualifier scopes separate.

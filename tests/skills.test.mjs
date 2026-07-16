@@ -561,6 +561,29 @@ test("core workflows absorb selected engineering lenses without adding stages", 
   assert.match(review, /pass requires both/i);
 });
 
+test("build and review reject speculative work without adding a workflow", async () => {
+  const build = await readFile(path.join(skillsRoot, "build", "SKILL.md"), "utf8");
+  const review = await readFile(path.join(skillsRoot, "review", "SKILL.md"), "utf8");
+
+  assert.match(build, /every changed line[\s\S]{0,80}(?:serve|trace)[\s\S]{0,40}(?:request|requested outcome)/i);
+  for (const boundary of [
+    /speculative features/i,
+    /single-use abstractions/i,
+    /unrequested flexibility/i,
+    /impossible-case handling/i,
+    /slice-created orphans/i,
+  ]) {
+    assert.match(build, boundary);
+  }
+  for (const boundary of [
+    /speculative features/i,
+    /single-use abstractions/i,
+    /unrequested flexibility/i,
+  ]) {
+    assert.match(review, boundary);
+  }
+});
+
 test("shape supports explicit grilling without making it the default ceremony", async () => {
   const shape = await readFile(path.join(skillsRoot, "shape", "SKILL.md"), "utf8");
 

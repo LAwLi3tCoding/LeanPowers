@@ -53,23 +53,23 @@ find skills -mindepth 2 -maxdepth 2 -name SKILL.md -exec wc -w {} +
 
 # Inside LeanPowers 0.2.0
 find skills -mindepth 2 -maxdepth 2 -name SKILL.md -exec wc -w {} +
-# six engineering workflows: 3,228 words
+# six engineering workflows: 3,238 words
 # route control Skill: 500 words
 # adapt control Skill: 329 words
-# all eight Skill files: 4,057 words
+# all eight Skill files: 4,067 words
 
 wc -w adapters/claude/session-start
 # 111 words
 ```
 
-The six-workflow engineering `SKILL.md` files total 3,228 words, 82.6% less than the 18,516-word, 14-file Superpowers comparison set. Including the 500-word `route` and 329-word `adapt` control Skills, the eight LeanPowers `SKILL.md` files total 4,057 words, 78.1% less than the baseline set. The baseline total deliberately includes `writing-skills`, even though LeanPowers keeps that concern external. These figures measure primary `SKILL.md` words, not conditionally referenced policies, supporting files, actual model tokens, latency, or task quality.
+The six-workflow engineering `SKILL.md` files total 3,238 words, 82.5% less than the 18,516-word, 14-file Superpowers comparison set. Including the 500-word `route` and 329-word `adapt` control Skills, the eight LeanPowers `SKILL.md` files total 4,067 words, 78.0% less than the baseline set. The baseline total deliberately includes `writing-skills`, even though LeanPowers keeps that concern external. These figures measure primary `SKILL.md` words, not conditionally referenced policies, supporting files, actual model tokens, latency, or task quality.
 
 ## Side-by-side design choices
 
 | Dimension | Superpowers 6.1.1 | LeanPowers 0.2.0 | What remains protected |
 | --- | --- | --- | --- |
 | User-facing core | 14 skills | 6 engineering workflows + 2 control Skills | Full path from requirements to delivery; routing and learning stay outside the chain |
-| Primary skill text | 18,516 words | 3,228 engineering words; 4,057 total | Strict-only review policy loads after strict validation |
+| Primary skill text | 18,516 words | 3,238 engineering words; 4,067 total | Strict-only review policy loads after strict validation |
 | Workflow selection | Check relevant skills before any response or action | `route` selects and runs exactly one lowest-safe workflow when no owner is already clear | Explicit routing still upgrades on risk |
 | Creative work | `brainstorming` hard-gates implementation until design approval | `shape` only for material ambiguity or risk | Acceptance, scope, constraints, architecture decisions |
 | Planning | Detailed 2–5 minute steps, often including code | 1–5 outcome-based delivery slices | Interfaces and proof are still explicit |
@@ -143,7 +143,7 @@ These choices are not universal recommendations. Superpowers' more explicit and 
 Verified now:
 
 - Six engineering workflows, `route` and `adapt` control Skills, and six shared policy documents exist.
-- Source budgets are exactly 3,228 engineering words, 500 `route` words, 329 `adapt` words, 4,057 total Skill words, and a 111-word Claude startup script.
+- Source budgets are exactly 3,238 engineering words, 500 `route` words, 329 `adapt` words, 4,067 total Skill words, and a 111-word Claude startup script.
 - Codex has zero startup injection; Claude has one static, read-only command hook.
 - Learning is disabled by default; when enabled it stores normalized rules and bounded evidence summaries in project-local `.leanpowers/`, excluded through local Git metadata.
 - The learning helper has no background activity, network access, telemetry, global profile, or cross-project sharing, and requires Node.js 20+ only while learning is enabled.

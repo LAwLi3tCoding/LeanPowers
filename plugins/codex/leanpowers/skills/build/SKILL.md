@@ -23,7 +23,7 @@ Start with executable goal, scope, acceptance evidence, constraints. Material am
 3. Patch product only after RED. Expand only qualifiers present: `fresh` calls twice and compares identities; `deep-fresh` proves disjoint identity sets for required input/output containers, sharing no containers; `exact ordinary` checks prototype, `Reflect.ownKeys`, descriptors; order-independent checks both orders; `case-sensitive` flips one character's case; `no-coercion`/`no-access` keeps a trap counter zero. These reject reuse, aliasing, exotic surfaces, first-wins, lowercasing, and eager access. Use snapshots/nested identities for immutability and post-guard sentinels for short-circuiting.
 4. After final edit run regression and applicable affected integration/lint/typecheck/static/package/build/full-suite checks. Inspect results; failure or validation gap blocks `complete`.
 5. Unknown cause transitions to `debug`; otherwise repair in scope. First green freezes completed acceptance set. Material omission before review starts a new incomplete cycle. Edits invalidate evidence; read-only reporting does not.
-6. Record paths, supported claims, evidence, residual risk. Avoid out-of-scope abstraction, dependency, compatibility, or cleanup work.
+6. Record claims, evidence, risk. Every changed line must serve the request. Reject speculative features, single-use abstractions, unrequested flexibility, impossible-case handling, out-of-scope dependencies/compatibility; remove only slice-created orphans.
 
 Configuration/generated output uses baseline/precheck. Failing evidence is only for behavior/defect. Documentation needs a relevant precheck; all need current post-edit validation.
 

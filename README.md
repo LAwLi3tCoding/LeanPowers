@@ -1,12 +1,19 @@
 # LeanPowers
 
-**Lightweight, high-rigor engineering workflows for Codex and Claude Code.**
+[![CI](https://github.com/LAwLi3tCoding/LeanPowers/actions/workflows/ci.yml/badge.svg)](https://github.com/LAwLi3tCoding/LeanPowers/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/LAwLi3tCoding/LeanPowers?display_name=tag)](https://github.com/LAwLi3tCoding/LeanPowers/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-2f6b5f.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/LAwLi3tCoding/LeanPowers?style=social)](https://github.com/LAwLi3tCoding/LeanPowers)
+
+**A lightweight workflow microkernel that keeps coding agents rigorous without making every task heavy.**
 
 *Essential workflows. Less ceremony.*
 
-[简体中文](README.zh-CN.md) · [Superpowers comparison](docs/comparison-superpowers.md) · [Benchmark protocol](docs/benchmark.md) · [Acknowledgments](ACKNOWLEDGMENTS.md) · [Migration guide](docs/migration.md)
+[简体中文](README.zh-CN.md) · [Install](#install-in-60-seconds) · [How it works](#how-leanpowers-works) · [Superpowers comparison](docs/comparison-superpowers.md) · [Benchmark](docs/benchmark.md) · [Contributing](CONTRIBUTING.md)
 
-LeanPowers keeps the safeguards that matter—bounded requirements, regression evidence, root-cause debugging, independent review, current verification, and safe delivery—while selecting the smallest workflow justified by risk. It is a workflow microkernel, not a large always-on prompt or orchestration service.
+LeanPowers gives Codex and Claude Code six focused engineering workflows plus two small control Skills. It selects the lowest-safe path for the task, requires current evidence before completion, and can optionally learn narrow project rules from explicit feedback—all without an MCP server, daemon, telemetry, or always-on orchestration layer.
+
+If that is the kind of agent workflow you want to see grow, [Star LeanPowers](https://github.com/LAwLi3tCoding/LeanPowers) and share what should stay lightweight.
 
 > **Release status:** `0.2.0` is a technical preview with dynamic risk routing and opt-in project learning. Paired live benchmark reports and audits are published transparently; see the [latest result](docs/benchmarks/development-effects-performance-confirmatory-v7-2026-07-16.md), [post-run audit](docs/benchmarks/development-effects-performance-confirmatory-v7-audit-2026-07-16.md), and [benchmark protocol](docs/benchmark.md).
 
@@ -22,6 +29,35 @@ LeanPowers keeps the safeguards that matter—bounded requirements, regression e
 - Current evidence required before completion or delivery claims.
 - Static installed packages with no MCP server, daemon, telemetry, or third-party dependency installation.
 - Native packages for both Codex and Claude Code, plus portable Agent Skills.
+
+## Install in 60 seconds
+
+The repository is its own marketplace. Install directly from GitHub—no clone is required.
+
+### Codex
+
+```bash
+codex plugin marketplace add LAwLi3tCoding/LeanPowers
+codex plugin add leanpowers@leanpowers
+```
+
+Codex uses native Skill discovery and receives no startup prompt injection.
+
+### Claude Code
+
+```bash
+claude plugin marketplace add LAwLi3tCoding/LeanPowers
+claude plugin install leanpowers@leanpowers
+```
+
+Inside an interactive Claude Code session, use:
+
+```text
+/plugin marketplace add LAwLi3tCoding/LeanPowers
+/plugin install leanpowers@leanpowers
+```
+
+Claude Code receives one compact, read-only `SessionStart` routing charter. The hook does not scan or write the repository, access the network, or dispatch agents.
 
 ## Learn and evolve with your project
 
@@ -43,9 +79,9 @@ Learning is disabled by default. When enabled, the bundled Node.js helper stores
 
 Retrieved lessons are advisory and can never lower authorization, scope, risk, root-cause, regression-evidence, independent-review, or completion-evidence gates. There is no background activity, network access, telemetry, global user profile, or cross-project sharing. Node.js 20+ is needed only after learning is explicitly enabled.
 
-## A dynamic workflow, not a fixed pipeline
+## How LeanPowers works
 
-`route` reads the task and observable risk, then activates exactly one owning workflow. LeanPowers transitions only when new evidence requires it: an unknown cause moves work to `debug`, strict risk adds independent review, and stale or delivery-bound evidence moves through `verify` before `ship`. The full chain is never loaded by default.
+LeanPowers is dynamic, not a fixed pipeline. `route` reads the task and observable risk, then activates exactly one owning workflow. It transitions only when new evidence requires it: an unknown cause moves work to `debug`, strict risk adds independent review, and stale or delivery-bound evidence moves through `verify` before `ship`. The full chain is never loaded by default.
 
 ```mermaid
 flowchart LR
@@ -60,35 +96,6 @@ flowchart LR
     A --> L["Project-local lessons"]
     L -. "up to 3 relevant rules" .-> W
 ```
-
-## Install from GitHub
-
-The repository is its own marketplace. Install it directly—no clone is required.
-
-### Codex
-
-```bash
-codex plugin marketplace add LAwLi3tCoding/LeanPowers
-codex plugin add leanpowers@leanpowers
-```
-
-Codex uses native skill discovery and receives no startup prompt injection.
-
-### Claude Code
-
-```bash
-claude plugin marketplace add LAwLi3tCoding/LeanPowers
-claude plugin install leanpowers@leanpowers
-```
-
-The equivalent commands inside an interactive Claude Code session are:
-
-```text
-/plugin marketplace add LAwLi3tCoding/LeanPowers
-/plugin install leanpowers@leanpowers
-```
-
-Claude Code receives one compact, read-only `SessionStart` routing charter. The hook does not scan or write the repository, access the network, or dispatch agents.
 
 ## Quick start
 
@@ -111,6 +118,17 @@ $leanpowers:adapt Enable LeanPowers learning for this project.
 ```
 
 `mode=auto` is the default. `mode=lean`, `mode=standard`, and `mode=strict` request a workflow preference; safety, authorization, scope, and evidence gates can still raise the rigor.
+
+## Who LeanPowers is for
+
+LeanPowers is a good fit when you:
+
+- use Codex, Claude Code, or another Agent Skills-compatible runtime for real repository work;
+- want TDD, root-cause debugging, review, verification, and safe delivery without a mandatory long chain;
+- prefer one risk-appropriate workflow over an always-on multi-agent framework;
+- want project learning to be explicit, local, inspectable, and off by default.
+
+It is probably not the right fit if you want a fully autonomous orchestration service, mandatory multi-agent execution for every task, or cloud-hosted cross-project memory.
 
 ## The six engineering workflows
 
@@ -183,7 +201,7 @@ Agent instructions are not a security boundary. Review commands and diffs before
 
 ## Compared with Superpowers 6.1.1
 
-LeanPowers carries forward Superpowers' evidence-first engineering principles while consolidating 13 engineering-workflow concerns into six risk-activated workflows. The six engineering `SKILL.md` files total 3,228 words—82.6% fewer than the 14-file Superpowers 6.1.1 comparison set. Adding `route` (500 words) and `adapt` (329 words) brings all eight LeanPowers Skills to 4,057 words, still 78.1% smaller.
+LeanPowers carries forward Superpowers' evidence-first engineering principles while consolidating 13 engineering-workflow concerns into six risk-activated workflows. The six engineering `SKILL.md` files total 3,238 words—82.5% fewer than the 14-file Superpowers 6.1.1 comparison set. Adding `route` (500 words) and `adapt` (329 words) brings all eight LeanPowers Skills to 4,067 words, still 78.0% smaller.
 
 This is a lineage-and-tradeoff comparison, not a winner ranking. Superpowers remains the upstream inspiration and a comprehensive workflow reference; LeanPowers tests whether the outcome-critical safeguards can be retained with a smaller, risk-adaptive control surface. The retained safeguards, different optimization choices, evidence limits, and balanced conclusion are documented in [docs/comparison-superpowers.md](docs/comparison-superpowers.md). If you are migrating, read [docs/migration.md](docs/migration.md)—do not enable both systems as automatic workflow routers in the same session.
 
@@ -202,6 +220,18 @@ node scripts/benchmark.mjs compare \
 
 A release-eligible result must use complete, live, blind, identically paired runs. For the full evidence record, see the [benchmark method and status](docs/benchmark.md), [latest v7 result](docs/benchmarks/development-effects-performance-confirmatory-v7-2026-07-16.md), [v7 post-run audit](docs/benchmarks/development-effects-performance-confirmatory-v7-audit-2026-07-16.md), and [complete Superpowers comparison](docs/comparison-superpowers.md).
 
+## Project map
+
+| Path | What you will find |
+| --- | --- |
+| [`skills/`](skills/) | Canonical `route`, `shape`, `build`, `debug`, `review`, `verify`, `ship`, and `adapt` Skills |
+| [`references/`](references/) | Shared risk, evidence, learning, transition, and strict-review policies |
+| [`plugins/`](plugins/) | Generated Codex and Claude Code packages; do not edit by hand |
+| [`docs/`](docs/) | Architecture, migration, comparison, benchmarks, and implementation records |
+| [`tests/`](tests/) | Structural, behavioral, generator, packaging, and learning tests |
+
+Start with the [architecture](docs/architecture.md), read the [migration guide](docs/migration.md) if you use Superpowers, and see [CONTRIBUTING.md](CONTRIBUTING.md) for local development and pull requests. Security and privacy boundaries are documented in [SECURITY.md](SECURITY.md).
+
 ## Development
 
 Development prerequisites: Git and Node.js 20 or 22. Installed engineering workflows have no runtime dependencies; Node.js 20+ is used only by explicitly enabled project learning.
@@ -215,6 +245,8 @@ npm run build            # create validated release artifacts in dist/
 ```
 
 Canonical sources live in `metadata/`, `skills/`, `references/`, `agent-specs/`, and `adapters/`. Do not edit `plugins/` by hand; regenerate it. Contribution rules are in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Questions and concrete failure cases are welcome in [GitHub Issues](https://github.com/LAwLi3tCoding/LeanPowers/issues). If LeanPowers makes your agent workflow clearer without making it heavier, [Star LeanPowers](https://github.com/LAwLi3tCoding/LeanPowers) so more builders can find it.
 
 ## License
 
