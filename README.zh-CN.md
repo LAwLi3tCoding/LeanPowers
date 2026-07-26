@@ -15,7 +15,7 @@ LeanPowers 为 Codex 和 Claude Code 提供六个聚焦工程工作的 workflow�
 
 如果你也希望 Agent 工作流更严谨但不更重，欢迎[为 LeanPowers 点 Star](https://github.com/LAwLi3tCoding/LeanPowers)，也欢迎告诉我们哪些能力必须继续保持轻量。
 
-> **发布状态：**`0.2.0` 是带动态风险路由和可选项目学习能力的技术预览版。成对 live 基准及其审计持续公开，详见[最新结果](docs/benchmarks/development-effects-performance-confirmatory-v7-2026-07-16.md)、[运行后审计](docs/benchmarks/development-effects-performance-confirmatory-v7-audit-2026-07-16.md)和[基准测试方法](docs/benchmark.md)。
+> **发布状态：**`0.2.0` 是带动态风险路由和可选项目学习能力的技术预览版。成对 live 基准及其审计持续公开，详见[最新已计分结果](docs/benchmarks/development-effects-performance-confirmatory-v7-2026-07-16.md)、[运行后审计](docs/benchmarks/development-effects-performance-confirmatory-v7-audit-2026-07-16.md)、[V8 未计分审计](docs/benchmarks/development-effects-optimization-validation-v8-audit-2026-07-27.md)和[基准测试方法](docs/benchmark.md)。
 
 > **项目谱系与致谢：**[Superpowers](https://github.com/obra/superpowers) 是这个独立项目的上游参考和最主要的工程基础。它在证据优先工程、TDD、系统化调试、审查、验证和安全交付上的实践，使 LeanPowers 成为可能。LeanPowers 探索的是另一个优化点：让完整流程按风险选择，同时保留工程严谨性。详见[致谢](ACKNOWLEDGMENTS.md)。
 
@@ -207,7 +207,9 @@ LeanPowers 延续 Superpowers 证据优先的工程原则，把 13 个工程流�
 
 ## 证据与基准
 
-LeanPowers 持续公开成对 live 编程测试、预注册、运行后审计、模型/工具兼容性预检和可复现的比较器。结构缩减已经验证；真实开发效果仍属于有边界的证据，不能概括为普遍等效或全面更快。具体命令、分数、限制和所有冻结历史结论都保留在[基准协议](docs/benchmark.md)中，不再挤占产品首页。
+LeanPowers 持续公开成对 live 编程测试、预注册、运行后审计、中性环境与工作流真实 home 的模型/工具兼容性预检、脱敏的任务前失败记录和可复现的比较器。结构缩减已经验证；真实开发效果仍属于有边界的证据，不能概括为普遍等效或全面更快。具体命令、分数、限制和所有冻结历史结论都保留在[基准协议](docs/benchmark.md)中，不再挤占产品首页。
+
+最新已计分证据仍是 V7。已授权的 V8 尝试在任何任务运行前因模型/工具预检错误失败，因此状态为 `UNSCORED`，不能用于比较结论；详见 [V8 未计分审计](docs/benchmarks/development-effects-optimization-validation-v8-audit-2026-07-27.md)。
 
 比较器接收符合 [schemas/benchmark-result.schema.json](schemas/benchmark-result.schema.json) 的成对结果：
 
@@ -218,7 +220,7 @@ node scripts/benchmark.mjs compare \
   --out path/to/report
 ```
 
-只有完整、live、盲评且条件完全配对的结果才可能通过发布门槛。完整证据见[基准方法与当前状态](docs/benchmark.md)、[最新 v7 结果](docs/benchmarks/development-effects-performance-confirmatory-v7-2026-07-16.md)、[v7 运行后审计](docs/benchmarks/development-effects-performance-confirmatory-v7-audit-2026-07-16.md)和[与 Superpowers 的完整对比](docs/comparison-superpowers.zh-CN.md)。
+只有完整、live、盲评且条件完全配对的结果才可能通过发布门槛。完整证据见[基准方法与当前状态](docs/benchmark.md)、[最新 v7 已计分结果](docs/benchmarks/development-effects-performance-confirmatory-v7-2026-07-16.md)、[v7 运行后审计](docs/benchmarks/development-effects-performance-confirmatory-v7-audit-2026-07-16.md)和[与 Superpowers 的完整对比](docs/comparison-superpowers.zh-CN.md)。
 
 ## 项目地图
 

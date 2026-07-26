@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  calibrateDevelopmentWorkflowPreflights,
   loadDevelopmentSuite,
   runDevelopmentPilot,
   runStandaloneCodexModelToolPreflight,
@@ -55,9 +56,29 @@ async function main() {
     console.log("Model/tool preflight PASS");
     return;
   }
+  if (command === "preflight-workflows") {
+    const outputFile = path.resolve(option(args, "--out", { required: true }));
+    const artifact = await calibrateDevelopmentWorkflowPreflights({
+      authFile: option(args, "--auth-file"),
+      codexExecutable: option(args, "--codex") ?? "codex",
+      leanpowersMarketplace: option(args, "--leanpowers-marketplace", { required: true }),
+      model: option(args, "--model"),
+      suitePath: option(args, "--suite", { required: true }),
+      superpowersMarketplace: option(args, "--superpowers-marketplace", { required: true }),
+    });
+    await mkdir(path.dirname(outputFile), { recursive: true });
+    await writeFile(
+      outputFile,
+      `${JSON.stringify(artifact, null, 2)}\n`,
+      { flag: "wx" },
+    );
+    console.log(`Workflow model/tool preflight ${artifact.status}`);
+    if (artifact.status !== "PASS") process.exitCode = 1;
+    return;
+  }
   if (!["inspect", "run"].includes(command)) {
     throw new Error(
-      "Usage: node scripts/development-benchmark.mjs <inspect|preflight|run> [options]",
+      "Usage: node scripts/development-benchmark.mjs <inspect|preflight|preflight-workflows|run> [options]",
     );
   }
   const suitePath = option(args, "--suite", { required: true });

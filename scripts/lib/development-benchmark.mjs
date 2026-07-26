@@ -1176,6 +1176,26 @@ export async function preflightCodexModelToolCompatibility({
     const completedCommands = completedTools.filter(
       (event) => event.item.type === "command_execution",
     );
+    const buildFailure = async (message, code) => {
+      const evidence = await safeCodexModelToolFailureEvidence({
+        agent,
+        completedCommands,
+        completedTools,
+        disabledFeatures,
+        effort,
+        events,
+        gitBaselineHead: baselineHead,
+        model,
+        nonce,
+        telemetry,
+        toolchain,
+        wallSeconds,
+        workspace,
+        workspaceFingerprintBefore,
+      });
+      evidence.failure_code = code;
+      return preflightFailureError(message, code, evidence);
+    };
     if (
       agent.exitCode !== 0 ||
       agent.timedOut ||
@@ -1184,42 +1204,62 @@ export async function preflightCodexModelToolCompatibility({
       telemetry.completed !== true
     ) {
       const detail = safeCodexPreflightFailure(events);
-      throw new Error(
+      throw await buildFailure(
         detail === null
           ? "Codex model/tool preflight request did not complete"
           : `Codex model/tool preflight request did not complete: ${detail}`,
+        "request-incomplete",
       );
     }
     if (completedCommands.length !== 1) {
-      throw new Error(
+      throw await buildFailure(
         "Codex model/tool preflight requires exactly one command_execution tool call",
+        "command-count",
       );
     }
     if (
       completedCommands[0].item.status !== "completed" ||
       completedCommands[0].item.exit_code !== 0
     ) {
-      throw new Error("Codex model/tool preflight command_execution did not succeed");
+      throw await buildFailure(
+        "Codex model/tool preflight command_execution did not succeed",
+        "command-failed",
+      );
     }
     if (
       normalizedPreflightCommand(completedCommands[0].item.command) !==
         "node --version"
     ) {
-      throw new Error("Codex model/tool preflight must execute node --version");
+      throw await buildFailure(
+        "Codex model/tool preflight must execute node --version",
+        "command-mismatch",
+      );
     }
     if (completedTools.some((event) => event.item.type !== "command_execution")) {
-      throw new Error("Codex model/tool preflight observed an unexpected tool event");
+      throw await buildFailure(
+        "Codex model/tool preflight observed an unexpected tool event",
+        "unexpected-tool",
+      );
     }
     if (telemetry.final_message.trim() !== nonce) {
-      throw new Error("Codex model/tool preflight returned the wrong completion nonce");
+      throw await buildFailure(
+        "Codex model/tool preflight returned the wrong completion nonce",
+        "nonce-mismatch",
+      );
     }
     if (telemetry.tokens?.telemetry_complete !== true) {
-      throw new Error("Codex model/tool preflight did not return complete Token telemetry");
+      throw await buildFailure(
+        "Codex model/tool preflight did not return complete Token telemetry",
+        "telemetry-incomplete",
+      );
     }
     if (
       await fingerprintDirectoryTree(workspace) !== workspaceFingerprintBefore
     ) {
-      throw new Error("Codex model/tool preflight changed its disposable workspace");
+      throw await buildFailure(
+        "Codex model/tool preflight changed its disposable workspace",
+        "workspace-mutated",
+      );
     }
     const gitState = await inspectBenchmarkGitState({
       baselineHead,
@@ -1231,7 +1271,10 @@ export async function preflightCodexModelToolCompatibility({
       gitState.final_head === baselineHead &&
       gitState.changed_paths.length === 0;
     if (!workspaceUnchanged) {
-      throw new Error("Codex model/tool preflight changed its disposable workspace");
+      throw await buildFailure(
+        "Codex model/tool preflight changed its disposable workspace",
+        "workspace-mutated",
+      );
     }
     return {
       disabled_features: [...disabledFeatures],
@@ -1255,6 +1298,114 @@ export async function preflightCodexModelToolCompatibility({
   } finally {
     await rm(runRoot, { force: true, recursive: true });
   }
+}
+
+function preflightFailureError(message, code, evidence) {
+  const error = new Error(message);
+  error.code = `codex-preflight-${code}`;
+  error.preflight_evidence = evidence;
+  return error;
+}
+
+async function safeCodexModelToolFailureEvidence({
+  agent,
+  completedCommands,
+  completedTools,
+  disabledFeatures,
+  effort,
+  events,
+  gitBaselineHead,
+  model,
+  nonce,
+  telemetry,
+  toolchain,
+  wallSeconds,
+  workspace,
+  workspaceFingerprintBefore,
+}) {
+  const requiredCommands = completedCommands.filter((event) =>
+    event.item.status === "completed" &&
+    event.item.exit_code === 0 &&
+    normalizedPreflightCommand(event.item.command) === "node --version"
+  );
+  const unexpectedCommands = completedCommands.filter((event) =>
+    !requiredCommands.includes(event)
+  );
+  const workspaceUnchanged = {
+    fingerprint_unchanged: null,
+    git_changed_paths_count: null,
+    git_head_unchanged: null,
+    status: "UNKNOWN",
+  };
+  try {
+    workspaceUnchanged.fingerprint_unchanged =
+      await fingerprintDirectoryTree(workspace) === workspaceFingerprintBefore;
+  } catch {
+    workspaceUnchanged.fingerprint_unchanged = null;
+  }
+  try {
+    const gitState = await inspectBenchmarkGitState({
+      baselineHead: gitBaselineHead,
+      environment: toolchain.environment,
+      gitExecutable: toolchain.git,
+      workspace,
+    });
+    workspaceUnchanged.git_head_unchanged =
+      gitState.final_head === gitBaselineHead;
+    workspaceUnchanged.git_changed_paths_count = gitState.changed_paths.length;
+  } catch {
+    workspaceUnchanged.git_head_unchanged = null;
+    workspaceUnchanged.git_changed_paths_count = null;
+  }
+  workspaceUnchanged.status =
+    workspaceUnchanged.fingerprint_unchanged === true &&
+      workspaceUnchanged.git_head_unchanged === true &&
+      workspaceUnchanged.git_changed_paths_count === 0
+      ? "PASS"
+      : workspaceUnchanged.fingerprint_unchanged === null ||
+          workspaceUnchanged.git_head_unchanged === null ||
+          workspaceUnchanged.git_changed_paths_count === null
+      ? "UNKNOWN"
+      : "FAIL";
+  const tokenUsage = telemetry.tokens?.telemetry_complete === true
+    ? {
+      cached_input: telemetry.tokens.cached_input,
+      input: telemetry.tokens.input,
+      output: telemetry.tokens.output,
+      reasoning_output: telemetry.tokens.reasoning_output,
+      total: telemetry.tokens.total,
+      uncached_plus_output: telemetry.tokens.uncached_plus_output,
+    }
+    : null;
+  return {
+    agent_completed: telemetry.completed === true,
+    agent_exit_ok: agent.exitCode === 0 &&
+      agent.timedOut !== true &&
+      agent.signal === null &&
+      agent.outputLimitExceeded !== true,
+    completed_command_count: completedCommands.length,
+    completed_tool_count: completedTools.length,
+    disabled_features: [...disabledFeatures],
+    effort,
+    failure_code: null,
+    model,
+    nonce_match: telemetry.final_message.trim() === nonce,
+    required_command_count: requiredCommands.length,
+    required_tool_event_type: "command_execution",
+    started_tool_count: events.filter((event) =>
+      event?.type === "item.started" &&
+      !["agent_message", "reasoning"].includes(event?.item?.type)
+    ).length,
+    status: "FAIL",
+    telemetry_complete: telemetry.tokens?.telemetry_complete === true,
+    token_usage: tokenUsage,
+    unexpected_command_count: unexpectedCommands.length,
+    unexpected_tool_count: completedTools.filter(
+      (event) => event.item.type !== "command_execution",
+    ).length,
+    wall_seconds: wallSeconds > 0 ? wallSeconds : Number.EPSILON,
+    workspace_unchanged: workspaceUnchanged,
+  };
 }
 
 function normalizedPreflightCommand(command) {
@@ -1383,6 +1534,160 @@ export async function runStandaloneCodexModelToolPreflight({
   } finally {
     await rm(root, { force: true, recursive: true });
   }
+}
+
+export async function calibrateDevelopmentWorkflowPreflights({
+  authFile = path.join(
+    process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex"),
+    "auth.json",
+  ),
+  codexExecutable = "codex",
+  leanpowersMarketplace,
+  model,
+  suitePath,
+  superpowersMarketplace,
+}) {
+  const suiteUrl = toFileUrl(suitePath);
+  const suite = await loadDevelopmentSuite(suiteUrl);
+  const heldout = suite.evidence_level === "paired-development-heldout";
+  assertFrozenHeldoutSelection(suite, { model });
+  const homeRoot = await mkdtemp(path.join(os.tmpdir(), "leanpowers-workflow-preflight-"));
+  try {
+    const toolchain = await resolveBenchmarkToolchain(codexExecutable);
+    const codex = toolchain.codex;
+    const codexVersion = await runProcess(codex, ["--version"], {
+      timeoutMs: 30_000,
+    });
+    if (
+      codexVersion.exitCode !== 0 ||
+      codexVersion.timedOut ||
+      codexVersion.signal !== null ||
+      codexVersion.stdout.trim().length === 0
+    ) {
+      throw new Error("Workflow model/tool preflight could not identify Codex");
+    }
+    const workflowRevisions = {
+      "superpowers-6.1.1": await cleanGitRevision(superpowersMarketplace, {
+        officialOrigin: "github.com/obra/superpowers",
+        tag: "v6.1.1",
+      }),
+      "leanpowers-0.2.0": await cleanGitRevision(leanpowersMarketplace),
+    };
+    const runnerRevision = heldout
+      ? await cleanGitRevision(PROJECT_ROOT)
+      : null;
+    const evaluatorRevision = runnerRevision;
+    assertFrozenHeldoutRevisions(suite, {
+      evaluatorRevision,
+      runnerRevision,
+      workflowRevisions,
+    });
+    const homes = await prepareCodexHomes({
+      authFile,
+      codexExecutable: codex,
+      homeRoot,
+      leanpowersMarketplace,
+      superpowersMarketplace,
+      toolchain,
+    });
+    const codexToolPolicy = developmentCodexToolPolicy(suite);
+    const selectedModel = model ?? suite.model_default;
+    const preflights = await collectDevelopmentWorkflowPreflights({
+      codexExecutable: codex,
+      codexToolPolicy,
+      effort: suite.effort,
+      heldout,
+      homes,
+      model: selectedModel,
+      toolchain,
+    });
+    const aggregateStatus = [...WORKFLOWS].every(
+      (workflow) => preflights[workflow]?.status === "PASS",
+    )
+      ? "PASS"
+      : "FAIL";
+    return {
+      codex_tool_policy: {
+        disabled_features: [...codexToolPolicy.disabled_features],
+        required_tool_event_type: codexToolPolicy.required_tool_event_type,
+      },
+      codex_version: codexVersion.stdout.trim(),
+      effort: suite.effort,
+      evaluator_revision: evaluatorRevision,
+      evidence_level: suite.evidence_level,
+      freeze_contract_verified: suite.freeze_contract_verified === true,
+      model: selectedModel,
+      per_workflow: preflights,
+      runner_revision: runnerRevision,
+      schema_version: 1,
+      status: aggregateStatus,
+      suite_id: suite.suite_id,
+      suite_sha256: suite.suite_sha256,
+      workflow_revisions: workflowRevisions,
+    };
+  } finally {
+    await rm(homeRoot, { force: true, recursive: true });
+  }
+}
+
+async function collectDevelopmentWorkflowPreflights({
+  codexExecutable,
+  codexToolPolicy,
+  effort,
+  heldout,
+  homes,
+  model,
+  toolchain,
+}) {
+  const preflights = {};
+  for (const workflow of WORKFLOWS) {
+    try {
+      preflights[workflow] = await preflightCodexModelToolCompatibility({
+        codexExecutable,
+        codexHome: homes[workflow],
+        disabledFeatures: codexToolPolicy.disabled_features,
+        effort,
+        model,
+        permissionProfile: heldout ? HELDOUT_PERMISSION_PROFILE : undefined,
+        toolchain,
+      });
+    } catch (error) {
+      if (isKnownPreflightFailure(error)) {
+        preflights[workflow] = {
+          ...error.preflight_evidence,
+          failure_code: error.preflight_evidence.failure_code ??
+            failureCodeFromError(error),
+        };
+        continue;
+      }
+      throw error;
+    }
+  }
+  return preflights;
+}
+
+function isKnownPreflightFailure(error) {
+  return error?.preflight_evidence !== null &&
+    typeof error?.preflight_evidence === "object" &&
+    error.preflight_evidence.status === "FAIL";
+}
+
+function failureCodeFromError(error) {
+  const match = String(error?.code ?? "").match(/^codex-preflight-(.+)$/u);
+  return match?.[1] ?? "unknown";
+}
+
+async function materializePreflightFailureArtifact(outputDirectory, artifact) {
+  await writeFile(
+    path.join(outputDirectory, "preflight-failure.json"),
+    `${JSON.stringify({
+      calibration: artifact,
+      comparative_decision: "INELIGIBLE",
+      matrix_status: "INCOMPLETE",
+      schema_version: 1,
+    }, null, 2)}\n`,
+    { flag: "wx" },
+  );
 }
 
 export function parseClaudeResult(raw) {
@@ -6124,19 +6429,52 @@ export async function runDevelopmentPilot({
       superpowersMarketplace,
       toolchain,
     });
-    const modelToolPreflight = {};
-    for (const workflow of WORKFLOWS) {
-      modelToolPreflight[workflow] =
-        await preflightCodexModelToolCompatibility({
-          codexExecutable,
-          codexHome: homes[workflow],
-          disabledFeatures: codexToolPolicy.disabled_features,
-          effort: suite.effort,
-          model: selectedModel,
-          permissionProfile:
-            heldout ? HELDOUT_PERMISSION_PROFILE : undefined,
-          toolchain,
-        });
+    const codexVersion = (
+      await runProcess(codexExecutable, ["--version"], { timeoutMs: 30_000 })
+    ).stdout.trim();
+    const modelToolPreflight = await collectDevelopmentWorkflowPreflights({
+      codexExecutable,
+      codexToolPolicy,
+      effort: suite.effort,
+      heldout,
+      homes,
+      model: selectedModel,
+      toolchain,
+    });
+    const preflightCalibration = {
+      codex_tool_policy: {
+        disabled_features: [...codexToolPolicy.disabled_features],
+        required_tool_event_type: codexToolPolicy.required_tool_event_type,
+      },
+      codex_version: codexVersion,
+      effort: suite.effort,
+      evaluator_revision: evaluatorRevision,
+      evidence_level: suite.evidence_level,
+      freeze_contract_verified: suite.freeze_contract_verified === true,
+      model: selectedModel,
+      per_workflow: modelToolPreflight,
+      runner_revision: runnerRevision,
+      schema_version: 1,
+      status: [...WORKFLOWS].every(
+        (workflow) => modelToolPreflight[workflow]?.status === "PASS",
+      )
+        ? "PASS"
+        : "FAIL",
+      suite_id: suite.suite_id,
+      suite_sha256: suite.suite_sha256,
+      workflow_revisions: workflowRevisions,
+    };
+    if (preflightCalibration.status !== "PASS") {
+      await materializePreflightFailureArtifact(
+        outputDirectory,
+        preflightCalibration,
+      );
+      const failed = [...WORKFLOWS].find(
+        (workflow) => modelToolPreflight[workflow]?.status !== "PASS",
+      );
+      throw new Error(
+        `Development benchmark model/tool preflight failed for ${failed}: ${modelToolPreflight[failed]?.failure_code ?? "unknown"}`,
+      );
     }
     let agentReadIsolationPreflight = null;
     if (heldout) {
@@ -6153,9 +6491,7 @@ export async function runDevelopmentPilot({
       agentReadIsolationPreflight = "PASS";
     }
     const runtime = {
-      codex_version: (
-        await runProcess(codexExecutable, ["--version"], { timeoutMs: 30_000 })
-      ).stdout.trim(),
+      codex_version: codexVersion,
       model: selectedModel,
       effort: suite.effort,
       codex_tool_policy: {

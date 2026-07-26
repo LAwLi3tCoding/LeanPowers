@@ -24,6 +24,7 @@ import {
   benchmarkEnvironment,
   buildClaudeArgs,
   buildCodexArgs,
+  calibrateDevelopmentWorkflowPreflights,
   caseSnapshotContract,
   createReviewerWorkspaceMutationTracker,
   evaluateChangedPaths,
@@ -48,6 +49,7 @@ import {
   reportsWorkflowActivation,
   renderDevelopmentReport,
   runArtifactRegressionGates,
+  runDevelopmentPilot,
   runDevelopmentCaseWithCapacityRetry,
   runProcess,
   runVerifier,
@@ -1898,6 +1900,34 @@ process.stdout.write(events.map((event) => JSON.stringify(event)).join("\\n"));
       workspace_unchanged: true,
     });
     await assert.rejects(runPreflight("no-tool"), /command_execution/u);
+    for (const [mode, code] of [
+      ["no-tool", "command-count"],
+      ["two-tools", "command-count"],
+      ["wrong-command", "command-mismatch"],
+      ["other-tool", "unexpected-tool"],
+    ]) {
+      let failure;
+      try {
+        await runPreflight(mode);
+      } catch (error) {
+        failure = error;
+      }
+      assert.equal(failure?.preflight_evidence?.status, "FAIL");
+      assert.equal(failure.preflight_evidence.failure_code, code);
+      assert.equal(failure.preflight_evidence.model, "gpt-5.6-terra");
+      assert.equal(failure.preflight_evidence.effort, "medium");
+      assert.equal(failure.preflight_evidence.telemetry_complete, true);
+      assert.equal(
+        failure.preflight_evidence.required_tool_event_type,
+        "command_execution",
+      );
+      assert.ok(
+        Number.isFinite(failure.preflight_evidence.wall_seconds) &&
+          failure.preflight_evidence.wall_seconds > 0,
+      );
+      const serialized = JSON.stringify(failure.preflight_evidence);
+      assert.doesNotMatch(serialized, /node --version|zsh|preflight|SECRET|\/tmp/u);
+    }
     await assert.rejects(runPreflight("wrong-command"), /node --version/u);
     await assert.rejects(runPreflight("two-tools"), /exactly one/u);
     await assert.rejects(runPreflight("other-tool"), /unexpected tool/u);
@@ -1910,6 +1940,416 @@ process.stdout.write(events.map((event) => JSON.stringify(event)).join("\\n"));
       /feature registry/u,
     );
     await assert.rejects(runPreflight("cli-upgrade"), /requires a newer version of Codex/u);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+async function initializeFakeGitRepository(repository, { origin, tag } = {}) {
+  execFileSync("git", ["init", "--quiet"], { cwd: repository });
+  execFileSync("git", ["config", "user.name", "LAwLi3tCoding"], {
+    cwd: repository,
+  });
+  execFileSync("git", ["config", "user.email", "lawli3t1994@outlook.com"], {
+    cwd: repository,
+  });
+  if (origin) {
+    execFileSync("git", ["remote", "add", "origin", origin], {
+      cwd: repository,
+    });
+  }
+  execFileSync("git", ["add", "."], { cwd: repository });
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "user.name=LAwLi3tCoding",
+      "-c",
+      "user.email=lawli3t1994@outlook.com",
+      "commit",
+      "--quiet",
+      "--no-gpg-sign",
+      "-m",
+      "fixture",
+    ],
+    { cwd: repository },
+  );
+  if (tag) {
+    execFileSync("git", ["tag", tag], { cwd: repository });
+  }
+}
+
+async function writeFakeWorkflowRepositories(root) {
+  const superpowers = path.join(root, "superpowers");
+  const leanpowers = path.join(root, "leanpowers");
+  const leanPlugin = path.join(leanpowers, "plugins", "codex", "leanpowers");
+  for (const [pluginRoot, name, version] of [
+    [superpowers, "superpowers", "6.1.1"],
+    [leanPlugin, "leanpowers", "0.2.0"],
+  ]) {
+    await mkdir(path.join(pluginRoot, ".codex-plugin"), { recursive: true });
+    await mkdir(path.join(pluginRoot, "skills"), { recursive: true });
+    await mkdir(path.join(pluginRoot, "assets"), { recursive: true });
+    await writeFile(
+      path.join(pluginRoot, ".codex-plugin", "plugin.json"),
+      `${JSON.stringify({ name, version }, null, 2)}\n`,
+    );
+    await writeFile(path.join(pluginRoot, "README.md"), `${name}\n`);
+    await writeFile(path.join(pluginRoot, "LICENSE"), "MIT\n");
+  }
+  await initializeFakeGitRepository(superpowers, {
+    origin: "https://github.com/obra/superpowers.git",
+    tag: "v6.1.1",
+  });
+  await initializeFakeGitRepository(leanpowers);
+  return { leanpowers, superpowers };
+}
+
+async function writeWorkflowFakeCodex(root) {
+  const fakeCodex = path.join(root, "fake-codex.cjs");
+  const logFile = path.join(root, "preflight-log.txt");
+  const modeFile = path.join(root, "preflight-modes.json");
+  await writeFile(fakeCodex, `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+function workflow() {
+  const log = ${JSON.stringify(logFile)};
+  const previous = fs.existsSync(log)
+    ? fs.readFileSync(log, "utf8").trim().split(/\\n/).filter(Boolean).length
+    : 0;
+  return previous % 2 === 0
+    ? "superpowers-6.1.1"
+    : "leanpowers-0.2.0";
+}
+if (args.length === 1 && args[0] === "--version") {
+  process.stdout.write("codex-cli workflow-test\\n");
+  process.exit(0);
+}
+if (args[0] === "plugin" && args[1] === "marketplace") {
+  process.stdout.write("{}\\n");
+  process.exit(0);
+}
+if (args[0] === "plugin" && args[1] === "add") {
+  process.stdout.write(JSON.stringify({
+    version: String(args[2]).startsWith("superpowers@") ? "6.1.1" : "0.2.0"
+  }));
+  process.exit(0);
+}
+if (args[0] === "features" && args[1] === "list") {
+  process.stdout.write("image_generation stable true\\n");
+  process.exit(0);
+}
+if (args[0] !== "exec") process.exit(93);
+const current = workflow();
+fs.appendFileSync(${JSON.stringify(logFile)}, current + "\\n");
+const modes = fs.existsSync(${JSON.stringify(modeFile)})
+  ? JSON.parse(fs.readFileSync(${JSON.stringify(modeFile)}, "utf8"))
+  : {};
+const mode = modes[current] || "pass";
+const events = [
+  { type: "thread.started", thread_id: "contains-SECRET-and-path-/tmp/raw" },
+  { type: "turn.started" },
+];
+if (mode !== "no-tool") {
+  events.push({
+    type: "item.completed",
+    item: {
+      type: "command_execution",
+      command: mode === "wrong-command" ? "/tmp/SECRET/tool" : "node --version",
+      status: "completed",
+      exit_code: 0,
+    },
+  });
+}
+if (mode === "two-tools") {
+  events.push({
+    type: "item.completed",
+    item: {
+      type: "command_execution",
+      command: "node --version",
+      status: "completed",
+      exit_code: 0,
+    },
+  });
+}
+if (mode === "other-tool") {
+  events.push({
+    type: "item.completed",
+    item: { type: "file_change", path: "/tmp/SECRET/file" },
+  });
+}
+events.push({
+  type: "item.completed",
+  item: { type: "agent_message", text: "LEANPOWERS_MODEL_TOOL_PREFLIGHT_OK" },
+});
+events.push({
+  type: "turn.completed",
+  usage: {
+    input_tokens: 11,
+    cached_input_tokens: 3,
+    output_tokens: 5,
+    reasoning_output_tokens: 0,
+  },
+});
+process.stdout.write(events.map((event) => JSON.stringify(event)).join("\\n"));
+`, { mode: 0o755 });
+  return { fakeCodex, logFile, modeFile };
+}
+
+test("workflow preflight calibration inspects both homes and returns sanitized failures", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "lp-workflow-preflight-"));
+  try {
+    const authFile = path.join(root, "auth.json");
+    await writeFile(authFile, "{}\n");
+    const repositories = await writeFakeWorkflowRepositories(root);
+    const { fakeCodex, logFile, modeFile } = await writeWorkflowFakeCodex(root);
+    const artifact = await calibrateDevelopmentWorkflowPreflights({
+      authFile,
+      codexExecutable: fakeCodex,
+      leanpowersMarketplace: repositories.leanpowers,
+      suitePath,
+      superpowersMarketplace: repositories.superpowers,
+      model: "gpt-5.5",
+    });
+    assert.equal(artifact.status, "PASS");
+    assert.equal(artifact.codex_version, "codex-cli workflow-test");
+    assert.equal(artifact.evaluator_revision, null);
+    assert.equal(artifact.freeze_contract_verified, false);
+    assert.equal(artifact.runner_revision, null);
+    assert.equal(artifact.per_workflow["superpowers-6.1.1"].status, "PASS");
+    assert.equal(artifact.per_workflow["leanpowers-0.2.0"].status, "PASS");
+    assert.deepEqual(
+      (await readFile(logFile, "utf8")).trim().split(/\n/u).sort(),
+      ["leanpowers-0.2.0", "superpowers-6.1.1"],
+    );
+
+    await writeFile(logFile, "");
+    await writeFile(
+      modeFile,
+      `${JSON.stringify({
+        "leanpowers-0.2.0": "other-tool",
+        "superpowers-6.1.1": "no-tool",
+      })}\n`,
+    );
+    const failedArtifact = await calibrateDevelopmentWorkflowPreflights({
+      authFile,
+      codexExecutable: fakeCodex,
+      leanpowersMarketplace: repositories.leanpowers,
+      suitePath,
+      superpowersMarketplace: repositories.superpowers,
+      model: "gpt-5.5",
+    });
+    assert.equal(failedArtifact.status, "FAIL");
+    assert.equal(
+      failedArtifact.per_workflow["superpowers-6.1.1"].failure_code,
+      "command-count",
+    );
+    assert.equal(
+      failedArtifact.per_workflow["leanpowers-0.2.0"].failure_code,
+      "unexpected-tool",
+    );
+    assert.deepEqual(
+      (await readFile(logFile, "utf8")).trim().split(/\n/u).sort(),
+      ["leanpowers-0.2.0", "superpowers-6.1.1"],
+    );
+    const serialized = JSON.stringify(failedArtifact);
+    assert.doesNotMatch(serialized, /SECRET|\/tmp\/SECRET|node --version/u);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("preflight-workflows CLI writes exclusive PASS and FAIL artifacts", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "lp-workflow-preflight-cli-"));
+  try {
+    const authFile = path.join(root, "auth.json");
+    await writeFile(authFile, "{}\n");
+    const repositories = await writeFakeWorkflowRepositories(root);
+    const { fakeCodex, modeFile } = await writeWorkflowFakeCodex(root);
+    const cli = fileURLToPath(
+      new URL("../scripts/development-benchmark.mjs", import.meta.url),
+    );
+    const passOut = path.join(root, "workflow-pass.json");
+    const passOutput = execFileSync(
+      process.execPath,
+      [
+        cli,
+        "preflight-workflows",
+        "--suite",
+        fileURLToPath(suitePath),
+        "--superpowers-marketplace",
+        repositories.superpowers,
+        "--leanpowers-marketplace",
+        repositories.leanpowers,
+        "--codex",
+        fakeCodex,
+        "--auth-file",
+        authFile,
+        "--model",
+        "gpt-5.5",
+        "--out",
+        passOut,
+      ],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    assert.equal(passOutput, "Workflow model/tool preflight PASS\n");
+    const passArtifact = JSON.parse(await readFile(passOut, "utf8"));
+    assert.equal(passArtifact.status, "PASS");
+    assert.equal(passArtifact.evaluator_revision, null);
+    assert.equal(passArtifact.freeze_contract_verified, false);
+    assert.equal(passArtifact.runner_revision, null);
+    assert.throws(
+      () => execFileSync(
+        process.execPath,
+        [
+          cli,
+          "preflight-workflows",
+          "--suite",
+          fileURLToPath(suitePath),
+          "--superpowers-marketplace",
+          repositories.superpowers,
+          "--leanpowers-marketplace",
+          repositories.leanpowers,
+          "--codex",
+          fakeCodex,
+          "--auth-file",
+          authFile,
+          "--model",
+          "gpt-5.5",
+          "--out",
+          passOut,
+        ],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      ),
+      /EEXIST/u,
+    );
+
+    const failOut = path.join(root, "workflow-fail.json");
+    await writeFile(
+      modeFile,
+      `${JSON.stringify({ "leanpowers-0.2.0": "no-tool" })}\n`,
+    );
+    let failError;
+    try {
+      execFileSync(
+        process.execPath,
+        [
+          cli,
+          "preflight-workflows",
+          "--suite",
+          fileURLToPath(suitePath),
+          "--superpowers-marketplace",
+          repositories.superpowers,
+          "--leanpowers-marketplace",
+          repositories.leanpowers,
+          "--codex",
+          fakeCodex,
+          "--auth-file",
+          authFile,
+          "--model",
+          "gpt-5.5",
+          "--out",
+          failOut,
+        ],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      );
+    } catch (error) {
+      failError = error;
+    }
+    assert.equal(failError?.status, 1);
+    assert.equal(String(failError?.stdout), "Workflow model/tool preflight FAIL\n");
+    const failArtifact = JSON.parse(await readFile(failOut, "utf8"));
+    assert.equal(failArtifact.status, "FAIL");
+    assert.equal(failArtifact.evaluator_revision, null);
+    assert.equal(failArtifact.freeze_contract_verified, false);
+    assert.equal(failArtifact.runner_revision, null);
+    assert.equal(
+      failArtifact.per_workflow["leanpowers-0.2.0"].failure_code,
+      "command-count",
+    );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("live development runner writes only preflight failure artifact before task start", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "lp-live-preflight-failure-"));
+  try {
+    const authFile = path.join(root, "auth.json");
+    const outputDirectory = path.join(root, "out");
+    await writeFile(authFile, "{}\n");
+    const repositories = await writeFakeWorkflowRepositories(root);
+    const { fakeCodex, modeFile } = await writeWorkflowFakeCodex(root);
+    await writeFile(
+      modeFile,
+      `${JSON.stringify({ "leanpowers-0.2.0": "other-tool" })}\n`,
+    );
+    const progress = [];
+    await assert.rejects(
+      runDevelopmentPilot({
+        authFile,
+        codexExecutable: fakeCodex,
+        leanpowersMarketplace: repositories.leanpowers,
+        onProgress(event) {
+          progress.push(event);
+        },
+        outputDirectory,
+        suitePath: fileURLToPath(suitePath),
+        superpowersMarketplace: repositories.superpowers,
+      }),
+      /preflight failed for leanpowers-0\.2\.0: unexpected-tool/u,
+    );
+    assert.deepEqual(progress, []);
+    const failure = JSON.parse(
+      await readFile(path.join(outputDirectory, "preflight-failure.json"), "utf8"),
+    );
+    assert.equal(failure.matrix_status, "INCOMPLETE");
+    assert.equal(failure.comparative_decision, "INELIGIBLE");
+    assert.equal(failure.calibration.status, "FAIL");
+    assert.equal(failure.calibration.evaluator_revision, null);
+    assert.equal(failure.calibration.freeze_contract_verified, false);
+    assert.equal(failure.calibration.runner_revision, null);
+    assert.equal(
+      failure.calibration.per_workflow["leanpowers-0.2.0"].failure_code,
+      "unexpected-tool",
+    );
+    await assert.rejects(
+      readFile(path.join(outputDirectory, "pilot-result.json"), "utf8"),
+      /ENOENT/u,
+    );
+    await assert.rejects(
+      readFile(path.join(outputDirectory, "pilot-report.md"), "utf8"),
+      /ENOENT/u,
+    );
+    await assert.rejects(
+      readFile(path.join(outputDirectory, "gate-result.json"), "utf8"),
+      /ENOENT/u,
+    );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("workflow preflight rejects heldout suites under revision drift", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "lp-heldout-preflight-drift-"));
+  try {
+    const authFile = path.join(root, "auth.json");
+    await writeFile(authFile, "{}\n");
+    const repositories = await writeFakeWorkflowRepositories(root);
+    const { fakeCodex } = await writeWorkflowFakeCodex(root);
+    await assert.rejects(
+      calibrateDevelopmentWorkflowPreflights({
+        authFile,
+        codexExecutable: fakeCodex,
+        leanpowersMarketplace: repositories.leanpowers,
+        suitePath: new URL(
+          "../evals/development-effects/optimization-validation-v8-suite.json",
+          import.meta.url,
+        ),
+        superpowersMarketplace: repositories.superpowers,
+      }),
+      /freeze contract|clean before a live run|HEAD must equal v6\.1\.1/u,
+    );
   } finally {
     await rm(root, { force: true, recursive: true });
   }
@@ -2099,7 +2539,10 @@ process.stdout.write(events.map((event) => JSON.stringify(event)).join("\\n"));
     } catch (error) {
       usageError = error;
     }
-    assert.match(String(usageError?.stderr), /<inspect\|preflight\|run>/u);
+    assert.match(
+      String(usageError?.stderr),
+      /<inspect\|preflight\|preflight-workflows\|run>/u,
+    );
   } finally {
     await rm(root, { force: true, recursive: true });
   }

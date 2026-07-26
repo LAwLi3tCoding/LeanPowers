@@ -1,80 +1,59 @@
 # LeanPowers usage-driven optimization plan
 
 **Date:** 2026-07-26
-**Status:** Implemented and locally verified; new live benchmark pending
-**Scope:** Improve LeanPowers from observed v7 failures and current workspace changes without changing the frozen v7 result.
+**Status:** Implementation complete and locally verified; V8 effect evidence unavailable
+**Scope:** Improve LeanPowers from observed v7 failures, recent usage, external evaluation guidance, and multi-agent review without changing any frozen historical result.
 
-## Source evidence
+## Final state
 
-- `docs/benchmarks/development-effects-performance-confirmatory-v7-audit-2026-07-16.md`: v7 is a frozen FAIL. LeanPowers produced `2/10` Task PASS, `1/10` conformance, no quality-policy population, and only diagnostic efficiency data.
-- `docs/benchmark.md`: live checks are bounded evidence. Current releases may cite exact observations but may not claim general non-inferiority or release-gate success.
-- Current workspace diff: `skills/route/SKILL.md` reduces DEBUG over-selection, clarifies concrete route declarations, and keeps strict risk sticky.
-- Current workspace diff: learning schema and helper code restrict lesson workflow scopes to `shape`, `build`, `debug`, `review`, `verify`, and `ship`.
-- Current workspace diff: `scripts/lib/development-benchmark.mjs` disables `image_generation` for Codex benchmark runs to address the v7 model/tool compatibility failure class.
-- Current workspace verification: `npm run validate:quick` passed `176/176`; the full `npm run validate` passed `503/503` with macOS fixture isolation available. No new live benchmark has been run.
+All planned local optimization work is implemented in the current main-line commits. The changes harden route selection, strict-review handling, mutation-discriminating workflow expectations, benchmark model/tool preflight, workflow-home calibration, sanitized pre-task failure evidence, preflight telemetry, result-gate policy binding, and V8 fixture calibration. README, architecture, benchmark protocol, generated package READMEs, and this plan are synchronized to the implemented code and current evidence boundary.
 
-## Priorities
+The authorized V8 live attempt on 2026-07-27 did not produce effect evidence. It failed before any `START` event or task run with `Codex model/tool preflight requires exactly one command_execution tool call`. The output directory was empty and no pilot result, report, or gate artifact exists. The standalone prefreeze calibration had passed, but that is compatibility calibration only and not live task evidence. V8 is therefore `UNSCORED`; its comparative decision is `INELIGIBLE`; the suite is not rerun, repaired, or rescored.
 
-| Priority | Work | Evidence driver | Acceptance gate |
-| --- | --- | --- | --- |
-| P0 | Stop route example anchoring and DEBUG over-selection | v7 routed all completed LeanPowers turns to `workflow=debug | risk=standard`; BUILD cases lost required BUILD order | Routing tests prove explicit BUILD and known-repair tasks choose BUILD, unknown-cause tasks choose DEBUG, strict signals stay strict, and route declarations use concrete values without a hard-coded example |
-| P0 | Restore source-package parity | Generated package drift repeatedly appeared during concurrent route edits | `npm run generate:check` and package validation pass after regenerating intended artifacts |
-| P0 | Keep mutation-discriminating tests as a hard workflow expectation | v7 task failures were dominated by candidate tests that did not kill all semantic fault members | Build/debug/review Skill tests cover boundary-proving tests, meaningful RED, no-access sentinels, identity/snapshot checks, and semantic fault-family adequacy |
-| P0 | Prevent Spark model/tool compatibility exclusions | v7 had three pre-agent failures from unsupported advertised image-generation tooling | Runner argument tests prove `--disable image_generation`; the next benchmark preflight must fail closed before suite freeze if selected model/tool support is incompatible |
-| P1 | Tighten DEBUG recovery and resolved reproduction attribution | v7 observed recovery protocol and reproduction-window misses | Development benchmark parser tests prove one bounded recovery only, identical rerun command, and standalone final reproduction when structured output is required |
-| P1 | Make strict review non-skippable | v7 strict BUILD downgraded risk and lacked current independent PASS review | Route/skill tests prove strict risk monotonicity, post-green review requirement, no mutation after PASS, and `verify` incomplete when review is missing |
-| P1 | Bound learning scopes to engineering workflows only | `route` and `adapt` are control-plane surfaces; storing them as lesson workflow scopes would blur retrieval semantics | Schema, core validator, CLI validator, and learning policy tests reject `route` and `adapt` workflow scopes before state mutation |
-| P1 | Separate fast and full local validation | Current package script adds `test:quick` and `validate:quick`; README already links these commands | README link tests and package scripts pass; docs explain fast gate versus full gate without treating quick validation as release proof |
-| P2 | Run a new frozen live benchmark only after P0/P1 gates pass | v7 cannot be rerun or rescored; old tasks are now calibration evidence | Newly frozen unseen cases, model/tool preflight, clean generated packages, and complete telemetry before making any new effectiveness claim |
+## Implemented optimization slices
 
-## Implemented slices
+| Slice | Implemented outcome | Evidence |
+| --- | --- | --- |
+| Route behavior repair | Explicit BUILD and known-repair tasks no longer default to DEBUG; unknown-cause tasks still route to DEBUG; strict signals stay sticky | Routing and Skill tests in the local quick/full suites |
+| Source/package parity | Canonical sources regenerate the Codex and Claude package READMEs and portable package files | `npm run generate`, `npm run generate:check` |
+| Mutation-discriminating workflow expectation | BUILD, DEBUG, REVIEW, and strict paths require boundary-proving regression evidence instead of superficial visible-test success | Skill tests plus V8 fixture calibration |
+| Model/tool preflight hardening | Benchmark runs bind exact model, effort, disabled feature, required tool event, complete Token arithmetic, tool count, wall time, and disposable workspace fingerprint | Standalone prefreeze PASS and result-gate tests; live V8 pre-task failure recorded separately |
+| Workflow-home calibration and failure audit | A pre-live command prepares the same two installed workflow homes as live, checks both under known failure, rejects revision drift, persists complete runner/evaluator/workflow revision provenance in one exclusive sanitized artifact, and live failures stop before `START` with only `preflight-failure.json` | Fake-Codex home/CLI/drift/privacy tests and live pre-task artifact-order regression |
+| DEBUG recovery and reproduction attribution | Recovery is bounded; final DEBUG output preserves the reproduction contract and resolved replay evidence | Development benchmark parser and V8 DEBUG fixture tests |
+| Strict review non-skippability | Strict risk requires a fresh independent read-only PASS review after green validation; later mutation invalidates it | Strict review protocol tests and independent strict review PASS |
+| Learning scope repair | Project lessons are scoped only to the six engineering workflows, not `route` or `adapt` | Schema, core, CLI, and learning policy tests |
+| V8 unseen suite | Three new calibrated cases cover lean BUILD, standard DEBUG, and strict BUILD boundaries | V8 fixture calibration `5/5 PASS` |
 
-1. **Documentation and source-of-truth cleanup**
-   - Add architecture documentation and this optimization plan.
-   - Keep benchmark statements bounded to frozen evidence.
-   - Gate: README local links resolve; no claim says a new live benchmark passed.
+## Review and validation ledger
 
-2. **Route behavior repair**
-   - Keep declaration format concrete without embedding one selectable example.
-   - Make bug/fix/change wording insufficient for DEBUG unless cause is unknown or diagnosis is explicitly requested.
-   - Gate: `tests/routing.test.mjs` and route sections of `tests/skills.test.mjs` pass.
+The optimization was checked through at least ten review loops before final documentation:
 
-3. **Learning scope repair**
-   - Treat lessons as scoped only to the six engineering workflows.
-   - Reject noncanonical workflow scopes in JSON schema, runtime validation, and CLI requests before writing `.leanpowers`.
-   - Gate: learning schema/core/CLI tests pass and state remains unchanged on invalid input.
+1. Repository gap audit against v7 failures and existing code.
+2. Official-source external evaluation review for bounded claims, predeclared gates, and contamination limits.
+3. Architecture review rejecting generic tracing/MCP expansion and requiring preflight/tool-policy binding.
+4. Privacy and code review identifying exact-command, workspace-mutation, feature-name, result-gate, and path-reporting risks.
+5. Route audit of BUILD/DEBUG/strict transitions and test gaps.
+6. External-method review limiting small-sample claims to directional diagnostic evidence.
+7. TDD route hardening with RED/GREEN tests.
+8. Benchmark contract audit adding suite policy binding and preflight cost telemetry.
+9. Fixture calibration audit covering hidden verifier imports, mutant source shape, references, and no workspace mutation.
+10. Independent strict review of the pre-V8 implementation after validation, resulting in PASS.
+11. Authorized V8 execution audit preserving the empty-output pre-task failure as `UNSCORED`.
+12. Prospective preflight design review separating neutral-home calibration, workflow-home calibration, and repeated live gating.
+13. TDD preflight hardening review covering safe diagnostics, both workflow homes, revision drift, exclusive writes, and no synthetic scored artifacts.
+14. Fresh independent strict review after post-hardening full validation as the final delivery gate.
 
-4. **Runner compatibility repair**
-   - Disable unsupported image-generation tooling in benchmark Codex args or preflight exact selected model/tool support before a run freezes.
-   - Gate: benchmark argument tests pass; no future benchmark proceeds after a known unsupported tool advertisement.
+Current deterministic evidence:
 
-5. **Package regeneration and package validation**
-   - Regenerate Codex and Claude installables from canonical source after source changes are final.
-   - Gate: `npm run generate:check`, `node scripts/validate-package.mjs`, and package parity tests pass.
+- Quick validation: `181/181 PASS`.
+- Full validation: `531/531 PASS`.
+- V8 fixture calibration: `5/5 PASS`.
+- Independent strict review: a fresh post-hardening review is required after final green validation.
 
-6. **Full validation and release-readiness check**
-   - Run `npm run validate:quick` as the inner-loop gate.
-   - Run `npm run validate` before any release or public claim.
-   - Gate: all failures are either fixed or documented as blocking gaps; no release claim is made from partial validation.
+These checks prove local implementation and documentation consistency. They do not prove live comparative effectiveness because the authorized V8 attempt failed before task execution.
 
-7. **New benchmark only after local gates**
-   - Freeze new unseen tasks, verifier snapshots, retry/exclusion policy, model/tool preflight, and scoring rules before live execution.
-   - Gate: complete quality and telemetry populations. Diagnostic-only or failed results stay published as such.
+## Benchmark evidence boundary
 
-## Acceptance gates
+V7 remains the latest scored development-effects result and a frozen FAIL. V8 is an unscored pre-task infrastructure failure. Current releases may cite exact local validation evidence, the frozen V7 scored result, and the V8 unscored audit, but may not claim general non-inferiority, release-gate success, workflow parity, or measured V8 efficiency.
 
-- Source docs exist at `docs/architecture.md` and this plan path.
-- README and packaged README local links resolve after generation.
-- Generated Codex and Claude packages are source-identical where portable files are expected.
-- `npm run generate:check` passes.
-- `npm run validate:quick` passes.
-- `npm run validate` passes before release.
-- Any future benchmark claim names the frozen suite, exact revision, valid-pair population, and PASS/FAIL/DIAGNOSTIC status.
-
-## Known limitations
-
-- No new live benchmark has been run for the current workspace changes.
-- V7 remains a frozen FAIL and is not rescored by this plan.
-- The route repair is proven by deterministic contract tests, not yet by a newly frozen live conformance matrix.
-- Disabling `image_generation` proves the constructed Codex invocation no longer advertises that tool; the next live suite still needs an exact model/tool preflight and complete telemetry.
-- Fast validation is an inner-loop convenience, not a substitute for full validation or benchmark evidence.
+Any future positive benchmark claim requires a new unseen suite frozen after the workflow-home preflight infrastructure is verified. The observed V8 suite remains permanently ineligible for rerun or rescoring.

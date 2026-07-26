@@ -15,7 +15,7 @@ LeanPowers gives Codex and Claude Code six focused engineering workflows plus tw
 
 If that is the kind of agent workflow you want to see grow, [Star LeanPowers](https://github.com/LAwLi3tCoding/LeanPowers) and share what should stay lightweight.
 
-> **Release status:** `0.2.0` is a technical preview with dynamic risk routing and opt-in project learning. Paired live benchmark reports and audits are published transparently; see the [latest result](docs/benchmarks/development-effects-performance-confirmatory-v7-2026-07-16.md), [post-run audit](docs/benchmarks/development-effects-performance-confirmatory-v7-audit-2026-07-16.md), and [benchmark protocol](docs/benchmark.md).
+> **Release status:** `0.2.0` is a technical preview with dynamic risk routing and opt-in project learning. Paired live benchmark reports and audits are published transparently; see the [latest scored result](docs/benchmarks/development-effects-performance-confirmatory-v7-2026-07-16.md), [post-run audit](docs/benchmarks/development-effects-performance-confirmatory-v7-audit-2026-07-16.md), [V8 unscored audit](docs/benchmarks/development-effects-optimization-validation-v8-audit-2026-07-27.md), and [benchmark protocol](docs/benchmark.md).
 
 > **Lineage and thanks:** [Superpowers](https://github.com/obra/superpowers) is the upstream reference and principal engineering foundation for this independent project. Its evidence-first engineering discipline, TDD, systematic debugging, review, verification, and safe-delivery ideas made LeanPowers possible. LeanPowers carries those principles into a smaller, risk-adaptive control surface; the comparison is a lineage-and-tradeoff study. See [Acknowledgments](ACKNOWLEDGMENTS.md).
 
@@ -207,7 +207,9 @@ This is a lineage-and-tradeoff comparison, not a winner ranking. Superpowers rem
 
 ## Evidence and benchmark
 
-LeanPowers publishes paired live coding runs, preregistrations, post-run audits, a model/tool compatibility preflight, and a reproducible comparator. Structural reduction is verified; live development results remain bounded evidence rather than a universal parity or speed claim. Detailed commands, scores, limitations, and every frozen historical conclusion stay in the [benchmark protocol](docs/benchmark.md) instead of the product overview.
+LeanPowers publishes paired live coding runs, preregistrations, post-run audits, neutral and workflow-home model/tool compatibility preflights, sanitized pre-task failure records, and a reproducible comparator. Structural reduction is verified; live development results remain bounded evidence rather than a universal parity or speed claim. Detailed commands, scores, limitations, and every frozen historical conclusion stay in the [benchmark protocol](docs/benchmark.md) instead of the product overview.
+
+The latest scored evidence remains V7. The authorized V8 attempt failed before any task run with a model/tool preflight error, so it is `UNSCORED` and ineligible for comparative decisions; see the [V8 unscored audit](docs/benchmarks/development-effects-optimization-validation-v8-audit-2026-07-27.md).
 
 The comparator accepts paired result documents conforming to [schemas/benchmark-result.schema.json](schemas/benchmark-result.schema.json):
 
@@ -218,7 +220,7 @@ node scripts/benchmark.mjs compare \
   --out path/to/report
 ```
 
-A release-eligible result must use complete, live, blind, identically paired runs. For the full evidence record, see the [benchmark method and status](docs/benchmark.md), [latest v7 result](docs/benchmarks/development-effects-performance-confirmatory-v7-2026-07-16.md), [v7 post-run audit](docs/benchmarks/development-effects-performance-confirmatory-v7-audit-2026-07-16.md), and [complete Superpowers comparison](docs/comparison-superpowers.md).
+A release-eligible result must use complete, live, blind, identically paired runs. For the full evidence record, see the [benchmark method and status](docs/benchmark.md), [latest v7 scored result](docs/benchmarks/development-effects-performance-confirmatory-v7-2026-07-16.md), [v7 post-run audit](docs/benchmarks/development-effects-performance-confirmatory-v7-audit-2026-07-16.md), and [complete Superpowers comparison](docs/comparison-superpowers.md).
 
 ## Project map
 
