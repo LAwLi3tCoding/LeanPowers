@@ -41,7 +41,10 @@
               "type": "array",
               "maxItems": 32,
               "uniqueItems": true,
-              "items": { "type": "string", "minLength": 1, "maxLength": 64 }
+              "items": {
+                "type": "string",
+                "enum": ["shape", "build", "debug", "review", "verify", "ship"]
+              }
             },
             "path_prefixes": {
               "type": "array",
@@ -169,7 +172,10 @@
               "type": "array",
               "maxItems": 32,
               "uniqueItems": true,
-              "items": { "type": "string", "minLength": 1, "maxLength": 64 }
+              "items": {
+                "type": "string",
+                "enum": ["shape", "build", "debug", "review", "verify", "ship"]
+              }
             },
             "path_prefixes": {
               "type": "array",

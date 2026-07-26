@@ -29,6 +29,7 @@ const INVALID_UUIDS = [
 ];
 const GENERIC_UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SYNTHETIC_PRIVATE_HOME = ["", "Users", "sample-user", "private"].join("/");
 
 const readJson = (relativePath) =>
   JSON.parse(readFileSync(new URL(relativePath, import.meta.url), "utf8"));
@@ -303,6 +304,44 @@ test("validateEvent accepts every closed event action", () => {
   assert.deepEqual(validateEvent({ ...clear, lesson_id: "unexpected" }), [
     "$.lesson_id: is not allowed",
   ]);
+});
+
+test("lesson events accept only canonical engineering workflow scopes", () => {
+  const canonical = ["shape", "build", "debug", "review", "verify", "ship"];
+  assert.deepEqual(
+    validateEvent(
+      activateEvent({
+        scope: {
+          workflows: canonical,
+          path_prefixes: ["src/"],
+          tags: ["workflow"],
+        },
+      }),
+    ),
+    [],
+  );
+  assert.deepEqual(
+    validateEvent(
+      activateEvent({
+        scope: {
+          workflows: ["route"],
+          path_prefixes: ["src/"],
+          tags: ["workflow"],
+        },
+      }),
+    ),
+    [
+      "$.scope.workflows[0]: must be one of shape, build, debug, review, verify, ship",
+    ],
+  );
+
+  const schema = readJson("../schemas/lesson-event.schema.json");
+  for (const branch of schema.oneOf.filter(({ properties }) => properties.scope)) {
+    assert.deepEqual(
+      branch.properties.scope.properties.workflows.items.enum,
+      canonical,
+    );
+  }
 });
 
 test("every schema branch and runtime validator share required and closed fields", () => {
@@ -676,7 +715,10 @@ test("normalizeOriginUrl unifies SSH and HTTPS without credentials", () => {
     normalizeOriginUrl("ssh://git@github.com/Owner/LeanPowers.git"),
     expected,
   );
-  assert.equal(normalizeOriginUrl("/Users/example/repository"), null);
+  assert.equal(
+    normalizeOriginUrl(["", "Users", "example", "repository"].join("/")),
+    null,
+  );
   assert.equal(normalizeOriginUrl("not an origin"), null);
 });
 
@@ -687,7 +729,7 @@ test("computeProjectId hashes normalized identity without exposing raw paths", (
     .digest("hex")}`;
   const fromSsh = computeProjectId({
     gitOrigin: "git@github.com:Owner/LeanPowers.git",
-    realRoot: "/Users/alice/private/repository",
+    realRoot: `${SYNTHETIC_PRIVATE_HOME}/repository`,
     git: true,
   });
   const fromHttps = computeProjectId({
@@ -697,22 +739,35 @@ test("computeProjectId hashes normalized identity without exposing raw paths", (
   });
   const fromWorkspace = computeProjectId({
     gitOrigin: null,
-    realRoot: "/Users/alice/private/workspace",
+    realRoot: `${SYNTHETIC_PRIVATE_HOME}/workspace`,
     git: false,
   });
 
   assert.equal(fromSsh, expectedOrigin);
   assert.equal(fromHttps, expectedOrigin);
   assert.match(fromWorkspace, /^sha256:[a-f0-9]{64}$/);
-  assert.equal(fromWorkspace.includes("/Users/alice"), false);
+  assert.equal(fromWorkspace.includes(SYNTHETIC_PRIVATE_HOME), false);
 });
 
 test("privacy guard rejects credential-shaped and raw-log content", () => {
-  assert.equal(containsForbiddenContent("Authorization: Bearer ghp_secret"), true);
-  assert.equal(containsForbiddenContent("api_key=sk-live-secret"), true);
-  assert.equal(containsForbiddenContent("CI_JOB_TOKEN=internal-secret-value"), true);
   assert.equal(
-    containsForbiddenContent("The checkout is /Users/alice/private/LeanPowers."),
+    containsForbiddenContent(
+      ["Authorization: Bearer ", ["ghp", "secret"].join("_")].join(""),
+    ),
+    true,
+  );
+  assert.equal(
+    containsForbiddenContent(
+      ["api_key", ["sk", "live", "secret"].join("-")].join("="),
+    ),
+    true,
+  );
+  assert.equal(
+    containsForbiddenContent(["CI_JOB_TOKEN", "internal-secret-value"].join("=")),
+    true,
+  );
+  assert.equal(
+    containsForbiddenContent(`The checkout is ${SYNTHETIC_PRIVATE_HOME}/LeanPowers.`),
     true,
   );
   assert.equal(

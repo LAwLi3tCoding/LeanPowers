@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 const ACTIONS = ["activate", "reinforce", "supersede", "forget", "clear"];
 const KINDS = ["preference", "correction", "outcome", "confirmation"];
+const CANONICAL_WORKFLOWS = ["shape", "build", "debug", "review", "verify", "ship"];
 const PROJECT_ID_PATTERN = /^sha256:[a-f0-9]{64}$/;
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})[tT](\d{2}):(\d{2}):(\d{2})(\.\d+)?([zZ]|([+-])(\d{2}):(\d{2}))$/;
@@ -202,7 +203,16 @@ const validateScope = (value, errors) => {
     return;
   }
   if (Object.hasOwn(value, "workflows")) {
-    validateStringList(value.workflows, `${path}.workflows`, { itemMaximum: 64 }, errors);
+    validateStringList(
+      value.workflows,
+      `${path}.workflows`,
+      {
+        itemMaximum: 64,
+        itemValidator: (item) => CANONICAL_WORKFLOWS.includes(item),
+        itemMessage: `must be one of ${CANONICAL_WORKFLOWS.join(", ")}`,
+      },
+      errors,
+    );
   }
   if (Object.hasOwn(value, "path_prefixes")) {
     validateStringList(
@@ -509,6 +519,7 @@ const relevanceTier = (lesson, workflow, paths, tags) => {
 const hasSafeScope = (lesson) =>
   isPlainObject(lesson.scope) &&
   Array.isArray(lesson.scope.workflows) &&
+  lesson.scope.workflows.every((workflow) => CANONICAL_WORKFLOWS.includes(workflow)) &&
   Array.isArray(lesson.scope.path_prefixes) &&
   lesson.scope.path_prefixes.every(isSafeRelativePath) &&
   Array.isArray(lesson.scope.tags);

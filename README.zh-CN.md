@@ -187,7 +187,7 @@ LeanPowers 每次只从一个工作流开始，出现可观察的升级条件时
 | reviewer / verifier | 运行时原生任务提示 | 随包 Agent | 单 Agent 执行；严格审查必须来自外部独立视角 |
 | 核心质量门槛 | 保留 | 保留 | 保留 |
 
-Codex 保持零启动注入，通过原生 metadata 发现 500 词的 `route` Skill。Claude Code 接收一段 111 词的只读路由提示，并在启动、清空或上下文压缩后恢复；它不会检查 `.leanpowers/`、扫描或修改仓库、访问网络或派发 Agent。六个工程工作流不需要 Node.js；只有用户明确启用项目学习后，可选学习 helper 才需要 Node.js 20+。
+Codex 保持零启动注入，通过原生 metadata 发现 498 词的 `route` Skill。Claude Code 接收一段 111 词的只读路由提示，并在启动、清空或上下文压缩后恢复；它不会检查 `.leanpowers/`、扫描或修改仓库、访问网络或派发 Agent。六个工程工作流不需要 Node.js；只有用户明确启用项目学习后，可选学习 helper 才需要 Node.js 20+。
 
 ## 隐私与安全
 
@@ -201,7 +201,7 @@ Agent 指令本身不是安全边界。授权破坏性、生产或凭证相关�
 
 ## 与 Superpowers 6.1.1 的区别
 
-LeanPowers 延续 Superpowers 证据优先的工程原则，把 13 个工程流程关注点收敛为六个按风险启用的工作流。六个工程 `SKILL.md` 共 3,238 词，比 Superpowers 6.1.1 的 14 文件对比集减少 82.5%；加上 `route`（500 词）和 `adapt`（329 词）后，全部八个 LeanPowers Skill 共 4,067 词，仍减少 78.0%。
+LeanPowers 延续 Superpowers 证据优先的工程原则，把 13 个工程流程关注点收敛为六个按风险启用的工作流。六个工程 `SKILL.md` 共 3,238 词，比 Superpowers 6.1.1 的 14 文件对比集减少 82.5%；加上 `route`（498 词）和 `adapt`（329 词）后，全部八个 LeanPowers Skill 共 4,065 词，仍减少 78.0%。
 
 这是一份谱系与取舍对比，不是胜负排名。Superpowers 仍是 LeanPowers 的上游灵感来源和完整工作流参考；LeanPowers 要验证的是：能否用更小、按风险自适应的控制面保留影响工程结果的关键保障。保留能力、不同优化选择、证据边界和完整结论见[中文对比文档](docs/comparison-superpowers.zh-CN.md)。迁移前请先读 [docs/migration.md](docs/migration.md)：**不要在同一会话同时启用两个系统的自动路由。**
 
@@ -230,7 +230,7 @@ node scripts/benchmark.mjs compare \
 | [`docs/`](docs/) | 架构、迁移、对比、基准和实现记录 |
 | [`tests/`](tests/) | 结构、行为、生成器、打包和学习机制测试 |
 
-建议先阅读[架构说明](docs/architecture.md)；如果你正在使用 Superpowers，再阅读[迁移指南](docs/migration.md)。本地开发和 PR 规则见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全与隐私边界见 [SECURITY.md](SECURITY.md)。
+建议先阅读[架构说明](docs/architecture.md)和最新的[近期使用驱动优化方案](docs/plans/2026-07-26-leanpowers-usage-driven-optimization.md)；如果你正在使用 Superpowers，再阅读[迁移指南](docs/migration.md)。本地开发和 PR 规则见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全与隐私边界见 [SECURITY.md](SECURITY.md)。
 
 ## 开发
 
@@ -239,8 +239,9 @@ node scripts/benchmark.mjs compare \
 ```bash
 npm run generate         # 重新生成两个运行时安装包
 npm run generate:check   # 检查生成物是否漂移
-npm test                 # 运行 Node 测试
-npm run validate         # 校验同步、结构、预算和测试
+npm run validate:quick   # 快速内环：包检查与核心回归
+npm test                 # 运行全部 Node 测试
+npm run validate         # 完整发布门禁：同步、结构、预算与全部测试
 npm run build            # 在 dist/ 生成已验证的发布产物
 ```
 

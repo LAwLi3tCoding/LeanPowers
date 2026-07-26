@@ -34,9 +34,17 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
   }
   assert.match(body, /Choose (?:the )?lowest-safe owner/i);
   assert.match(body, /lowest-safe|lowest safe/i);
-  assert.match(body, /choose lowercase owner\/risk/i);
+  assert.match(body, /choose one .*owner[\s\S]{0,120}one .*risk/i);
   assert.match(body, /before any task tool[\s\S]{0,120}emit its declaration/i);
   assert.doesNotMatch(body, /workflow=OWNER|risk=RISK/);
+  assert.doesNotMatch(
+    body,
+    /leanpowers:route \| workflow=(?:shape|build|debug|review|verify|ship) \| risk=(?:lean|standard|strict)/i,
+  );
+  assert.match(
+    body,
+    /concatenat[\s\S]{0,120}`leanpowers:route \| workflow=`[\s\S]{0,120}selected[\s\S]{0,120}` \| risk=`/i,
+  );
   assert.match(body, /explicit-feedback→`adapt`[\s\S]{0,180}implementation\/known-repair→`build`/i);
   assert.match(
     body,
@@ -81,8 +89,7 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
   }
   assert.match(body, /`causeKnown=false`[\s\S]{0,100}`standard`/i);
   assert.match(body, /Gates are strict `\[independent_review, current_evidence\]`/i);
-  assert.match(body, /leanpowers:route \| workflow=debug \| risk=standard/);
-  assert.match(body, /metavariables?[\s\S]{0,80}invalid/i);
+  assert.match(body, /concrete values[\s\S]{0,100}metavariables?[\s\S]{0,80}invalid/i);
   assert.match(body, /alone on line 1/i);
   assert.match(body, /BUILD[\s\S]{0,120}DISCOVER→READ→TEST-PATCH→RED→CODE-PATCH→VALIDATE/i);
   assert.match(body, /DEBUG[\s\S]{0,160}DISCOVER→READ\+REPRODUCE\/TRACE→PATCH→VALIDATE/i);
@@ -112,10 +119,7 @@ test("route is a high-recall, low-ceremony engineering entry point", async () =>
   assert.doesNotMatch(body, /One test-only correction/i);
   assert.doesNotMatch(body, /Exact pass immediately finalizes with no later tool/i);
   assert.doesNotMatch(body, /never rediscover\/reread/i);
-  assert.ok(
-    body.indexOf("First emitted bytes MUST be") < body.indexOf("Choose the lowest-safe owner"),
-    "canonical declaration must precede routing prose",
-  );
+  assert.ok(body.indexOf("Choose the lowest-safe owner") < body.indexOf("Selected-owner capsule"));
   assert.match(body, /`strict` for[^\n]*\bconcurrency\b/i);
   for (const workflow of ["shape", "build", "debug", "review", "verify", "ship", "adapt"]) {
     assert.match(body, new RegExp(`\\b${workflow}\\b`, "i"), workflow);
@@ -199,8 +203,8 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(verify, /independent_review: pass \| missing \| not_required/i);
   assert.match(build, /affected integration[\s\S]{0,120}full-suite/i);
   assert.match(build, /validation gap blocks `complete`/i);
-  assert.match(route, /Unknown-cause defects or reproduce\/trace\/diagnose\/root-cause\/why\/first-wrong-transition requests/i);
-  assert.match(route, /`owner=debug` \(overrides fix\/change\/build\), `risk≥standard`/i);
+  assert.match(route, /Unknown-cause defects or explicit reproduce\/trace\/diagnose\/root-cause\/first-wrong-transition requests/i);
+  assert.match(route, /bug\/fix\/change wording alone[\s\S]{0,100}does not select `debug`/i);
   assert.match(route, /and supplied repro\/cause/i);
   assert.match(route, /Bounded deterministic single-component defects/i);
   assert.match(route, /without (?:another |reading )?Skill\/reference/i);
@@ -210,15 +214,19 @@ test("ordinary completion is inline while strict review remains mandatory", asyn
   assert.match(route, /explicit-feedback→`adapt`/i);
   assert.match(route, /implementation\/known-repair→`build`/i);
   assert.match(route, /First emitted bytes MUST be/i);
-  assert.match(route, /leanpowers:route \| workflow=debug \| risk=standard/);
+  assert.match(route, /concatenat[\s\S]{0,120}`leanpowers:route \| workflow=`/i);
   assert.doesNotMatch(route, /workflow=OWNER|risk=RISK/);
+  assert.doesNotMatch(
+    route,
+    /leanpowers:route \| workflow=(?:shape|build|debug|review|verify|ship) \| risk=(?:lean|standard|strict)/i,
+  );
   assert.match(route, /alone on line 1/i);
   assert.match(route, /never prefix or repeat it/i);
   assert.match(route, /If evidence raises risk, emit `leanpowers:risk \| risk=strict`; never downgrade/i);
   assert.match(route, /Selected-owner capsule[\s\S]{0,140}route invocation owns order through completion/i);
   assert.ok(
-    route.indexOf("Selected-owner capsule") < route.indexOf("Choose the lowest-safe owner"),
-    "owner capsule must precede routing and risk detail",
+    route.indexOf("Choose the lowest-safe owner") < route.indexOf("Selected-owner capsule"),
+    "routing and risk detail must precede the owner capsule",
   );
   assert.match(build, /Routed entry owns workflow order/i);
   assert.match(debug, /Routed entry owns workflow order/i);

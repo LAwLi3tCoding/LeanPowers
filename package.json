@@ -32,6 +32,8 @@
     "generate": "node scripts/generate.mjs",
     "generate:check": "node scripts/generate.mjs --check",
     "test": "node --test",
-    "validate": "npm run generate:check && node scripts/validate-package.mjs && node --test"
+    "test:quick": "node --test tests/benchmark.test.mjs tests/evidence.test.mjs tests/generator.test.mjs tests/learning-cases.test.mjs tests/learning-cli.test.mjs tests/learning-core.test.mjs tests/packages.test.mjs tests/release.test.mjs tests/routing.test.mjs tests/skills.test.mjs",
+    "validate": "npm run generate:check && node scripts/validate-package.mjs && node --test",
+    "validate:quick": "npm run generate:check && node scripts/validate-package.mjs && npm run test:quick"
   }
 }

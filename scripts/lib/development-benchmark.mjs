@@ -840,6 +840,8 @@ export function buildCodexArgs({
     `model_reasoning_effort="${effort}"`,
     "-c",
     "features.multi_agent=true",
+    "--disable",
+    "image_generation",
     "--skip-git-repo-check",
     "--ephemeral",
     "-m",

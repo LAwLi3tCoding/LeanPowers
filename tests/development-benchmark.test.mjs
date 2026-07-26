@@ -1720,6 +1720,10 @@ test("the Codex runner is writable, non-interactive, ephemeral, and model-paired
   assert.ok(args.includes('approval_policy="never"'));
   assert.ok(args.includes('model_reasoning_effort="low"'));
   assert.ok(args.includes("features.multi_agent=true"));
+  assert.deepEqual(
+    args.slice(args.indexOf("--disable"), args.indexOf("--disable") + 2),
+    ["--disable", "image_generation"],
+  );
   assert.ok(!args.join(" ").includes("superpowers-6.1.1"));
   assert.ok(!args.join(" ").includes("leanpowers-0.2.0"));
 });

@@ -187,7 +187,7 @@ Evidence is keyed to the relevant revision and scope. Unchanged evidence may be 
 | Optional reviewer/verifier agents | Runtime-native task prompts | Packaged agents | Single-agent execution; strict review must come from an external perspective |
 | Core quality gates | Yes | Yes | Yes |
 
-Codex retains zero startup injection and discovers the 500-word `route` Skill through native metadata. Claude Code receives one 111-word, read-only routing hint that is restored after startup, clear, or compaction; it does not inspect `.leanpowers/`, scan or write the repository, access the network, or dispatch agents. The six engineering workflows require no Node.js runtime. The optional learning helper requires Node.js 20+ only when learning is explicitly enabled.
+Codex retains zero startup injection and discovers the 498-word `route` Skill through native metadata. Claude Code receives one 111-word, read-only routing hint that is restored after startup, clear, or compaction; it does not inspect `.leanpowers/`, scan or write the repository, access the network, or dispatch agents. The six engineering workflows require no Node.js runtime. The optional learning helper requires Node.js 20+ only when learning is explicitly enabled.
 
 ## Privacy and security
 
@@ -201,7 +201,7 @@ Agent instructions are not a security boundary. Review commands and diffs before
 
 ## Compared with Superpowers 6.1.1
 
-LeanPowers carries forward Superpowers' evidence-first engineering principles while consolidating 13 engineering-workflow concerns into six risk-activated workflows. The six engineering `SKILL.md` files total 3,238 words—82.5% fewer than the 14-file Superpowers 6.1.1 comparison set. Adding `route` (500 words) and `adapt` (329 words) brings all eight LeanPowers Skills to 4,067 words, still 78.0% smaller.
+LeanPowers carries forward Superpowers' evidence-first engineering principles while consolidating 13 engineering-workflow concerns into six risk-activated workflows. The six engineering `SKILL.md` files total 3,238 words—82.5% fewer than the 14-file Superpowers 6.1.1 comparison set. Adding `route` (498 words) and `adapt` (329 words) brings all eight LeanPowers Skills to 4,065 words, still 78.0% smaller.
 
 This is a lineage-and-tradeoff comparison, not a winner ranking. Superpowers remains the upstream inspiration and a comprehensive workflow reference; LeanPowers tests whether the outcome-critical safeguards can be retained with a smaller, risk-adaptive control surface. The retained safeguards, different optimization choices, evidence limits, and balanced conclusion are documented in [docs/comparison-superpowers.md](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/comparison-superpowers.md). If you are migrating, read [docs/migration.md](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/migration.md)—do not enable both systems as automatic workflow routers in the same session.
 
@@ -230,7 +230,7 @@ A release-eligible result must use complete, live, blind, identically paired run
 | [`docs/`](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/) | Architecture, migration, comparison, benchmarks, and implementation records |
 | [`tests/`](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/tests/) | Structural, behavioral, generator, packaging, and learning tests |
 
-Start with the [architecture](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/architecture.md), read the [migration guide](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/migration.md) if you use Superpowers, and see [CONTRIBUTING.md](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/CONTRIBUTING.md) for local development and pull requests. Security and privacy boundaries are documented in [SECURITY.md](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/SECURITY.md).
+Start with the [architecture](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/architecture.md), see the latest [usage-driven optimization plan](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/plans/2026-07-26-leanpowers-usage-driven-optimization.md), read the [migration guide](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/migration.md) if you use Superpowers, and see [CONTRIBUTING.md](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/CONTRIBUTING.md) for local development and pull requests. Security and privacy boundaries are documented in [SECURITY.md](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/SECURITY.md).
 
 ## Development
 
@@ -239,8 +239,9 @@ Development prerequisites: Git and Node.js 20 or 22. Installed engineering workf
 ```bash
 npm run generate         # rebuild both committed runtime packages
 npm run generate:check   # fail if generated packages drift
-npm test                 # run the Node test suite
-npm run validate         # package sync, structure, budgets, and tests
+npm run validate:quick   # fast inner loop: package checks and core regressions
+npm test                 # run every Node test
+npm run validate         # full release gate: sync, structure, budgets, and all tests
 npm run build            # create validated release artifacts in dist/
 ```
 

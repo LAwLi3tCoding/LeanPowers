@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -119,6 +119,32 @@ test("product READMEs lead with value and installation while keeping evidence ho
   assert.doesNotMatch(chinese, /(?:2\/10|1\/10|83\.3699%)/u);
 });
 
+test("product READMEs expose fast and full validation paths and resolve local links", async () => {
+  const packageJson = JSON.parse(
+    await readFile(new URL("package.json", projectRoot), "utf8"),
+  );
+  assert.match(packageJson.scripts["test:quick"], /^node --test /u);
+  assert.match(
+    packageJson.scripts["validate:quick"],
+    /npm run generate:check.*validate-package.*npm run test:quick/u,
+  );
+
+  for (const relativePath of ["README.md", "README.zh-CN.md"]) {
+    const documentUrl = new URL(relativePath, projectRoot);
+    const document = await readFile(documentUrl, "utf8");
+    assert.match(document, /npm run validate:quick/u);
+    assert.match(document, /npm run validate/u);
+    const targets = [...document.matchAll(/\[[^\]]+\]\((?<target>[^)]+)\)/gu)]
+      .map((match) => match.groups.target)
+      .filter((target) => !/^(?:https?:|#)/u.test(target))
+      .map((target) => target.split("#", 1)[0])
+      .filter(Boolean);
+    for (const target of targets) {
+      await access(new URL(target, documentUrl));
+    }
+  }
+});
+
 test("published instruction counts match the canonical source exactly", async () => {
   const skillCounts = new Map();
   for (const name of skillNames) {
@@ -143,9 +169,9 @@ test("published instruction counts match the canonical source exactly", async ()
     { engineeringWords, routeWords, adaptWords, totalWords, charterWords },
     {
       engineeringWords: 3238,
-      routeWords: 500,
+      routeWords: 498,
       adaptWords: 329,
-      totalWords: 4067,
+      totalWords: 4065,
       charterWords: 111,
     },
   );
@@ -156,7 +182,7 @@ test("published instruction counts match the canonical source exactly", async ()
     "docs/comparison-superpowers.zh-CN.md",
   ]) {
     const document = await readFile(new URL(relativePath, projectRoot), "utf8");
-    for (const expected of ["3,238", "500", "329", "4,067", "82.5%", "78.0%"]) {
+    for (const expected of ["3,238", "498", "329", "4,065", "82.5%", "78.0%"]) {
       assert.ok(document.includes(expected), `${relativePath} missing ${expected}`);
     }
   }

@@ -117,6 +117,14 @@ test("initial workflow selection covers every workflow owner", () => {
 
 test("routing resolves entry contracts and competing intents one workflow at a time", () => {
   assert.equal(selectInitialWorkflow({ explicitWorkflow: "review" }), "review");
+  assert.equal(
+    selectInitialWorkflow({
+      explicitWorkflow: "build",
+      causeKnown: false,
+      diagnosisRequested: true,
+    }),
+    "build",
+  );
   assert.equal(selectInitialWorkflow({ explicitWorkflow: "ship" }), "verify");
   assert.equal(
     selectInitialWorkflow({ explicitWorkflow: "ship", verificationCurrent: true }),

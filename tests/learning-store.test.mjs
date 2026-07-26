@@ -478,7 +478,7 @@ test("linked worktrees use distinct confined Git-private owner roots", async (co
 });
 
 test("tracked worktree owner or transaction artifacts are never trusted", async (context) => {
-  const trackedOwner = await enabledFixture(context);
+  const trackedOwner = await enabledFixture(context, { origin: null });
   await git(trackedOwner.project.root, "add", "-f", ".leanpowers.owner.json");
   await git(trackedOwner.project.root, "commit", "-qm", "track forged owner");
   await assert.rejects(
@@ -487,7 +487,7 @@ test("tracked worktree owner or transaction artifacts are never trusted", async 
       error.code === "STORAGE_RECOVERY_FAILED" && /tracked learning metadata/.test(error.message),
   );
 
-  const trackedArtifact = await enabledFixture(context);
+  const trackedArtifact = await enabledFixture(context, { origin: null });
   const replacement = `${trackedArtifact.storePath}.replace-tracked`;
   const marker = `${replacement}.owner.json`;
   await cp(trackedArtifact.storePath, replacement, { recursive: true });

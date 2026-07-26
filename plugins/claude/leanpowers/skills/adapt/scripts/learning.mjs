@@ -34,6 +34,7 @@ const INITIAL_CONFIDENCE = {
   outcome: 0.85,
   confirmation: 0.75,
 };
+const CANONICAL_WORKFLOWS = ["shape", "build", "debug", "review", "verify", "ship"];
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_STDIN_BYTES = 64 * 1024;
 const SCHEMA_URLS = [
@@ -123,6 +124,16 @@ function requireStringList(value, field, maximum, itemMaximum) {
   for (const item of value) requireString(item, `${field}[]`, itemMaximum);
 }
 
+function requireCanonicalWorkflow(value, field) {
+  requireString(value, field, 64);
+  if (!CANONICAL_WORKFLOWS.includes(value)) {
+    throw commandError(
+      "INVALID_INPUT",
+      `${field} must be one of ${CANONICAL_WORKFLOWS.join(", ")}`,
+    );
+  }
+}
+
 function requireCallerIfPresent(request) {
   if (Object.hasOwn(request, "caller") && typeof request.caller !== "string") {
     throw commandError("INVALID_INPUT", "caller must be a string");
@@ -162,7 +173,7 @@ function requireNode20(context) {
 function validateQuery(request) {
   requireClosedRequest(request, ["workflow", "paths", "tags"], ["caller"]);
   requireCallerIfPresent(request);
-  requireString(request.workflow, "workflow", 64);
+  requireCanonicalWorkflow(request.workflow, "workflow");
   requireStringList(request.paths, "paths", 32, 500);
   requireStringList(request.tags, "tags", 32, 20);
   for (const candidate of request.paths) {
@@ -186,6 +197,10 @@ function validateRecordRequest(request) {
     throw commandError("INVALID_INPUT", "scope must be an object");
   }
   requireClosedRequest(request.scope, ["workflows", "path_prefixes", "tags"]);
+  requireStringList(request.scope.workflows, "scope.workflows", 32, 64);
+  for (const workflow of request.scope.workflows) {
+    requireCanonicalWorkflow(workflow, "scope.workflows[]");
+  }
   if (!isObject(request.evidence)) {
     throw commandError("INVALID_INPUT", "evidence must be an object");
   }
@@ -257,7 +272,6 @@ function hasSupportEvent(events, lessonId, evidence) {
 }
 
 async function recordCommand(request, project, context, dependencies) {
-  validateRecordRequest(request);
   const state = await readLearningState(project, dependencies);
   if (state.code === "LEARNING_DISABLED") {
     throw commandError("LEARNING_DISABLED", "learning is not enabled for this project");
@@ -459,6 +473,8 @@ export async function runCommand(command, request, context = {}) {
     }
 
     if (NODE_20_COMMANDS.has(command)) requireNode20(context);
+    if (command === "query") validateQuery(request);
+    if (command === "record") validateRecordRequest(request);
     const project = await projectFor(request, context);
     if (command === "enable") {
       requireClosedRequest(request, ["caller"]);
@@ -471,7 +487,6 @@ export async function runCommand(command, request, context = {}) {
       return { ok: true, enabled: result.enabled, ...cleanupWarningFields(result) };
     }
     if (command === "query") {
-      validateQuery(request);
       const state = await readLearningState(project, dependencies);
       if (state.code === "LEARNING_DISABLED") {
         throw commandError("LEARNING_DISABLED", "learning is not enabled for this project");

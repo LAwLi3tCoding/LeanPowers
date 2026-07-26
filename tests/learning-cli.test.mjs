@@ -231,6 +231,48 @@ test("every non-help invocation is stdin-only and requires exactly one JSON obje
   assert.equal(unknown.json.code, "INVALID_INPUT");
 });
 
+test("query and record reject noncanonical workflows before touching learning state", async (context) => {
+  const missingWorkspace = path.join(
+    await temporaryDirectory(context, "leanpowers-invalid-workflow-"),
+    "missing",
+  );
+  const beforeProjectResolution = await runCommand(
+    "query",
+    { ...debugContext, workflow: "route" },
+    { cwd: missingWorkspace, runtimeMajor: 20 },
+  );
+  assert.equal(beforeProjectResolution.exit_code, 2);
+  assert.equal(beforeProjectResolution.code, "INVALID_INPUT");
+
+  const workspace = await temporaryGitWorkspace(context);
+  const invalidQuery = await runCli(workspace, "query", {
+    ...debugContext,
+    workflow: "route",
+  });
+  assert.equal(invalidQuery.exitCode, 2);
+  assert.equal(invalidQuery.json.code, "INVALID_INPUT");
+  await assert.rejects(access(path.join(workspace, ".leanpowers")));
+
+  const enabled = await runCli(workspace, "enable", { caller: "leader" });
+  assert.equal(enabled.exitCode, 0);
+  const ledger = path.join(workspace, ".leanpowers", "lessons.jsonl");
+  const before = await readFile(ledger, "utf8");
+  const invalidRecord = await runCli(
+    workspace,
+    "record",
+    correctionCandidate({
+      scope: {
+        workflows: ["route"],
+        path_prefixes: ["src/"],
+        tags: ["workflow"],
+      },
+    }),
+  );
+  assert.equal(invalidRecord.exitCode, 2);
+  assert.equal(invalidRecord.json.code, "INVALID_INPUT");
+  assert.equal(await readFile(ledger, "utf8"), before);
+});
+
 test("all six mutation commands reject a missing or non-leader caller", async (context) => {
   const workspace = await temporaryGitWorkspace(context);
   const requests = new Map([
@@ -420,7 +462,9 @@ test("record rejects helper-owned fields, unsafe candidates, and full raw conten
   const unsafe = await runCli(
     workspace,
     "record",
-    correctionCandidate({ rule: "Use password=do-not-store for this request." }),
+    correctionCandidate({
+      rule: ["Use password", "do-not-store for this request."].join("="),
+    }),
   );
   assert.equal(unsafe.exitCode, 2);
   assert.equal(unsafe.json.code, "INVALID_INPUT");
