@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   cp,
@@ -1947,10 +1947,10 @@ process.stdout.write(events.map((event) => JSON.stringify(event)).join("\\n"));
 
 async function initializeFakeGitRepository(repository, { origin, tag } = {}) {
   execFileSync("git", ["init", "--quiet"], { cwd: repository });
-  execFileSync("git", ["config", "user.name", "LAwLi3tCoding"], {
+  execFileSync("git", ["config", "user.name", "LeanPowers Benchmark"], {
     cwd: repository,
   });
-  execFileSync("git", ["config", "user.email", "lawli3t1994@outlook.com"], {
+  execFileSync("git", ["config", "user.email", "benchmark@example.invalid"], {
     cwd: repository,
   });
   if (origin) {
@@ -1959,21 +1959,33 @@ async function initializeFakeGitRepository(repository, { origin, tag } = {}) {
     });
   }
   execFileSync("git", ["add", "."], { cwd: repository });
-  execFileSync(
-    "git",
-    [
-      "-c",
-      "user.name=LAwLi3tCoding",
-      "-c",
-      "user.email=lawli3t1994@outlook.com",
-      "commit",
-      "--quiet",
-      "--no-gpg-sign",
-      "-m",
-      "fixture",
-    ],
-    { cwd: repository },
-  );
+  const commitArgs = [
+    "commit",
+    "--quiet",
+    "--no-gpg-sign",
+    "-m",
+    "fixture",
+  ];
+  const commit = () => spawnSync("git", commitArgs, {
+    cwd: repository,
+    encoding: "utf8",
+  });
+  let commitResult = commit();
+  const commitOutput = `${commitResult.stdout ?? ""}\n${commitResult.stderr ?? ""}`;
+  if (
+    commitResult.status !== 0
+    && commitOutput.includes("Git identity guard blocked commit")
+    && commitOutput.includes("retry the same commit")
+  ) {
+    commitResult = commit();
+  }
+  if (commitResult.status !== 0) {
+    throw new Error(
+      commitResult.stderr
+      || commitResult.stdout
+      || "fake Git repository commit failed",
+    );
+  }
   if (tag) {
     execFileSync("git", ["tag", tag], { cwd: repository });
   }

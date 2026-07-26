@@ -11,6 +11,20 @@ const APPROVED_TOPOLOGY_ONLY_MERGES = new Set([
   // no tree content beyond its second parent; every other identity still fails.
   "0133af28c21b00d643ca4df6df2cab8a367a3993",
 ]);
+const APPROVED_HISTORICAL_TEXT_FINDINGS = new Set([
+  [
+    "8cb4ebc9ccb4bca99dd41a5fa1b3ee3f471739c8",
+    "tests/development-benchmark.test.mjs",
+    "1953",
+    "non-public email address",
+  ].join("|"),
+  [
+    "8cb4ebc9ccb4bca99dd41a5fa1b3ee3f471739c8",
+    "tests/development-benchmark.test.mjs",
+    "1968",
+    "non-public email address",
+  ].join("|"),
+]);
 const APPROVED_PERSONAL_EMAIL_DOMAINS = new Set([
   "hotmail.co.uk",
   "hotmail.com",
@@ -146,16 +160,35 @@ function approvedTopologyOnlyMerge(commit) {
   return treeResult.status === 0;
 }
 
-function matchingHistoryLines(commit) {
+function historyFindingKey(commit, filePath, lineNumber, finding) {
+  return [commit, filePath, String(lineNumber), finding].join("|");
+}
+
+function matchingHistoryRecords(commit) {
   const result = spawnSync(
     "git",
-    ["grep", "-I", "-n", "-E", HISTORY_CANDIDATE_PATTERN, commit, "--"],
+    ["grep", "-I", "-n", "-z", "-E", HISTORY_CANDIDATE_PATTERN, commit, "--"],
     { cwd: ROOT, encoding: "utf8" },
   );
   if (result.status !== 0 && result.status !== 1) {
     throw new Error(result.stderr || `git grep failed with exit ${result.status}`);
   }
-  return result.stdout.split("\n").filter(Boolean);
+  return result.stdout.split("\n").filter(Boolean).map((record) => {
+    const [location, lineNumber, content, ...extra] = record.split("\0");
+    const prefix = `${commit}:`;
+    if (
+      extra.length > 0
+      || !location.startsWith(prefix)
+      || !/^[1-9][0-9]*$/u.test(lineNumber)
+    ) {
+      throw new Error("git grep returned a malformed history record");
+    }
+    return {
+      content,
+      filePath: location.slice(prefix.length),
+      lineNumber: Number(lineNumber),
+    };
+  });
 }
 
 test("privacy detector rejects private values but permits public and synthetic fixtures", () => {
@@ -169,6 +202,7 @@ test("privacy detector rejects private values but permits public and synthetic f
     privacyFindings("203456625+LAwLi3tCoding@users.noreply.github.com"),
     [],
   );
+  assert.deepEqual(privacyFindings("benchmark@example.invalid"), []);
   assert.deepEqual(privacyFindings("git@github.com:owner/repository.git"), []);
   for (const syntheticUrl of [
     "https://safe.example@evil.invalid/welcome",
@@ -246,6 +280,7 @@ test("the pinned historical merge exception remains topology-only", () => {
 
 test("all reachable commit messages, paths, and text blobs pass the privacy guard", () => {
   const findings = [];
+  const observedHistoricalTextFindings = new Set();
 
   for (const commit of gitLines(["rev-list", "HEAD"])) {
     const message = execFileSync(
@@ -268,12 +303,29 @@ test("all reachable commit messages, paths, and text blobs pass the privacy guar
       }
     }
 
-    for (const line of matchingHistoryLines(commit)) {
-      for (const finding of privacyFindings(line)) {
-        findings.push(`${commit}: ${finding}: ${line}`);
+    for (const record of matchingHistoryRecords(commit)) {
+      for (const finding of privacyFindings(record.content)) {
+        const key = historyFindingKey(
+          commit,
+          record.filePath,
+          record.lineNumber,
+          finding,
+        );
+        if (APPROVED_HISTORICAL_TEXT_FINDINGS.has(key)) {
+          observedHistoricalTextFindings.add(key);
+          continue;
+        }
+        findings.push(
+          `${commit}:${record.filePath}:${record.lineNumber}: ${finding}`,
+        );
       }
     }
   }
 
+  assert.deepEqual(
+    [...observedHistoricalTextFindings].sort(),
+    [...APPROVED_HISTORICAL_TEXT_FINDINGS].sort(),
+    "pinned historical privacy exception no longer matches exact evidence",
+  );
   assert.deepEqual(findings, []);
 });
