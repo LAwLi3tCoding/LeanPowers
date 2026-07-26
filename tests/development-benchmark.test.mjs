@@ -1707,6 +1707,7 @@ test("the runner isolates one plugin and preserves workflow-neutral prompts", as
 
 test("the Codex runner is writable, non-interactive, ephemeral, and model-paired", () => {
   const args = buildCodexArgs({
+    disabledFeatures: ["image_generation", "browser_use"],
     effort: "low",
     model: "gpt-5.3-codex-spark",
     prompt: "Implement the task in this repository.",
@@ -1721,11 +1722,387 @@ test("the Codex runner is writable, non-interactive, ephemeral, and model-paired
   assert.ok(args.includes('model_reasoning_effort="low"'));
   assert.ok(args.includes("features.multi_agent=true"));
   assert.deepEqual(
-    args.slice(args.indexOf("--disable"), args.indexOf("--disable") + 2),
-    ["--disable", "image_generation"],
+    args.flatMap((value, index) =>
+      value === "--disable" ? [args.slice(index, index + 2)] : []
+    ),
+    [
+      ["--disable", "image_generation"],
+      ["--disable", "browser_use"],
+    ],
   );
   assert.ok(!args.join(" ").includes("superpowers-6.1.1"));
   assert.ok(!args.join(" ").includes("leanpowers-0.2.0"));
+
+  assert.throws(
+    () => buildCodexArgs({
+      disabledFeatures: ["image_generation", "bad-feature"],
+      effort: "low",
+      model: "gpt-5.3-codex-spark",
+      prompt: "Implement the task in this repository.",
+      workspace: "/tmp/disposable-workspace",
+    }),
+    /disabled feature/u,
+  );
+  assert.throws(
+    () => buildCodexArgs({
+      disabledFeatures: ["image_generation", "image_generation"],
+      effort: "low",
+      model: "gpt-5.3-codex-spark",
+      prompt: "Implement the task in this repository.",
+      workspace: "/tmp/disposable-workspace",
+    }),
+    /disabled feature/u,
+  );
+});
+
+test("the Codex model/tool preflight requires an exact successful tool round trip", async () => {
+  const { preflightCodexModelToolCompatibility } = await import(
+    "../scripts/lib/development-benchmark.mjs"
+  );
+  assert.equal(typeof preflightCodexModelToolCompatibility, "function");
+
+  const root = await mkdtemp(path.join(os.tmpdir(), "lp-model-tool-preflight-"));
+  try {
+    const codexHome = path.join(root, "codex-home");
+    await mkdir(path.join(codexHome, "tmp"), { recursive: true });
+    await writeFile(path.join(codexHome, "auth.json"), "{}\n");
+    const fakeCodex = path.join(root, "fake-codex.cjs");
+    await writeFile(fakeCodex, `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+if (args[0] === "features" && args[1] === "list") {
+  process.stdout.write([
+    "image_generation stable true",
+    "browser_use stable true",
+  ].join("\\n"));
+  process.exit(0);
+}
+const disabled = args.flatMap((value, index) =>
+  value === "--disable" ? [args[index + 1]] : []
+);
+if (
+  args[args.indexOf("-m") + 1] !== "gpt-5.6-terra" ||
+  JSON.stringify(disabled) !== JSON.stringify(["image_generation", "browser_use"])
+) {
+  process.exit(91);
+}
+const mode = process.env.FAKE_PREFLIGHT_MODE;
+const events = [
+  { type: "thread.started", thread_id: "preflight" },
+  { type: "turn.started" },
+];
+if (mode === "cli-upgrade") {
+  const message = "The 'gpt-5.6-terra' model requires a newer version of Codex.";
+  events.push({ type: "error", message });
+  events.push({ type: "turn.failed", error: { message } });
+  process.stdout.write(events.map((event) => JSON.stringify(event)).join("\\n"));
+  process.exit(1);
+}
+if (mode !== "no-tool") {
+  events.push({
+    type: "item.completed",
+    item: {
+      type: "command_execution",
+      command: mode === "wrong-command"
+        ? "/bin/zsh -lc true"
+        : "/bin/zsh -lc 'node --version'",
+      status: "completed",
+      exit_code: 0,
+    },
+  });
+}
+if (mode === "two-tools") {
+  events.push({
+    type: "item.completed",
+    item: {
+      type: "command_execution",
+      command: "node --version",
+      status: "completed",
+      exit_code: 0,
+    },
+  });
+}
+if (mode === "other-tool") {
+  events.push({
+    type: "item.completed",
+    item: { type: "collab_tool_call", status: "completed" },
+  });
+}
+if (mode === "empty-directory") fs.mkdirSync("unexpected-empty");
+if (mode === "git-config") fs.appendFileSync(".git/config", "\\n[unexpected]\\n");
+events.push({
+  type: "item.completed",
+  item: {
+    type: "agent_message",
+    text: mode === "wrong-nonce"
+      ? "WRONG"
+      : "LEANPOWERS_MODEL_TOOL_PREFLIGHT_OK",
+  },
+});
+events.push({
+  type: "turn.completed",
+  usage: mode === "missing-telemetry"
+    ? {}
+    : {
+        input_tokens: 100,
+        cached_input_tokens: 40,
+        output_tokens: 20,
+        reasoning_output_tokens: 10,
+      },
+});
+process.stdout.write(events.map((event) => JSON.stringify(event)).join("\\n"));
+`, { mode: 0o755 });
+
+    const runPreflight = (
+      mode,
+      disabledFeatures = ["image_generation", "browser_use"],
+    ) => preflightCodexModelToolCompatibility({
+      codexExecutable: fakeCodex,
+      codexHome,
+      disabledFeatures,
+      effort: "medium",
+      model: "gpt-5.6-terra",
+      toolchain: {
+        codex: fakeCodex,
+        git: "git",
+        node: process.execPath,
+        npm: "npm",
+        runtimeReadRoots: [],
+        environment: {
+          FAKE_PREFLIGHT_MODE: mode,
+          PATH: process.env.PATH,
+          SHELL: process.env.SHELL ?? "/bin/sh",
+        },
+      },
+    });
+
+    const passingPreflight = await runPreflight("pass");
+    const { wall_seconds: wallSeconds, ...stablePreflight } = passingPreflight;
+    assert.ok(Number.isFinite(wallSeconds) && wallSeconds > 0);
+    assert.deepEqual(stablePreflight, {
+      disabled_features: ["image_generation", "browser_use"],
+      effort: "medium",
+      model: "gpt-5.6-terra",
+      required_tool_event_type: "command_execution",
+      status: "PASS",
+      telemetry_complete: true,
+      token_usage: {
+        cached_input: 40,
+        input: 100,
+        output: 20,
+        reasoning_output: 10,
+        total: 120,
+        uncached_plus_output: 80,
+      },
+      tool_calls: 1,
+      workspace_unchanged: true,
+    });
+    await assert.rejects(runPreflight("no-tool"), /command_execution/u);
+    await assert.rejects(runPreflight("wrong-command"), /node --version/u);
+    await assert.rejects(runPreflight("two-tools"), /exactly one/u);
+    await assert.rejects(runPreflight("other-tool"), /unexpected tool/u);
+    await assert.rejects(runPreflight("wrong-nonce"), /completion nonce/u);
+    await assert.rejects(runPreflight("missing-telemetry"), /Token telemetry/u);
+    await assert.rejects(runPreflight("empty-directory"), /changed its disposable workspace/u);
+    await assert.rejects(runPreflight("git-config"), /changed its disposable workspace/u);
+    await assert.rejects(
+      runPreflight("pass", ["image_generation", "not_real_feature"]),
+      /feature registry/u,
+    );
+    await assert.rejects(runPreflight("cli-upgrade"), /requires a newer version of Codex/u);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("held-out suites freeze one exact closed Codex tool policy", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "lp-tool-policy-freeze-"));
+  try {
+    const copiedRoot = path.join(root, "development-effects");
+    await cp(new URL("../evals/development-effects/", import.meta.url), copiedRoot, {
+      recursive: true,
+    });
+    const copiedSuitePath = path.join(
+      copiedRoot,
+      "performance-confirmatory-v7-suite.json",
+    );
+    const source = JSON.parse(await readFile(copiedSuitePath, "utf8"));
+    const policy = {
+      disabled_features: ["image_generation", "browser_use"],
+      required_tool_event_type: "command_execution",
+    };
+    source.codex_tool_policy = policy;
+    source.freeze_contract.codex_tool_policy = policy;
+    await writeFile(copiedSuitePath, `${JSON.stringify(source, null, 2)}\n`);
+
+    const loaded = await loadDevelopmentSuite(copiedSuitePath);
+    assert.deepEqual(loaded.codex_tool_policy, policy);
+    assert.equal(loaded.freeze_contract_verified, true);
+
+    const missingFreezePolicy = structuredClone(source);
+    delete missingFreezePolicy.freeze_contract.codex_tool_policy;
+    await writeFile(
+      copiedSuitePath,
+      `${JSON.stringify(missingFreezePolicy, null, 2)}\n`,
+    );
+    await assert.rejects(
+      loadDevelopmentSuite(copiedSuitePath),
+      /exact frozen model, matrix/u,
+    );
+
+    const duplicateFeature = structuredClone(source);
+    duplicateFeature.codex_tool_policy.disabled_features = [
+      "image_generation",
+      "image_generation",
+    ];
+    duplicateFeature.freeze_contract.codex_tool_policy =
+      duplicateFeature.codex_tool_policy;
+    await writeFile(
+      copiedSuitePath,
+      `${JSON.stringify(duplicateFeature, null, 2)}\n`,
+    );
+    await assert.rejects(
+      loadDevelopmentSuite(copiedSuitePath),
+      /codex_tool_policy/u,
+    );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test("development runs complete model/tool preflight before creating task runs", async () => {
+  const source = await readFile(
+    new URL("../scripts/lib/development-benchmark.mjs", import.meta.url),
+    "utf8",
+  );
+  const preflight = source.indexOf(
+    "await preflightCodexModelToolCompatibility({",
+  );
+  const taskRuns = source.indexOf("const runs = [];", preflight);
+  assert.ok(preflight >= 0);
+  assert.ok(taskRuns > preflight);
+  assert.match(
+    source.slice(preflight, taskRuns),
+    /disabledFeatures: codexToolPolicy\.disabled_features/u,
+  );
+  assert.match(
+    source.slice(taskRuns),
+    /disabledFeatures: codexToolPolicy\.disabled_features/u,
+  );
+});
+
+test("the benchmark CLI records standalone model/tool preflight evidence before freeze", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "lp-preflight-cli-"));
+  try {
+    const authFile = path.join(root, "auth.json");
+    const fakeCodex = path.join(root, "fake-codex.cjs");
+    const outputFile = path.join(root, "model-tool-preflight.json");
+    await writeFile(authFile, "{}\n");
+    await writeFile(fakeCodex, `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args.length === 1 && args[0] === "--version") {
+  process.stdout.write("codex-cli 0.test\\n");
+  process.exit(0);
+}
+if (args[0] === "features" && args[1] === "list") {
+  process.stdout.write("image_generation stable true\\n");
+  process.exit(0);
+}
+const events = [
+  { type: "thread.started", thread_id: "preflight" },
+  { type: "turn.started" },
+  {
+    type: "item.completed",
+    item: {
+      type: "command_execution",
+      command: "node --version",
+      status: "completed",
+      exit_code: 0,
+    },
+  },
+  {
+    type: "item.completed",
+    item: {
+      type: "agent_message",
+      text: "LEANPOWERS_MODEL_TOOL_PREFLIGHT_OK",
+    },
+  },
+  {
+    type: "turn.completed",
+    usage: {
+      input_tokens: 100,
+      cached_input_tokens: 40,
+      output_tokens: 20,
+      reasoning_output_tokens: 10,
+    },
+  },
+];
+process.stdout.write(events.map((event) => JSON.stringify(event)).join("\\n"));
+`, { mode: 0o755 });
+
+    const cliOutput = execFileSync(
+      process.execPath,
+      [
+        fileURLToPath(new URL("../scripts/development-benchmark.mjs", import.meta.url)),
+        "preflight",
+        "--model",
+        "gpt-5.6-terra",
+        "--effort",
+        "medium",
+        "--disable-feature",
+        "image_generation",
+        "--codex",
+        fakeCodex,
+        "--auth-file",
+        authFile,
+        "--out",
+        outputFile,
+      ],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    assert.equal(cliOutput, "Model/tool preflight PASS\n");
+    const evidence = JSON.parse(await readFile(outputFile, "utf8"));
+    const { wall_seconds: wallSeconds, ...stableEvidence } = evidence;
+    assert.ok(Number.isFinite(wallSeconds) && wallSeconds > 0);
+    assert.deepEqual(stableEvidence, {
+      codex_version: "codex-cli 0.test",
+      disabled_features: ["image_generation"],
+      effort: "medium",
+      model: "gpt-5.6-terra",
+      required_tool_event_type: "command_execution",
+      schema_version: 1,
+      status: "PASS",
+      telemetry_complete: true,
+      token_usage: {
+        cached_input: 40,
+        input: 100,
+        output: 20,
+        reasoning_output: 10,
+        total: 120,
+        uncached_plus_output: 80,
+      },
+      tool_calls: 1,
+      workspace_unchanged: true,
+    });
+    let usageError;
+    try {
+      execFileSync(
+        process.execPath,
+        [
+          fileURLToPath(
+            new URL("../scripts/development-benchmark.mjs", import.meta.url),
+          ),
+          "unknown-command",
+        ],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      );
+    } catch (error) {
+      usageError = error;
+    }
+    assert.match(String(usageError?.stderr), /<inspect\|preflight\|run>/u);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
 });
 
 test("LeanPowers activation requires an unambiguous first-progress route declaration", () => {
@@ -7566,8 +7943,26 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
     evidence_level: "paired-development-pilot",
     runtime: {
       codex_version: "codex-test",
+      codex_tool_policy: {
+        disabled_features: ["image_generation"],
+        required_tool_event_type: "command_execution",
+      },
       effort: "low",
       model: "test-model",
+      model_tool_preflight: {
+        "leanpowers-0.2.0": {
+          status: "PASS",
+          token_usage: { total: 120 },
+          tool_calls: 1,
+          wall_seconds: 0.5,
+        },
+        "superpowers-6.1.1": {
+          status: "PASS",
+          token_usage: { total: 100 },
+          tool_calls: 1,
+          wall_seconds: 0.4,
+        },
+      },
       workflow_revisions: {
         "leanpowers-0.2.0": "lean-revision",
         "superpowers-6.1.1": "upstream-revision",
@@ -7589,6 +7984,14 @@ test("paired reductions are calculated per matched pair and prioritize both-PASS
   assert.match(report, /Run matrix: \*\*complete\*\*/u);
   assert.match(report, /Attempts \| Capacity retry wall/u);
   assert.match(report, /capacity retries are isolated from workflow wall-time comparisons/iu);
+  assert.match(
+    report,
+    /Tool policy: required event command_execution; disabled features: image_generation\./u,
+  );
+  assert.match(
+    report,
+    /Model\/tool preflight: Superpowers PASS \(100 tokens, 1 tool call, 0\.4s\); LeanPowers PASS \(120 tokens, 1 tool call, 0\.5s\)\./u,
+  );
   assert.match(report, new RegExp(`Suite manifest: ${suite.suite_sha256}`, "u"));
   assert.match(report, /Workspace snapshot \| Hidden verifier snapshot \| Fault-family snapshot/u);
   assert.match(report, /eligible pairs: 0\/2/u);

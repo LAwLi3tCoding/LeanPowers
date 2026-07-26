@@ -1,9 +1,11 @@
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
   loadDevelopmentSuite,
   runDevelopmentPilot,
+  runStandaloneCodexModelToolPreflight,
 } from "./lib/development-benchmark.mjs";
 
 function option(args, name, { required = false } = {}) {
@@ -33,18 +35,37 @@ function options(args, name) {
 
 async function main() {
   const [command, ...args] = process.argv.slice(2);
+  if (command === "preflight") {
+    const outputFile = path.resolve(option(args, "--out", { required: true }));
+    const disabledFeatures = options(args, "--disable-feature");
+    const evidence = await runStandaloneCodexModelToolPreflight({
+      authFile: option(args, "--auth-file"),
+      codexExecutable: option(args, "--codex") ?? "codex",
+      disabledFeatures:
+        disabledFeatures.length === 0 ? undefined : disabledFeatures,
+      effort: option(args, "--effort") ?? "medium",
+      model: option(args, "--model", { required: true }),
+    });
+    await mkdir(path.dirname(outputFile), { recursive: true });
+    await writeFile(
+      outputFile,
+      `${JSON.stringify(evidence, null, 2)}\n`,
+      { flag: "wx" },
+    );
+    console.log("Model/tool preflight PASS");
+    return;
+  }
+  if (!["inspect", "run"].includes(command)) {
+    throw new Error(
+      "Usage: node scripts/development-benchmark.mjs <inspect|preflight|run> [options]",
+    );
+  }
   const suitePath = option(args, "--suite", { required: true });
   if (command === "inspect") {
     const suite = await loadDevelopmentSuite(suitePath);
     console.log(JSON.stringify(suite, null, 2));
     return;
   }
-  if (command !== "run") {
-    throw new Error(
-      "Usage: node scripts/development-benchmark.mjs <inspect|run> --suite <file> [run options]",
-    );
-  }
-
   const result = await runDevelopmentPilot({
     suitePath,
     outputDirectory: path.resolve(option(args, "--out", { required: true })),

@@ -351,6 +351,7 @@ function normalizeSuiteContract(source, reasons) {
     report_contract: source?.report_contract,
     model_default: source?.model_default,
     effort: source?.effort,
+    codex_tool_policy: source?.codex_tool_policy,
     repetitions: source?.repetitions,
     workflow_order: source?.workflow_order,
     case_order: source?.case_order,
@@ -417,6 +418,10 @@ function normalizeSuiteContract(source, reasons) {
       contract.quality_policy,
     ) ||
     contract.freeze_contract?.quality_policy !== contract.quality_policy ||
+    !validFrozenCodexToolPolicy(
+      contract.codex_tool_policy,
+      contract.freeze_contract?.codex_tool_policy,
+    ) ||
     !SHA1.test(String(contract.freeze_contract?.superpowers_revision ?? "")) ||
     typeof contract.freeze_contract?.agent_read_isolation !== "string" ||
     !pinnedRevisionContractValid
@@ -429,6 +434,33 @@ function normalizeSuiteContract(source, reasons) {
 function validateRuntime(runtime, contract, reasons) {
   if (runtime?.model !== contract.model_default) reasons.add("runtime-model");
   if (runtime?.effort !== contract.effort) reasons.add("runtime-effort");
+  if (contract.codex_tool_policy !== undefined) {
+    if (!isDeepStrictEqual(runtime?.codex_tool_policy, contract.codex_tool_policy)) {
+      reasons.add("runtime-tool-policy");
+    }
+    if (
+      !plainObject(runtime?.model_tool_preflight) ||
+      !isDeepStrictEqual(
+        Object.keys(runtime.model_tool_preflight).sort(),
+        [...WORKFLOWS].sort(),
+      ) ||
+      WORKFLOWS.some((workflow) =>
+        !validModelToolPreflight(
+          runtime.model_tool_preflight[workflow],
+          contract,
+        )
+      )
+    ) {
+      reasons.add("runtime-model-tool-preflight");
+    }
+  } else {
+    if (runtime?.codex_tool_policy !== undefined) {
+      reasons.add("runtime-tool-policy");
+    }
+    if (runtime?.model_tool_preflight !== undefined) {
+      reasons.add("runtime-model-tool-preflight");
+    }
+  }
   if (
     runtime?.sandbox !== "permissions-profile" ||
     runtime?.permission_profile !== "benchmark" ||
@@ -463,6 +495,65 @@ function validateRuntime(runtime, contract, reasons) {
     revisionsValid &&= runtime?.evaluator_revision === revisions?.[LEAN_WORKFLOW];
   }
   if (!revisionsValid) reasons.add("workflow-revisions");
+}
+
+function validFrozenCodexToolPolicy(policy, frozenPolicy) {
+  if (policy === undefined) return frozenPolicy === undefined;
+  return plainObject(policy) &&
+    Object.keys(policy).sort().join(",") ===
+      "disabled_features,required_tool_event_type" &&
+    Array.isArray(policy.disabled_features) &&
+    new Set(policy.disabled_features).size === policy.disabled_features.length &&
+    policy.disabled_features.every((feature) =>
+      typeof feature === "string" &&
+      /^[a-z][a-z0-9_]*$/u.test(feature)
+    ) &&
+    policy.required_tool_event_type === "command_execution" &&
+    isDeepStrictEqual(frozenPolicy, policy);
+}
+
+function validModelToolPreflight(preflight, contract) {
+  if (
+    !plainObject(preflight) ||
+    Object.keys(preflight).sort().join(",") !==
+      "disabled_features,effort,model,required_tool_event_type,status,telemetry_complete,token_usage,tool_calls,wall_seconds,workspace_unchanged" ||
+    !isDeepStrictEqual(
+      preflight.disabled_features,
+      contract.codex_tool_policy.disabled_features,
+    ) ||
+    preflight.effort !== contract.effort ||
+    preflight.model !== contract.model_default ||
+    preflight.required_tool_event_type !==
+      contract.codex_tool_policy.required_tool_event_type ||
+    preflight.status !== "PASS" ||
+    preflight.telemetry_complete !== true ||
+    preflight.tool_calls !== 1 ||
+    !Number.isFinite(preflight.wall_seconds) ||
+    preflight.wall_seconds <= 0 ||
+    preflight.workspace_unchanged !== true
+  ) {
+    return false;
+  }
+  const tokens = preflight.token_usage;
+  return plainObject(tokens) &&
+    Object.keys(tokens).sort().join(",") ===
+      "cached_input,input,output,reasoning_output,total,uncached_plus_output" &&
+    Number.isSafeInteger(tokens.input) &&
+    tokens.input >= 0 &&
+    Number.isSafeInteger(tokens.cached_input) &&
+    tokens.cached_input >= 0 &&
+    tokens.cached_input <= tokens.input &&
+    Number.isSafeInteger(tokens.output) &&
+    tokens.output >= 0 &&
+    Number.isSafeInteger(tokens.total) &&
+    tokens.total > 0 &&
+    tokens.total === tokens.input + tokens.output &&
+    Number.isSafeInteger(tokens.uncached_plus_output) &&
+    tokens.uncached_plus_output ===
+      tokens.input - tokens.cached_input + tokens.output &&
+    (tokens.reasoning_output === null ||
+      (Number.isSafeInteger(tokens.reasoning_output) &&
+        tokens.reasoning_output >= 0));
 }
 
 function validateMatrix(runs, contract, repetitions, reasons) {

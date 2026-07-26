@@ -413,6 +413,121 @@ test("gate validates frozen runtime, exact order, and workflow revisions", () =>
   }
 });
 
+test("gate binds exact model/tool preflight evidence to the frozen tool policy", () => {
+  const suite = structuredClone(frozenSuite);
+  suite.suite_id = "development-effects-model-tool-preflight-test";
+  suite.suite_sha256 = "9".repeat(64);
+  suite.codex_tool_policy = {
+    disabled_features: ["image_generation"],
+    required_tool_event_type: "command_execution",
+  };
+  suite.freeze_contract.codex_tool_policy = suite.codex_tool_policy;
+
+  const result = passingResult();
+  result.suite_id = suite.suite_id;
+  result.suite_sha256 = suite.suite_sha256;
+  result.runtime.codex_tool_policy = structuredClone(suite.codex_tool_policy);
+  const preflight = {
+    disabled_features: ["image_generation"],
+    effort: suite.effort,
+    model: suite.model_default,
+    required_tool_event_type: "command_execution",
+    status: "PASS",
+    telemetry_complete: true,
+    token_usage: {
+      cached_input: 40,
+      input: 100,
+      output: 20,
+      reasoning_output: 10,
+      total: 120,
+      uncached_plus_output: 80,
+    },
+    tool_calls: 1,
+    wall_seconds: 0.5,
+    workspace_unchanged: true,
+  };
+  result.runtime.model_tool_preflight = {
+    "superpowers-6.1.1": structuredClone(preflight),
+    "leanpowers-0.2.0": structuredClone(preflight),
+  };
+
+  assert.equal(
+    evaluateDevelopmentResultGate(result, { suite }).status,
+    "PASS",
+  );
+
+  const mutations = [
+    ["runtime-tool-policy", (value) => {
+      delete value.runtime.codex_tool_policy;
+    }],
+    ["runtime-tool-policy", (value) => {
+      value.runtime.codex_tool_policy.disabled_features = ["browser_use"];
+    }],
+    ["runtime-model-tool-preflight", (value) => {
+      delete value.runtime.model_tool_preflight["leanpowers-0.2.0"];
+    }],
+    ["runtime-model-tool-preflight", (value) => {
+      value.runtime.model_tool_preflight["leanpowers-0.2.0"].model =
+        "different-model";
+    }],
+    ["runtime-model-tool-preflight", (value) => {
+      value.runtime.model_tool_preflight["leanpowers-0.2.0"].effort =
+        "different-effort";
+    }],
+    ["runtime-model-tool-preflight", (value) => {
+      value.runtime.model_tool_preflight["leanpowers-0.2.0"].status = "FAIL";
+    }],
+    ["runtime-model-tool-preflight", (value) => {
+      value.runtime.model_tool_preflight["leanpowers-0.2.0"]
+        .telemetry_complete = false;
+    }],
+    ["runtime-model-tool-preflight", (value) => {
+      value.runtime.model_tool_preflight["leanpowers-0.2.0"]
+        .workspace_unchanged = false;
+    }],
+    ["runtime-model-tool-preflight", (value) => {
+      value.runtime.model_tool_preflight["leanpowers-0.2.0"]
+        .token_usage.total = 119;
+    }],
+    ["runtime-model-tool-preflight", (value) => {
+      value.runtime.model_tool_preflight["leanpowers-0.2.0"]
+        .tool_calls = 2;
+    }],
+    ["runtime-model-tool-preflight", (value) => {
+      value.runtime.model_tool_preflight["leanpowers-0.2.0"]
+        .wall_seconds = 0;
+    }],
+  ];
+  for (const [reason, mutate] of mutations) {
+    const candidate = structuredClone(result);
+    mutate(candidate);
+    const verdict = evaluateDevelopmentResultGate(candidate, { suite });
+    assert.equal(verdict.status, "FAIL", reason);
+    assert.ok(verdict.reasons.includes(reason), JSON.stringify(verdict));
+  }
+
+  const unpinned = structuredClone(suite);
+  delete unpinned.freeze_contract.codex_tool_policy;
+  const contractVerdict = evaluateDevelopmentResultGate(result, {
+    suite: unpinned,
+  });
+  assert.equal(contractVerdict.status, "FAIL");
+  assert.ok(contractVerdict.reasons.includes("suite-contract"));
+
+  const unboundRuntime = passingResult();
+  unboundRuntime.runtime.codex_tool_policy = structuredClone(
+    suite.codex_tool_policy,
+  );
+  unboundRuntime.runtime.model_tool_preflight = {
+    "superpowers-6.1.1": structuredClone(preflight),
+    "leanpowers-0.2.0": structuredClone(preflight),
+  };
+  const unboundVerdict = evaluateDevelopmentResultGate(unboundRuntime);
+  assert.equal(unboundVerdict.status, "FAIL");
+  assert.ok(unboundVerdict.reasons.includes("runtime-tool-policy"));
+  assert.ok(unboundVerdict.reasons.includes("runtime-model-tool-preflight"));
+});
+
 test("gate recomputes task outcome and Lean conformance instead of trusting PASS summaries", () => {
   const outcomeTamper = passingResult();
   outcomeTamper.runs[0].verifier.visible.exit_code = 1;

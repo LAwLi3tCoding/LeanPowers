@@ -36,6 +36,18 @@ The executable pilot lives in [evals/development-effects/](../evals/development-
 
 Cases may also declare workflow-neutral semantic fault families. Every member must preserve the immutable baseline tests, and every candidate-test counterfactual must complete. An `all-kill` family requires the candidate test delta to kill every member. The `replace-callable-export` operator rewrites exactly one registered direct named function or single-binding variable export in place. It adds no phase-only files, preserves all other module text and exports (including `default`), syntax-checks the transformed module before tests, and fails closed if the target or replacement does not match that explicit shape. The localized-cache case checks both name/locale inclusion directions and uses an empty-concatenation boundary-erasure representative (`name + locale`). Its explicit acceptance criterion requires distinct identities with identical concatenated text but different component boundaries, so the representative is killed without guessing a delimiter and without erasing order inside either component. It is a test instrument for boundary loss, not a claim that this exact implementation is a likely production bug. Family ID, policy, target, named export, member count/order, and hashes of the exact applied function fragments are bound into the case snapshot manifest. Public results expose only family-level counts and an evidence hash; detailed per-member commands remain in local raw artifacts. Missing test changes, byte-identical applied fragments, incomplete evidence, timeouts, signals, unsafe targets, baseline-invalid members, and unmet all-kill policies fail closed. Pilot suite/result schema version `2` intentionally rejects the earlier single-mutation shape. The checked-in 2026-07-14 pilot report predates this stronger gate and is not retroactively rescored.
 
+Before freezing or running a new matrix, verify the exact model, reasoning effort, and closed tool policy:
+
+```bash
+node scripts/development-benchmark.mjs preflight \
+  --model gpt-5.5 \
+  --effort medium \
+  --disable-feature image_generation \
+  --out /tmp/leanpowers-model-tool-preflight.json
+```
+
+The preflight creates a disposable workspace and isolated Codex home, verifies every disabled feature against the installed CLI registry, requires exactly one successful `command_execution`, rejects other tool events, checks a nonce, requires complete Token telemetry, records tool-call count and wall time, and proves that the full workspace fingerprint is unchanged. Held-out runs repeat this exact frozen policy for both workflows before the first task. The result gate fails closed when the suite policy, either workflow's evidence, Token arithmetic, tool count, or workspace proof is missing or mismatched. A PASS proves runtime compatibility only; it is not evidence of model quality or workflow effectiveness.
+
 ```bash
 node scripts/development-benchmark.mjs run \
   --suite evals/development-effects/pilot-suite.json \

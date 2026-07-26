@@ -72,6 +72,8 @@ Learning data is advisory. Retrieved lessons can adjust LeanPowers defaults only
 | `npm run validate` | Full repository validation gate |
 | Benchmark reports | Frozen live evidence for workflow effect; failed or diagnostic runs are retained, not rescored |
 
+Development-effects runs bind a closed Codex tool policy to both the suite and the result. Before any task is shown to either workflow, the runner creates a disposable workspace and isolated Codex home, verifies that every disabled feature exists in the installed CLI registry, executes exactly one `command_execution`, rejects unexpected tool events, checks the completion nonce, requires complete Token telemetry, records tool-call count and wall time, and fingerprints the full disposable tree before and after the request. The standalone `preflight` command exposes the same compatibility check for suite calibration. Held-out result adjudication fails closed when the frozen policy, either workflow's preflight evidence, Token arithmetic, tool count, or unchanged-workspace proof is missing or inconsistent.
+
 Benchmark evidence is bounded. The latest v7 audit is a frozen FAIL: it identifies concrete routing, conformance, mutation-test, strict-review, telemetry, and runner compatibility gaps, but it does not prove release-gate success or general non-inferiority.
 
 ## Current risks
@@ -82,4 +84,5 @@ Benchmark evidence is bounded. The latest v7 audit is a frozen FAIL: it identifi
 - DEBUG repair recovery and final reproduction attribution remain easy to violate.
 - Strict work cannot pass without a fresh independent read-only review.
 - Learning storage must remain local, bounded, schema-valid, and confined even under worktrees or concurrent writes.
+- Model/tool compatibility preflight proves only that the selected runtime can execute the frozen harness contract; it does not prove task quality, efficiency, or general model capability.
 - Future benchmark claims require newly frozen unseen cases; old failed runs are calibration evidence, not proof of success.

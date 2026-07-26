@@ -16,6 +16,11 @@ const routingSource = await readFile(
   new URL("../scripts/lib/routing.mjs", import.meta.url),
   "utf8",
 );
+const strictSignalNames =
+  routingSource
+    .match(/const STRICT_SIGNALS = \[([\s\S]*?)\];/)?.[1]
+    ?.match(/"([^"]+)"/g)
+    ?.map((signal) => signal.slice(1, -1)) ?? [];
 
 test("structured risk fixtures use the highest applicable signal", () => {
   for (const fixture of cases) {
@@ -26,6 +31,10 @@ test("structured risk fixtures use the highest applicable signal", () => {
 test("user rigor can upgrade but never downgrade a strict signal", () => {
   assert.equal(classifyRisk({ preferredMode: "strict", local: true }), "strict");
   assert.equal(classifyRisk({ preferredMode: "lean", security: true }), "strict");
+  assert.equal(
+    classifyRisk({ causeKnown: false, preferredMode: "lean", security: true }),
+    "strict",
+  );
   assert.equal(classifyRisk({ causeKnown: false, preferredMode: "lean" }), "standard");
   assert.equal(
     classifyRisk({
@@ -38,6 +47,25 @@ test("user rigor can upgrade but never downgrade a strict signal", () => {
     }),
     "standard",
   );
+});
+
+test("every strict signal in the routing table maps to strict risk", () => {
+  assert.notEqual(strictSignalNames.length, 0);
+  for (const signal of strictSignalNames) {
+    assert.equal(
+      classifyRisk({
+        [signal]: true,
+        causeKnown: false,
+        clear: true,
+        establishedValidation: true,
+        local: true,
+        preferredMode: "lean",
+        reversible: true,
+      }),
+      "strict",
+      signal,
+    );
+  }
 });
 
 test("every standard signal overrides otherwise lean-eligible work", () => {
@@ -115,6 +143,21 @@ test("initial workflow selection covers every workflow owner", () => {
   assert.equal(selectInitialWorkflow({ engineeringWork: false }), null);
 });
 
+test("strict build and debug work enter review before verification", () => {
+  for (const current of ["build", "debug"]) {
+    assert.equal(
+      selectNextWorkflow({
+        current,
+        risk: "strict",
+        evidenceCurrent: false,
+        verificationRequested: true,
+      }),
+      "review",
+      current,
+    );
+  }
+});
+
 test("routing resolves entry contracts and competing intents one workflow at a time", () => {
   assert.equal(selectInitialWorkflow({ explicitWorkflow: "review" }), "review");
   assert.equal(
@@ -183,6 +226,125 @@ test("routing resolves entry contracts and competing intents one workflow at a t
     }),
     "ship",
   );
+});
+
+test("invalid explicit workflow strings fall through to safe routing", () => {
+  for (const explicitWorkflow of ["route", "adapt-now", " build "]) {
+    assert.equal(selectInitialWorkflow({ explicitWorkflow }), "build", explicitWorkflow);
+    assert.equal(
+      selectInitialWorkflow({ causeKnown: false, explicitWorkflow }),
+      "debug",
+      explicitWorkflow,
+    );
+    assert.equal(
+      selectInitialWorkflow({ diagnosisRequested: true, explicitWorkflow }),
+      "debug",
+      explicitWorkflow,
+    );
+  }
+});
+
+test("dirty truthy structured values do not trigger initial workflow booleans", () => {
+  for (const dirtyTruthy of [1, "true", "yes", [], {}]) {
+    assert.equal(
+      selectInitialWorkflow({ engineeringWork: dirtyTruthy }),
+      null,
+      "engineeringWork",
+    );
+    assert.equal(
+      selectInitialWorkflow({ learningRequest: dirtyTruthy }),
+      "build",
+      "learningRequest",
+    );
+    assert.equal(
+      selectInitialWorkflow({ diagnosisRequested: dirtyTruthy }),
+      "build",
+      "diagnosisRequested",
+    );
+    assert.equal(
+      selectInitialWorkflow({
+        deliveryOnly: dirtyTruthy,
+        verificationCurrent: true,
+      }),
+      "build",
+      "deliveryOnly",
+    );
+    assert.equal(
+      selectInitialWorkflow({ reviewRequested: dirtyTruthy }),
+      "build",
+      "reviewRequested",
+    );
+    assert.equal(
+      selectInitialWorkflow({ needsShaping: dirtyTruthy }),
+      "build",
+      "needsShaping",
+    );
+    assert.equal(
+      selectInitialWorkflow({ grillingRequested: dirtyTruthy }),
+      "build",
+      "grillingRequested",
+    );
+    assert.equal(
+      selectInitialWorkflow({ verificationRequested: dirtyTruthy }),
+      "build",
+      "verificationRequested",
+    );
+    assert.equal(
+      selectInitialWorkflow({
+        deliveryOnly: true,
+        independentReview: dirtyTruthy,
+        risk: "strict",
+        verificationCurrent: true,
+      }),
+      "review",
+      "independentReview",
+    );
+    assert.equal(
+      selectInitialWorkflow({
+        deliveryOnly: true,
+        risk: "standard",
+        verificationCurrent: dirtyTruthy,
+      }),
+      "verify",
+      "verificationCurrent",
+    );
+  }
+});
+
+test("dirty truthy structured values do not trigger next workflow booleans", () => {
+  for (const dirtyTruthy of [1, "true", "yes", [], {}]) {
+    assert.equal(
+      selectNextWorkflow({
+        current: "build",
+        evidenceCurrent: true,
+        risk: "standard",
+        verificationRequested: dirtyTruthy,
+      }),
+      null,
+      "verificationRequested",
+    );
+    assert.equal(
+      selectNextWorkflow({
+        current: "build",
+        deliveryRequested: dirtyTruthy,
+        evidenceCurrent: true,
+        risk: "standard",
+      }),
+      null,
+      "deliveryRequested",
+    );
+    assert.equal(
+      selectNextWorkflow({
+        current: "review",
+        evidenceCurrent: true,
+        independentReview: dirtyTruthy,
+        reviewVerdict: "pass",
+        risk: "strict",
+      }),
+      "incomplete",
+      "independentReview",
+    );
+  }
 });
 
 test("risk becomes a sticky gate ledger across workflow transitions", () => {
@@ -273,6 +435,26 @@ test("verification is reserved for stale, explicit, delivery, and cross-artifact
       evidenceCurrent: false,
       independentReview: true,
       reviewVerdict: "pass",
+    }),
+    "verify",
+  );
+  assert.equal(
+    selectNextWorkflow({
+      current: "review",
+      risk: "standard",
+      evidenceCurrent: true,
+      reviewVerdict: "pass",
+      deliveryRequested: true,
+    }),
+    "verify",
+  );
+  assert.equal(
+    selectNextWorkflow({
+      current: "review",
+      risk: "standard",
+      evidenceCurrent: true,
+      reviewVerdict: "pass",
+      crossArtifactClaim: true,
     }),
     "verify",
   );

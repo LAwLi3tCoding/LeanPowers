@@ -1,0 +1,277 @@
+{
+  "schema_version": 2,
+  "suite_id": "development-effects-optimization-validation-v8-2026-07-26",
+  "evidence_level": "paired-development-pilot",
+  "runtime": "codex-cli",
+  "model_default": "gpt-5.5",
+  "effort": "medium",
+  "codex_tool_policy": {
+    "disabled_features": ["image_generation"],
+    "required_tool_event_type": "command_execution"
+  },
+  "repetitions": 2,
+  "activation_mode": "explicit-entrypoint",
+  "report_contract": "categorized-exact-render-v1",
+  "quality_policy": "lean-all-pass-reference-diagnostic-v1",
+  "token_target": {
+    "metric": "aggregate-model-token-share",
+    "population": "all-matched-pairs",
+    "max_share_pct": 60
+  },
+  "workflow_entrypoints": {
+    "superpowers-6.1.1": "$superpowers:using-superpowers",
+    "leanpowers-0.2.0": "$leanpowers:route"
+  },
+  "workflow_order": [
+    ["superpowers-6.1.1", "leanpowers-0.2.0"],
+    ["leanpowers-0.2.0", "superpowers-6.1.1"]
+  ],
+  "case_order": [
+    [
+      "stable-multiset-subtract",
+      "retry-budget-success-reset",
+      "bearer-credential-boundary"
+    ],
+    [
+      "bearer-credential-boundary",
+      "retry-budget-success-reset",
+      "stable-multiset-subtract"
+    ]
+  ],
+  "cases": [
+    {
+      "id": "stable-multiset-subtract",
+      "scenario_class": "small-explicit-feature",
+      "task_family": "stable-counted-token-subtraction",
+      "reporting_category": "stable multiset subtraction build",
+      "risk_level": "lean",
+      "expected_workflow": "build",
+      "workspace": "cases/stable-multiset-subtract/workspace",
+      "verifier_files": [
+        "cases/stable-multiset-subtract/verifier/stable-multiset-subtract.hidden.mjs"
+      ],
+      "task": "Implement stableMultisetSubtract(values, removals). Both inputs must be possibly empty dense ordinary arrays whose prototype is exactly Array.prototype, with no extra own keys and only own enumerable data elements. Every element must be a primitive ASCII string matching [A-Za-z0-9][A-Za-z0-9._-]*. Reject invalid structure or tokens with TypeError without invoking accessors or coercion hooks. Treat removals as a case-sensitive multiset: scan values from left to right, consume at most the available count for each exact token, and return the unconsumed values in original order. Extra removal occurrences have no effect. Return a fresh dense ordinary array and preserve both inputs and every property descriptor. Preserve the exact direct and public named export surfaces, with stableMultisetSubtract as the only direct named export. Add focused regressions for counted rather than set subtraction, left-to-right consumption, case-sensitive identity, exact accessor-safe validation, no coercion, freshness, input immutability, and API compatibility. Run the full test suite. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {
+          "id": "counted-not-set-subtraction",
+          "policy": "all-kill",
+          "mutations": [{
+            "kind": "replace-callable-export",
+            "export_name": "stableMultisetSubtract",
+            "target": "src/stable-multiset-subtract.mjs",
+            "source": "cases/stable-multiset-subtract/verifier/mutants/stable-multiset-subtract.set-difference.mjs"
+          }]
+        },
+        {
+          "id": "left-to-right-consumption",
+          "policy": "all-kill",
+          "mutations": [{
+            "kind": "replace-callable-export",
+            "export_name": "stableMultisetSubtract",
+            "target": "src/stable-multiset-subtract.mjs",
+            "source": "cases/stable-multiset-subtract/verifier/mutants/stable-multiset-subtract.consume-from-end.mjs"
+          }]
+        },
+        {
+          "id": "case-sensitive-token-identity",
+          "policy": "all-kill",
+          "mutations": [{
+            "kind": "replace-callable-export",
+            "export_name": "stableMultisetSubtract",
+            "target": "src/stable-multiset-subtract.mjs",
+            "source": "cases/stable-multiset-subtract/verifier/mutants/stable-multiset-subtract.case-fold-identity.mjs"
+          }]
+        },
+        {
+          "id": "fresh-input-preservation",
+          "policy": "all-kill",
+          "mutations": [{
+            "kind": "replace-callable-export",
+            "export_name": "stableMultisetSubtract",
+            "target": "src/stable-multiset-subtract.mjs",
+            "source": "cases/stable-multiset-subtract/verifier/mutants/stable-multiset-subtract.mutate-reuse-values.mjs"
+          }]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "retry-budget-success-reset",
+      "scenario_class": "unknown-cause-defect",
+      "task_family": "consecutive-retry-budget-reset",
+      "reporting_category": "retry budget reset debug",
+      "risk_level": "standard",
+      "expected_workflow": "debug",
+      "workspace": "cases/retry-budget-success-reset/workspace",
+      "verifier_files": [
+        "cases/retry-budget-success-reset/verifier/retry-budget-success-reset.hidden.mjs"
+      ],
+      "task": "Users report that a successful operation does not restore the retry budget after an earlier failure. Before editing, run the included node repro/retry-budget-success-reset.mjs as a standalone command and use its structured output to identify the first incorrect transition. Fix createRetryBudget(maxFailures). maxFailures must be a positive safe integer. Return an exact ordinary Object.prototype object exposing only the own enumerable data methods recordFailure(reason), recordSuccess(), canRetry(), and snapshot(). recordFailure must preserve the exact reason reference, increment consecutiveFailures, and return whether consecutiveFailures is still less than maxFailures. recordSuccess must reset consecutiveFailures to 0 and lastFailure to null and return undefined. canRetry must report the same strict boundary. snapshot must return a fresh exact ordinary { consecutiveFailures, lastFailure, retryable } record isolated from caller mutation. Preserve the exact direct and public named export surfaces, with createRetryBudget as the only direct named export. Add focused regressions for success reset, the strict retry boundary, exact reason identity, fresh snapshots, validation, and API compatibility. Run the full test suite, then rerun the same repro as a separate final command. Do not commit, install packages, use the network, or create another worktree.",
+      "reproduction_contract": {
+        "command": "node repro/retry-budget-success-reset.mjs",
+        "expected_output": {
+          "scenario": "retry-budget-success-reset",
+          "observations": [{
+            "action": "failure-then-success",
+            "expected_after_success": {
+              "consecutiveFailures": 0,
+              "lastFailure": null,
+              "retryable": true
+            },
+            "observed_after_success": {
+              "consecutiveFailures": 1,
+              "lastFailure": {"code": "timeout"},
+              "retryable": true
+            },
+            "expected_success_result_type": "undefined",
+            "observed_success_result_type": "undefined",
+            "expected_can_retry_after_success": true,
+            "observed_can_retry_after_success": true
+          }],
+          "first_incorrect_transition": {
+            "stage": "recordSuccess",
+            "expected": "reset consecutiveFailures to 0 and lastFailure to null",
+            "observed": "previous failure state remained visible after success"
+          },
+          "resolution": null
+        },
+        "resolved_output": {
+          "scenario": "retry-budget-success-reset",
+          "observations": [{
+            "action": "failure-then-success",
+            "expected_after_success": {
+              "consecutiveFailures": 0,
+              "lastFailure": null,
+              "retryable": true
+            },
+            "observed_after_success": {
+              "consecutiveFailures": 0,
+              "lastFailure": null,
+              "retryable": true
+            },
+            "expected_success_result_type": "undefined",
+            "observed_success_result_type": "undefined",
+            "expected_can_retry_after_success": true,
+            "observed_can_retry_after_success": true
+          }],
+          "first_incorrect_transition": null,
+          "resolution": {
+            "stage": "recordSuccess",
+            "observed": "failure count and last failure were cleared while retryability recovered"
+          }
+        }
+      },
+      "artifact_regression_gates": [
+        {
+          "id": "success-clears-last-failure",
+          "policy": "all-kill",
+          "mutations": [{
+            "kind": "replace-callable-export",
+            "export_name": "createRetryBudget",
+            "target": "src/retry-budget.mjs",
+            "source": "cases/retry-budget-success-reset/verifier/mutants/retry-budget-success-reset.success-keeps-last-failure.mjs"
+          }]
+        },
+        {
+          "id": "success-resets-failure-count",
+          "policy": "all-kill",
+          "mutations": [{
+            "kind": "replace-callable-export",
+            "export_name": "createRetryBudget",
+            "target": "src/retry-budget.mjs",
+            "source": "cases/retry-budget-success-reset/verifier/mutants/retry-budget-success-reset.success-decrements.mjs"
+          }]
+        },
+        {
+          "id": "strict-retry-boundary",
+          "policy": "all-kill",
+          "mutations": [{
+            "kind": "replace-callable-export",
+            "export_name": "createRetryBudget",
+            "target": "src/retry-budget.mjs",
+            "source": "cases/retry-budget-success-reset/verifier/mutants/retry-budget-success-reset.off-by-one-boundary.mjs"
+          }]
+        },
+        {
+          "id": "fresh-snapshot-isolation",
+          "policy": "all-kill",
+          "mutations": [{
+            "kind": "replace-callable-export",
+            "export_name": "createRetryBudget",
+            "target": "src/retry-budget.mjs",
+            "source": "cases/retry-budget-success-reset/verifier/mutants/retry-budget-success-reset.reused-snapshot.mjs"
+          }]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    },
+    {
+      "id": "bearer-credential-boundary",
+      "scenario_class": "authentication-boundary-feature",
+      "task_family": "exact-bearer-credential-parsing",
+      "reporting_category": "bearer credential strict build",
+      "risk_level": "strict",
+      "expected_workflow": "build",
+      "workspace": "cases/bearer-credential-boundary/workspace",
+      "verifier_files": [
+        "cases/bearer-credential-boundary/verifier/bearer-credential-boundary.hidden.mjs"
+      ],
+      "task": "Implement the authentication-boundary function extractBearerCredential(header). Reject a non-primitive-string header with TypeError without invoking coercion. A valid header must be ASCII and consist of an exact Bearer authentication scheme matched case-insensitively, exactly one U+0020 space, and one 16-to-512-character credential containing only [A-Za-z0-9._~-]. Return the exact original credential substring. Return null for every invalid string, including scheme prefixes or suffixes, leading or trailing whitespace, tabs, multiple spaces, commas, extra fields, CRLF or other controls, non-ASCII text, invalid token bytes, and values outside the length bounds. Preserve the exact direct and public named export surfaces, with extractBearerCredential as the only direct named export. Add focused regressions for case-insensitive exact scheme matching, whitespace and prefix boundaries, token length and charset, no coercion, and API compatibility. Run the full test suite. Because this is an authentication and credential boundary, retain strict risk and obtain a fresh independent read-only PASS review after green validation without changing the reviewed files afterward. Do not commit, install packages, use the network, or create another worktree.",
+      "artifact_regression_gates": [
+        {
+          "id": "case-insensitive-scheme",
+          "policy": "all-kill",
+          "mutations": [{
+            "kind": "replace-callable-export",
+            "export_name": "extractBearerCredential",
+            "target": "src/extract-bearer-credential.mjs",
+            "source": "cases/bearer-credential-boundary/verifier/mutants/bearer-credential-boundary.scheme-case-sensitive.mjs"
+          }]
+        },
+        {
+          "id": "no-surrounding-whitespace-normalization",
+          "policy": "all-kill",
+          "mutations": [{
+            "kind": "replace-callable-export",
+            "export_name": "extractBearerCredential",
+            "target": "src/extract-bearer-credential.mjs",
+            "source": "cases/bearer-credential-boundary/verifier/mutants/bearer-credential-boundary.trim-surrounding-whitespace.mjs"
+          }]
+        },
+        {
+          "id": "exact-scheme-token-boundary",
+          "policy": "all-kill",
+          "mutations": [{
+            "kind": "replace-callable-export",
+            "export_name": "extractBearerCredential",
+            "target": "src/extract-bearer-credential.mjs",
+            "source": "cases/bearer-credential-boundary/verifier/mutants/bearer-credential-boundary.prefix-bearerish-accepted.mjs"
+          }]
+        },
+        {
+          "id": "credential-charset-boundary",
+          "policy": "all-kill",
+          "mutations": [{
+            "kind": "replace-callable-export",
+            "export_name": "extractBearerCredential",
+            "target": "src/extract-bearer-credential.mjs",
+            "source": "cases/bearer-credential-boundary/verifier/mutants/bearer-credential-boundary.token-validation-too-loose.mjs"
+          }]
+        }
+      ],
+      "change_policy": {
+        "product": ["src/**", "test/**"],
+        "tests": ["test/**"],
+        "workflow": ["docs/plans/**", ".superpowers/**"]
+      }
+    }
+  ]
+}

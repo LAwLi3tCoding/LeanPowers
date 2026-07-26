@@ -17,6 +17,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 
@@ -46,11 +47,16 @@ const DEVELOPMENT_EVIDENCE_LEVELS = new Set([
   "paired-development-heldout",
   "paired-development-pilot",
 ]);
+const DEFAULT_CODEX_TOOL_POLICY = Object.freeze({
+  disabled_features: Object.freeze(["image_generation"]),
+  required_tool_event_type: "command_execution",
+});
 export const LEAN_CANDIDATE_QUALITY_POLICY =
   "lean-all-pass-reference-diagnostic-v1";
 const CODEX_CAPACITY_ERROR_MESSAGE =
   "Selected model is at capacity. Please try a different model.";
 const LOWER_KEBAB_CASE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const CODEX_FEATURE_NAME = /^[a-z][a-z0-9_]*$/u;
 const SAFE_ARTIFACT_DIRECTORY_NAME = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u;
 export const HELDOUT_PERMISSION_PROFILE = "benchmark";
 export const HELDOUT_AGENT_READ_ISOLATION =
@@ -105,6 +111,24 @@ const MACOS_VERIFIER_SANDBOX_PROFILE = [
   "  (subpath (param \"SANDBOX_HOME\"))",
   "  (literal \"/dev/null\"))",
 ].join("\n");
+
+function validCodexToolPolicy(policy) {
+  return policy !== null &&
+    typeof policy === "object" &&
+    !Array.isArray(policy) &&
+    Object.keys(policy).sort().join(",") ===
+      "disabled_features,required_tool_event_type" &&
+    Array.isArray(policy.disabled_features) &&
+    new Set(policy.disabled_features).size === policy.disabled_features.length &&
+    policy.disabled_features.every((feature) =>
+      typeof feature === "string" && CODEX_FEATURE_NAME.test(feature)
+    ) &&
+    policy.required_tool_event_type === "command_execution";
+}
+
+function developmentCodexToolPolicy(suite) {
+  return suite.codex_tool_policy ?? DEFAULT_CODEX_TOOL_POLICY;
+}
 
 export function benchmarkEnvironment(home, overrides = {}) {
   return {
@@ -171,6 +195,14 @@ export async function loadDevelopmentSuite(input) {
     suite.report_contract !== "categorized-exact-render-v1"
   ) {
     errors.push("report_contract must equal categorized-exact-render-v1 when provided");
+  }
+  if (
+    suite.codex_tool_policy !== undefined &&
+    !validCodexToolPolicy(suite.codex_tool_policy)
+  ) {
+    errors.push(
+      "codex_tool_policy must be a closed exact policy with unique lower_snake_case disabled_features and required_tool_event_type=command_execution",
+    );
   }
   if (suite.token_target !== undefined) {
     const target = suite.token_target;
@@ -492,6 +524,9 @@ export async function loadDevelopmentSuite(input) {
         status: "frozen-before-live-run",
         model_default: suite.model_default,
         effort: suite.effort,
+        ...(suite.codex_tool_policy === undefined
+          ? {}
+          : { codex_tool_policy: suite.codex_tool_policy }),
         repetitions: suite.repetitions,
         workflow_order: suite.workflow_order,
         ...(suite.case_order === undefined
@@ -815,12 +850,22 @@ export function renderHeldoutCodexProfile({
 }
 
 export function buildCodexArgs({
+  disabledFeatures = DEFAULT_CODEX_TOOL_POLICY.disabled_features,
   model,
   prompt,
   workspace,
   effort = "low",
   permissionProfile,
 }) {
+  if (
+    !Array.isArray(disabledFeatures) ||
+    new Set(disabledFeatures).size !== disabledFeatures.length ||
+    disabledFeatures.some((feature) =>
+      typeof feature !== "string" || !CODEX_FEATURE_NAME.test(feature)
+    )
+  ) {
+    throw new Error("Codex disabled feature names must be unique lower_snake_case values");
+  }
   const args = [
     "exec",
     "--json",
@@ -840,8 +885,7 @@ export function buildCodexArgs({
     `model_reasoning_effort="${effort}"`,
     "-c",
     "features.multi_agent=true",
-    "--disable",
-    "image_generation",
+    ...disabledFeatures.flatMap((feature) => ["--disable", feature]),
     "--skip-git-repo-check",
     "--ephemeral",
     "-m",
@@ -1036,6 +1080,308 @@ export async function preflightHeldoutAgentReadIsolation({
     };
   } finally {
     await rm(runRoot, { force: true, recursive: true });
+  }
+}
+
+export async function preflightCodexModelToolCompatibility({
+  codexExecutable,
+  codexHome,
+  disabledFeatures = DEFAULT_CODEX_TOOL_POLICY.disabled_features,
+  effort,
+  model,
+  permissionProfile,
+  toolchain,
+}) {
+  const runRoot = await mkdtemp(path.join(os.tmpdir(), "leanpowers-model-tool-preflight-"));
+  const workspace = path.join(runRoot, "workspace");
+  const runHome = path.join(runRoot, "home");
+  try {
+    await mkdir(workspace, { recursive: true });
+    await writeFile(
+      path.join(workspace, "package.json"),
+      '{"name":"leanpowers-model-tool-preflight","private":true,"type":"module"}\n',
+    );
+    await cp(codexHome, runHome, { recursive: true });
+    await mkdir(path.join(runHome, "tmp"), { recursive: true });
+    const baselineHead = await initializeGit(workspace, toolchain);
+    if (permissionProfile !== undefined) {
+      if (permissionProfile !== HELDOUT_PERMISSION_PROFILE) {
+        throw new Error("Unsupported model/tool preflight permission profile");
+      }
+      await configureHeldoutCodexHome(runHome, toolchain);
+    }
+    const env = permissionProfile === undefined
+      ? benchmarkEnvironment(runHome, toolchain.environment)
+      : heldoutAgentEnvironment(runHome, toolchain.environment);
+    const featureRegistry = await runProcess(
+      codexExecutable,
+      ["features", "list"],
+      { cwd: workspace, env, maxOutputBytes: 500_000, timeoutMs: 30_000 },
+    );
+    const registeredFeatures = new Map(
+      featureRegistry.stdout
+        .split(/\r?\n/u)
+        .map((line) =>
+          line.match(/^(\S+)\s+(.+?)\s+(?:true|false)$/u)
+        )
+        .filter(Boolean)
+        .map((match) => [match[1], match[2]]),
+    );
+    if (
+      featureRegistry.exitCode !== 0 ||
+      featureRegistry.timedOut ||
+      featureRegistry.signal !== null ||
+      disabledFeatures.some((feature) =>
+        !registeredFeatures.has(feature) ||
+        registeredFeatures.get(feature) === "removed"
+      )
+    ) {
+      throw new Error(
+        "Codex model/tool preflight disabled feature did not match the CLI feature registry",
+      );
+    }
+    const nonce = "LEANPOWERS_MODEL_TOOL_PREFLIGHT_OK";
+    const prompt = [
+      "This is a model and tool compatibility preflight.",
+      "Use the terminal tool to run `node --version` exactly once.",
+      `If and only if it succeeds, reply exactly ${nonce}`,
+      "Do not modify any files.",
+    ].join("\n");
+    const workspaceFingerprintBefore = await fingerprintDirectoryTree(workspace);
+    const agentStartedAt = performance.now();
+    const agent = await runProcess(
+      codexExecutable,
+      buildCodexArgs({
+        disabledFeatures,
+        effort,
+        model,
+        permissionProfile,
+        prompt,
+        workspace,
+      }),
+      {
+        cwd: workspace,
+        env,
+        maxOutputBytes: 2_000_000,
+        timeoutMs: 120_000,
+      },
+    );
+    const wallSeconds = (performance.now() - agentStartedAt) / 1_000;
+    const telemetry = parseCodexResult(agent.stdout);
+    const events = parseCodexEvents(agent.stdout);
+    const completedTools = events.filter((event) =>
+      event?.type === "item.completed" &&
+      !["agent_message", "reasoning"].includes(event?.item?.type)
+    );
+    const completedCommands = completedTools.filter(
+      (event) => event.item.type === "command_execution",
+    );
+    if (
+      agent.exitCode !== 0 ||
+      agent.timedOut ||
+      agent.signal !== null ||
+      agent.outputLimitExceeded ||
+      telemetry.completed !== true
+    ) {
+      const detail = safeCodexPreflightFailure(events);
+      throw new Error(
+        detail === null
+          ? "Codex model/tool preflight request did not complete"
+          : `Codex model/tool preflight request did not complete: ${detail}`,
+      );
+    }
+    if (completedCommands.length !== 1) {
+      throw new Error(
+        "Codex model/tool preflight requires exactly one command_execution tool call",
+      );
+    }
+    if (
+      completedCommands[0].item.status !== "completed" ||
+      completedCommands[0].item.exit_code !== 0
+    ) {
+      throw new Error("Codex model/tool preflight command_execution did not succeed");
+    }
+    if (
+      normalizedPreflightCommand(completedCommands[0].item.command) !==
+        "node --version"
+    ) {
+      throw new Error("Codex model/tool preflight must execute node --version");
+    }
+    if (completedTools.some((event) => event.item.type !== "command_execution")) {
+      throw new Error("Codex model/tool preflight observed an unexpected tool event");
+    }
+    if (telemetry.final_message.trim() !== nonce) {
+      throw new Error("Codex model/tool preflight returned the wrong completion nonce");
+    }
+    if (telemetry.tokens?.telemetry_complete !== true) {
+      throw new Error("Codex model/tool preflight did not return complete Token telemetry");
+    }
+    if (
+      await fingerprintDirectoryTree(workspace) !== workspaceFingerprintBefore
+    ) {
+      throw new Error("Codex model/tool preflight changed its disposable workspace");
+    }
+    const gitState = await inspectBenchmarkGitState({
+      baselineHead,
+      environment: toolchain.environment,
+      gitExecutable: toolchain.git,
+      workspace,
+    });
+    const workspaceUnchanged =
+      gitState.final_head === baselineHead &&
+      gitState.changed_paths.length === 0;
+    if (!workspaceUnchanged) {
+      throw new Error("Codex model/tool preflight changed its disposable workspace");
+    }
+    return {
+      disabled_features: [...disabledFeatures],
+      effort,
+      model,
+      required_tool_event_type: "command_execution",
+      status: "PASS",
+      telemetry_complete: true,
+      token_usage: {
+        cached_input: telemetry.tokens.cached_input,
+        input: telemetry.tokens.input,
+        output: telemetry.tokens.output,
+        reasoning_output: telemetry.tokens.reasoning_output,
+        total: telemetry.tokens.total,
+        uncached_plus_output: telemetry.tokens.uncached_plus_output,
+      },
+      tool_calls: completedTools.length,
+      wall_seconds: wallSeconds,
+      workspace_unchanged: true,
+    };
+  } finally {
+    await rm(runRoot, { force: true, recursive: true });
+  }
+}
+
+function normalizedPreflightCommand(command) {
+  const value = String(command ?? "").trim();
+  if (value === "node --version") return value;
+  const wrapped = value.match(
+    /^\/bin\/(?:ba|z)?sh\s+-lc\s+(['"])node --version\1$/u,
+  );
+  return wrapped === null ? null : "node --version";
+}
+
+function safeCodexPreflightFailure(events) {
+  const messages = events.flatMap((event) => {
+    if (event?.type === "turn.failed") return [event?.error?.message];
+    if (event?.type === "error") return [event?.message];
+    if (event?.item?.type === "error") return [event.item.message];
+    return [];
+  }).filter((value) => typeof value === "string");
+  const combined = messages.join("\n");
+  if (/requires a newer version of Codex/iu.test(combined)) {
+    return "selected model requires a newer version of Codex";
+  }
+  if (/unsupported|does not support|invalid.*tool|tool.*invalid/iu.test(combined)) {
+    return "selected model and tool policy are incompatible";
+  }
+  if (/\b(?:401|403)\b|forbidden|unauthorized/iu.test(combined)) {
+    return "Codex authentication or model entitlement was rejected";
+  }
+  if (/model.*(?:not found|unknown|unavailable)/iu.test(combined)) {
+    return "selected model is unavailable";
+  }
+  return null;
+}
+
+async function fingerprintDirectoryTree(root) {
+  const entries = [];
+  const visit = async (directory, relativeDirectory = "") => {
+    const children = await readdir(directory, { withFileTypes: true });
+    children.sort((left, right) => left.name.localeCompare(right.name));
+    for (const child of children) {
+      const target = path.join(directory, child.name);
+      const relativePath = relativeDirectory
+        ? `${relativeDirectory}/${child.name}`
+        : child.name;
+      const stat = await lstat(target);
+      if (stat.isDirectory()) {
+        entries.push({
+          kind: "directory",
+          mode: stat.mode & 0o777,
+          path: relativePath,
+        });
+        await visit(target, relativePath);
+      } else if (stat.isFile()) {
+        entries.push({
+          kind: "file",
+          mode: stat.mode & 0o777,
+          path: relativePath,
+          sha256: createHash("sha256")
+            .update(await readFile(target))
+            .digest("hex"),
+        });
+      } else if (stat.isSymbolicLink()) {
+        entries.push({
+          kind: "symlink",
+          path: relativePath,
+          target: await readlink(target),
+        });
+      } else {
+        entries.push({ kind: "other", path: relativePath });
+      }
+    }
+  };
+  await visit(root);
+  return createHash("sha256")
+    .update(JSON.stringify(entries))
+    .digest("hex");
+}
+
+export async function runStandaloneCodexModelToolPreflight({
+  authFile = path.join(
+    process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex"),
+    "auth.json",
+  ),
+  codexExecutable = "codex",
+  disabledFeatures = DEFAULT_CODEX_TOOL_POLICY.disabled_features,
+  effort = "medium",
+  model,
+}) {
+  if (typeof model !== "string" || model.length === 0) {
+    throw new Error("Standalone model/tool preflight requires an exact model");
+  }
+  if (typeof effort !== "string" || effort.length === 0) {
+    throw new Error("Standalone model/tool preflight requires an exact effort");
+  }
+  const root = await mkdtemp(path.join(os.tmpdir(), "leanpowers-standalone-preflight-"));
+  const codexHome = path.join(root, "home");
+  try {
+    await mkdir(path.join(codexHome, "tmp"), { recursive: true, mode: 0o700 });
+    await cp(authFile, path.join(codexHome, "auth.json"));
+    await chmod(path.join(codexHome, "auth.json"), 0o600);
+    const toolchain = await resolveBenchmarkToolchain(codexExecutable);
+    const evidence = await preflightCodexModelToolCompatibility({
+      codexExecutable: toolchain.codex,
+      codexHome,
+      disabledFeatures,
+      effort,
+      model,
+      toolchain,
+    });
+    const version = await runProcess(toolchain.codex, ["--version"], {
+      timeoutMs: 30_000,
+    });
+    if (
+      version.exitCode !== 0 ||
+      version.timedOut ||
+      version.signal !== null ||
+      version.stdout.trim().length === 0
+    ) {
+      throw new Error("Standalone model/tool preflight could not identify Codex");
+    }
+    return {
+      codex_version: version.stdout.trim(),
+      ...evidence,
+      schema_version: 1,
+    };
+  } finally {
+    await rm(root, { force: true, recursive: true });
   }
 }
 
@@ -5752,6 +6098,8 @@ export async function runDevelopmentPilot({
   try {
     const toolchain = await resolveBenchmarkToolchain(codexExecutable);
     codexExecutable = toolchain.codex;
+    const codexToolPolicy = developmentCodexToolPolicy(suite);
+    const selectedModel = model ?? suite.model_default;
     const workflowRevisions = {
       "superpowers-6.1.1": await cleanGitRevision(superpowersMarketplace, {
         officialOrigin: "github.com/obra/superpowers",
@@ -5776,6 +6124,20 @@ export async function runDevelopmentPilot({
       superpowersMarketplace,
       toolchain,
     });
+    const modelToolPreflight = {};
+    for (const workflow of WORKFLOWS) {
+      modelToolPreflight[workflow] =
+        await preflightCodexModelToolCompatibility({
+          codexExecutable,
+          codexHome: homes[workflow],
+          disabledFeatures: codexToolPolicy.disabled_features,
+          effort: suite.effort,
+          model: selectedModel,
+          permissionProfile:
+            heldout ? HELDOUT_PERMISSION_PROFILE : undefined,
+          toolchain,
+        });
+    }
     let agentReadIsolationPreflight = null;
     if (heldout) {
       for (const benchmarkCase of selectedCases) {
@@ -5794,8 +6156,13 @@ export async function runDevelopmentPilot({
       codex_version: (
         await runProcess(codexExecutable, ["--version"], { timeoutMs: 30_000 })
       ).stdout.trim(),
-      model: model ?? suite.model_default,
+      model: selectedModel,
       effort: suite.effort,
+      codex_tool_policy: {
+        disabled_features: [...codexToolPolicy.disabled_features],
+        required_tool_event_type: codexToolPolicy.required_tool_event_type,
+      },
+      model_tool_preflight: modelToolPreflight,
       sandbox: heldout ? "permissions-profile" : "workspace-write",
       permission_profile: heldout ? HELDOUT_PERMISSION_PROFILE : null,
       agent_read_isolation: heldout ? HELDOUT_AGENT_READ_ISOLATION : null,
@@ -5827,6 +6194,7 @@ export async function runDevelopmentPilot({
             benchmarkCase,
             codexExecutable,
             codexHome: homes[workflow],
+            disabledFeatures: codexToolPolicy.disabled_features,
             entrypoint: suite.workflow_entrypoints[workflow],
             effort: suite.effort,
             model: runtime.model,
@@ -6563,6 +6931,17 @@ export function renderDevelopmentReport(
   const scenarioScope = [...new Set(reportedCases.map(
     ({ scenario_class: scenarioClass }) => scenarioClass,
   ))].join(", ");
+  const codexToolPolicy = result.runtime.codex_tool_policy;
+  const toolPolicyLine = validCodexToolPolicy(codexToolPolicy)
+    ? `Tool policy: required event ${codexToolPolicy.required_tool_event_type}; disabled features: ${codexToolPolicy.disabled_features.join(", ") || "none"}.`
+    : null;
+  const modelToolPreflight = result.runtime.model_tool_preflight;
+  const modelToolPreflightLine =
+    modelToolPreflight !== null &&
+    typeof modelToolPreflight === "object" &&
+    !Array.isArray(modelToolPreflight)
+      ? `Model/tool preflight: Superpowers ${formatModelToolPreflight(modelToolPreflight["superpowers-6.1.1"])}; LeanPowers ${formatModelToolPreflight(modelToolPreflight["leanpowers-0.2.0"])}.`
+      : null;
   const caseSpecificBoundaries = [];
   if (reportedCases.some(({ id }) => id === "localized-template-cache")) {
     caseSpecificBoundaries.push(
@@ -6588,6 +6967,8 @@ export function renderDevelopmentReport(
     `Run matrix: **${result.completion}**. Token-target conclusions are unavailable unless the declared matrix and target population are complete.`,
     "",
     `Runtime: ${result.runtime.codex_version}; model: ${result.runtime.model}; effort: ${result.runtime.effort}.`,
+    ...(toolPolicyLine === null ? [] : ["", toolPolicyLine]),
+    ...(modelToolPreflightLine === null ? [] : ["", modelToolPreflightLine]),
     ...(heldout
       ? [
           "",
@@ -6774,6 +7155,20 @@ export function renderDevelopmentReport(
   ].join("\n");
 }
 
+function formatModelToolPreflight(preflight) {
+  if (preflight === null || typeof preflight !== "object" || Array.isArray(preflight)) {
+    return "missing";
+  }
+  const toolCalls = preflight.tool_calls;
+  const toolLabel = toolCalls === 1 ? "tool call" : "tool calls";
+  return [
+    preflight.status ?? "missing",
+    `(${displayMetric(preflight.token_usage?.total)} tokens,`,
+    `${displayMetric(toolCalls)} ${toolLabel},`,
+    `${displayMetric(round(preflight.wall_seconds, 1))}s)`,
+  ].join(" ");
+}
+
 function categoryWorkflowMetrics(runs, { metricRuns = runs } = {}) {
   return Object.fromEntries([...WORKFLOWS].map((workflow) => {
     const selected = runs.filter((run) => run.workflow === workflow);
@@ -6906,6 +7301,7 @@ async function runSingleCase({
   benchmarkCase,
   codexExecutable,
   codexHome,
+  disabledFeatures,
   entrypoint,
   effort,
   model,
@@ -6946,6 +7342,7 @@ async function runSingleCase({
       benchmarkCase.task,
     ].join("\n");
     const args = buildCodexArgs({
+      disabledFeatures,
       effort,
       model,
       prompt,

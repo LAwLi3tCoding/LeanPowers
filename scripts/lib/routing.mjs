@@ -35,6 +35,10 @@ const STANDARD_SIGNALS = [
 
 const INTERNAL_REVIEW_PHASE = "review"; // Internal same-turn phase; never a user handoff.
 
+function isTrue(value) {
+  return value === true;
+}
+
 export function classifyRisk(signals = {}) {
   if (!signals || typeof signals !== "object" || Array.isArray(signals)) {
     return "standard";
@@ -79,35 +83,68 @@ export function selectInitialWorkflow({
   verificationCurrent = false,
   verificationRequested = false,
 } = {}) {
-  if (!engineeringWork) {
+  if (engineeringWork !== true) {
     return null;
   }
+  const explicitWorkflowSignal =
+    typeof explicitWorkflow === "string" ? explicitWorkflow : null;
+  const normalizedSignals = {
+    learningRequest: isTrue(learningRequest),
+    diagnosisRequested: isTrue(diagnosisRequested),
+    deliveryOnly: isTrue(deliveryOnly),
+    deliveryRequested: isTrue(deliveryRequested),
+    grillingRequested: isTrue(grillingRequested),
+    needsShaping: isTrue(needsShaping),
+    reviewRequested: isTrue(reviewRequested),
+    risk,
+    independentReview: isTrue(independentReview),
+    verificationCurrent: isTrue(verificationCurrent),
+    verificationRequested: isTrue(verificationRequested),
+    causeKnown: causeKnown === false ? false : isTrue(causeKnown),
+  };
+
   if (explicitWorkflow !== null) {
-    if (explicitWorkflow === "ship") {
-      if (!verificationCurrent) return "verify";
-      if (risk === "strict" && !independentReview) return INTERNAL_REVIEW_PHASE;
+    if (explicitWorkflowSignal === "ship") {
+      if (!normalizedSignals.verificationCurrent) return "verify";
+      if (
+        risk === "strict" &&
+        normalizedSignals.independentReview !== true
+      ) {
+        return INTERNAL_REVIEW_PHASE;
+      }
     }
-    if (["adapt", "build", "debug", "review", "shape", "ship", "verify"].includes(explicitWorkflow)) {
-      return explicitWorkflow;
+    if ([
+      "adapt",
+      "build",
+      "debug",
+      "review",
+      "shape",
+      "ship",
+      "verify",
+    ].includes(explicitWorkflowSignal)) {
+      return explicitWorkflowSignal;
     }
   }
-  if (learningRequest) {
+  if (normalizedSignals.learningRequest) {
     return "adapt";
   }
-  if (deliveryOnly) {
-    if (!verificationCurrent) return "verify";
-    return risk === "strict" && !independentReview ? INTERNAL_REVIEW_PHASE : "ship";
+  if (normalizedSignals.deliveryOnly) {
+    if (!normalizedSignals.verificationCurrent) return "verify";
+    return risk === "strict"
+      && !normalizedSignals.independentReview
+      ? INTERNAL_REVIEW_PHASE
+      : "ship";
   }
-  if (reviewRequested) {
+  if (normalizedSignals.reviewRequested) {
     return "review";
   }
-  if (needsShaping || grillingRequested) {
+  if (normalizedSignals.needsShaping || normalizedSignals.grillingRequested) {
     return "shape";
   }
-  if (verificationRequested) {
+  if (normalizedSignals.verificationRequested) {
     return "verify";
   }
-  if (diagnosisRequested || causeKnown === false) {
+  if (normalizedSignals.diagnosisRequested || normalizedSignals.causeKnown === false) {
     return "debug";
   }
   return "build";
@@ -130,17 +167,22 @@ export function selectNextWorkflow({
   deliveryRequested = false,
   crossArtifactClaim = false,
 } = {}) {
+  const normalizedVerificationRequested = isTrue(verificationRequested);
+  const normalizedDeliveryRequested = isTrue(deliveryRequested);
+  const normalizedCrossArtifactClaim = isTrue(crossArtifactClaim);
+  const normalizedEvidenceCurrent = isTrue(evidenceCurrent);
+  const normalizedIndependentReview = isTrue(independentReview);
   if (current === "review") {
-    if (risk === "strict" && !independentReview) return "incomplete";
+    if (risk === "strict" && !normalizedIndependentReview) return "incomplete";
     if (reviewVerdict === "changes_required") {
       return repairOwner === "debug" ? "debug" : "build";
     }
     if (reviewVerdict !== "pass") return "incomplete";
     if (
-      evidenceCurrent &&
-      !verificationRequested &&
-      !deliveryRequested &&
-      !crossArtifactClaim
+      normalizedEvidenceCurrent &&
+      !normalizedVerificationRequested &&
+      !normalizedDeliveryRequested &&
+      !normalizedCrossArtifactClaim
     ) {
       return null;
     }
@@ -153,10 +195,10 @@ export function selectNextWorkflow({
     return INTERNAL_REVIEW_PHASE;
   }
   if (
-    !evidenceCurrent ||
-    verificationRequested ||
-    deliveryRequested ||
-    crossArtifactClaim
+    !normalizedEvidenceCurrent ||
+    normalizedVerificationRequested ||
+    normalizedDeliveryRequested ||
+    normalizedCrossArtifactClaim
   ) {
     return "verify";
   }

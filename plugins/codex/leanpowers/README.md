@@ -207,7 +207,7 @@ This is a lineage-and-tradeoff comparison, not a winner ranking. Superpowers rem
 
 ## Evidence and benchmark
 
-LeanPowers publishes paired live coding runs, preregistrations, post-run audits, and a reproducible comparator. Structural reduction is verified; live development results remain bounded evidence rather than a universal parity or speed claim. Detailed scores, limitations, and every frozen historical conclusion stay in the benchmark documents instead of the product overview.
+LeanPowers publishes paired live coding runs, preregistrations, post-run audits, a model/tool compatibility preflight, and a reproducible comparator. Structural reduction is verified; live development results remain bounded evidence rather than a universal parity or speed claim. Detailed commands, scores, limitations, and every frozen historical conclusion stay in the [benchmark protocol](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/docs/benchmark.md) instead of the product overview.
 
 The comparator accepts paired result documents conforming to [schemas/benchmark-result.schema.json](https://github.com/LAwLi3tCoding/LeanPowers/blob/main/schemas/benchmark-result.schema.json):
 
