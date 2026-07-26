@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "suite_id": "development-effects-optimization-validation-v8-2026-07-26",
-  "evidence_level": "paired-development-pilot",
+  "evidence_level": "paired-development-heldout",
   "runtime": "codex-cli",
   "model_default": "gpt-5.5",
   "effort": "medium",
@@ -17,6 +17,60 @@
     "metric": "aggregate-model-token-share",
     "population": "all-matched-pairs",
     "max_share_pct": 60
+  },
+  "freeze_contract": {
+    "status": "frozen-before-live-run",
+    "model_default": "gpt-5.5",
+    "effort": "medium",
+    "codex_tool_policy": {
+      "disabled_features": ["image_generation"],
+      "required_tool_event_type": "command_execution"
+    },
+    "repetitions": 2,
+    "workflow_order": [
+      ["superpowers-6.1.1", "leanpowers-0.2.0"],
+      ["leanpowers-0.2.0", "superpowers-6.1.1"]
+    ],
+    "case_order": [
+      [
+        "stable-multiset-subtract",
+        "retry-budget-success-reset",
+        "bearer-credential-boundary"
+      ],
+      [
+        "bearer-credential-boundary",
+        "retry-budget-success-reset",
+        "stable-multiset-subtract"
+      ]
+    ],
+    "agent_read_isolation": "codex-minimal-workspace-plugin-toolchain-read-v1",
+    "superpowers_revision": "d884ae04edebef577e82ff7c4e143debd0bbec99",
+    "leanpowers_revision": "3106f9d0081fb90e7dbab25227ab56351e1318e8",
+    "evaluator_revision": "3106f9d0081fb90e7dbab25227ab56351e1318e8",
+    "runner_revision": "3106f9d0081fb90e7dbab25227ab56351e1318e8",
+    "case_snapshots": {
+      "stable-multiset-subtract": {
+        "mutants_sha256": "d6d88f929c2a5a4b5cfbc948358992cb5222a89378aee08ffe9e378da6c4fc2f",
+        "verifier_sha256": "f5602e516940e196f4f23e066caeab5d0b7c2ca02dcd0091c4acd57cc9f02e69",
+        "workspace_sha256": "838acb91d09d32e06e879a016dd128388901d7a45a4c74d491fe52b6aa9d1020"
+      },
+      "retry-budget-success-reset": {
+        "mutants_sha256": "29f483ad0d72529bb8bfd529c76e74c7013837ad6d6a12456fb524e6080c231c",
+        "verifier_sha256": "2a061e19e05a31abb543af480bf528210dfe0a868f711647196a2f9755b25c84",
+        "workspace_sha256": "89fd152335fea615d50b2ce87fff0144a5d0468b629b5ddec2f67ef6f1630d77"
+      },
+      "bearer-credential-boundary": {
+        "mutants_sha256": "dc174b51f0a0f371faf4962a1b5529ad18d63865ce0a17869d61b46bf70cb9cd",
+        "verifier_sha256": "5f806087de29ac6503169bbdaafe1bc7ea52d9d82367425e1eb5d7d477442ccd",
+        "workspace_sha256": "28831275f11d8efb9865d6dc4200f1523da04784d09ff1cf4ef5b77561d121b2"
+      }
+    },
+    "token_target": {
+      "metric": "aggregate-model-token-share",
+      "population": "all-matched-pairs",
+      "max_share_pct": 60
+    },
+    "quality_policy": "lean-all-pass-reference-diagnostic-v1"
   },
   "workflow_entrypoints": {
     "superpowers-6.1.1": "$superpowers:using-superpowers",

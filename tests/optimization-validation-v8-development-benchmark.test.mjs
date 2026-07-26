@@ -174,7 +174,7 @@ test("optimization v8 suite loads three cases and pins the runtime tool policy",
   const suite = await loadDevelopmentSuite(suitePath);
 
   assert.equal(suite.suite_id, "development-effects-optimization-validation-v8-2026-07-26");
-  assert.equal(suite.evidence_level, "paired-development-pilot");
+  assert.equal(suite.evidence_level, "paired-development-heldout");
   assert.equal(suite.runtime, "codex-cli");
   assert.equal(suite.model_default, "gpt-5.5");
   assert.equal(suite.effort, "medium");
@@ -203,6 +203,31 @@ test("optimization v8 suite loads three cases and pins the runtime tool policy",
     ],
   ]);
   assert.deepEqual(suite.cases.map(({ id }) => id), expectedCaseIds);
+  assert.equal(suite.freeze_contract_verified, true);
+  assert.deepEqual(suite.freeze_contract.codex_tool_policy, suite.codex_tool_policy);
+  assert.equal(
+    suite.freeze_contract.superpowers_revision,
+    "d884ae04edebef577e82ff7c4e143debd0bbec99",
+  );
+  for (const field of [
+    "leanpowers_revision",
+    "evaluator_revision",
+    "runner_revision",
+  ]) {
+    assert.equal(
+      suite.freeze_contract[field],
+      "3106f9d0081fb90e7dbab25227ab56351e1318e8",
+    );
+  }
+  assert.deepEqual(
+    suite.freeze_contract.case_snapshots,
+    Object.fromEntries(
+      suite.cases.map((benchmarkCase) => [
+        benchmarkCase.id,
+        caseSnapshotContract(benchmarkCase),
+      ]),
+    ),
+  );
 });
 
 test("optimization v8 cases are novel by id, task, task family, and snapshot hash", async () => {
